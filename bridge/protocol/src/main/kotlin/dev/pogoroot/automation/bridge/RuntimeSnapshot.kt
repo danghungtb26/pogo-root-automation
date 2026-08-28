@@ -7,6 +7,14 @@ enum class RuntimeConnectionState {
     ERROR,
 }
 
+enum class BindingProbeState {
+    READY,
+    UNITY_LOADED,
+    WAITING,
+    NOT_RUNNING,
+    UNKNOWN,
+}
+
 data class RuntimeSnapshot(
     val protocolVersion: Int?,
     val state: RuntimeConnectionState,
@@ -15,6 +23,18 @@ data class RuntimeSnapshot(
     val packageName: String?,
     val gameVersionName: String?,
     val gameVersionCode: Long?,
+    val bindingProbeState: BindingProbeState = BindingProbeState.UNKNOWN,
+    val bindingEngine: String? = null,
+    val processExecutable: String? = null,
+    val il2cppPath: String? = null,
+    val unityPath: String? = null,
+    val libmainPath: String? = null,
+    val translationLayer: String? = null,
+    val devicePrimaryAbi: String? = null,
+    val deviceSupportedAbis: List<String> = emptyList(),
+    val nativeBridge: String? = null,
+    val zygote: String? = null,
+    val kernelMachine: String? = null,
     val error: String? = null,
 )
 
@@ -37,6 +57,14 @@ object RuntimeSnapshotParser {
             else -> RuntimeConnectionState.ERROR
         }
 
+        val probeState = when (values["probe_state"]) {
+            "ready" -> BindingProbeState.READY
+            "unity_loaded" -> BindingProbeState.UNITY_LOADED
+            "waiting" -> BindingProbeState.WAITING
+            "not_running" -> BindingProbeState.NOT_RUNNING
+            else -> BindingProbeState.UNKNOWN
+        }
+
         return RuntimeSnapshot(
             protocolVersion = values["protocol"]?.toIntOrNull(),
             state = state,
@@ -45,9 +73,31 @@ object RuntimeSnapshotParser {
             packageName = values["package"].nullIfBlank(),
             gameVersionName = values["version_name"].nullIfBlank(),
             gameVersionCode = values["version_code"]?.toLongOrNull(),
+            bindingProbeState = probeState,
+            bindingEngine = values["binding_engine"].nullIfBlankOrUnknown(),
+            processExecutable = values["process_exe"].nullIfBlank(),
+            il2cppPath = values["libil2cpp_path"].nullIfBlank(),
+            unityPath = values["libunity_path"].nullIfBlank(),
+            libmainPath = values["libmain_path"].nullIfBlank(),
+            translationLayer = values["translation_layer"].nullIfBlankOrNone(),
+            devicePrimaryAbi = values["device_primary_abi"].nullIfBlank(),
+            deviceSupportedAbis = values["device_supported_abis"]
+                .orEmpty()
+                .split(',')
+                .map(String::trim)
+                .filter(String::isNotEmpty),
+            nativeBridge = values["native_bridge"].nullIfBlankOrNone(),
+            zygote = values["zygote"].nullIfBlank(),
+            kernelMachine = values["kernel_machine"].nullIfBlank(),
             error = values["error"].nullIfBlank(),
         )
     }
 
     private fun String?.nullIfBlank(): String? = this?.takeIf(String::isNotBlank)
+
+    private fun String?.nullIfBlankOrUnknown(): String? =
+        this?.takeIf { it.isNotBlank() && it != "unknown" }
+
+    private fun String?.nullIfBlankOrNone(): String? =
+        this?.takeIf { it.isNotBlank() && it != "none" }
 }
