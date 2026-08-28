@@ -12,10 +12,12 @@
 ## M1 — Root runtime
 
 - [x] Zygisk target-process lifecycle stub
-- [ ] Package native `.so` artifacts into an installable Magisk zip
-- [ ] Runtime ↔ controller transport
-- [ ] Runtime heartbeat and reconnect semantics
-- [ ] Detect installed Pokémon GO package/version
+- [x] Companion-backed runtime attach event
+- [x] Root status query with PID/process validation
+- [x] Controller runtime polling + status parsing
+- [x] Installed Pokémon GO package/version detection
+- [x] Build/package arm64 Zygisk module in CI
+- [ ] Rooted-device smoke test: install → launch → kill → relaunch → uninstall
 
 **Acceptance:** controller can show `runtime connected`, process name, package version, and lifecycle without game-specific memory bindings.
 
