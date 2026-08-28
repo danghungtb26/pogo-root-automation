@@ -20,11 +20,12 @@ class CountdownService(
                 isEstimated = spawn.expiryConfidence == SpawnExpiryConfidence.ESTIMATED,
             )
 
-        val remaining = (expiresAt - nowEpochMs()).coerceAtLeast(0L)
+        val now = nowEpochMs()
+        val remaining = (expiresAt - now).coerceAtLeast(0L)
 
         return SpawnCountdown(
             remainingMillis = remaining,
-            isExpired = expiresAt <= nowEpochMs(),
+            isExpired = expiresAt <= now,
             isEstimated = spawn.expiryConfidence == SpawnExpiryConfidence.ESTIMATED,
         )
     }
