@@ -34,8 +34,13 @@ data class RuntimeSnapshot(
     val nativeProbeState: String? = null,
     val il2cppApiAvailable: Boolean = false,
     val il2cppSymbolCount: Int = 0,
+    val il2cppRequiredSymbolCount: Int = 0,
     val nativeIl2cppPath: String? = null,
     val nativeUnityPath: String? = null,
+    val assemblySurveyState: String? = null,
+    val assemblyCount: Int = 0,
+    val assemblyCSharpFound: Boolean = false,
+    val assemblyCSharpName: String? = null,
     val devicePrimaryAbi: String? = null,
     val deviceSupportedAbis: List<String> = emptyList(),
     val nativeBridge: String? = null,
@@ -90,8 +95,14 @@ object RuntimeSnapshotParser {
             nativeProbeState = values["native_probe_state"].nullIfBlank(),
             il2cppApiAvailable = values["native_il2cpp_api_available"] == "1",
             il2cppSymbolCount = values["native_il2cpp_symbol_count"]?.toIntOrNull() ?: 0,
+            il2cppRequiredSymbolCount =
+                values["native_il2cpp_required_symbol_count"]?.toIntOrNull() ?: 0,
             nativeIl2cppPath = values["native_libil2cpp_path"].nullIfBlank(),
             nativeUnityPath = values["native_libunity_path"].nullIfBlank(),
+            assemblySurveyState = values["native_assembly_survey_state"].nullIfBlank(),
+            assemblyCount = values["native_assembly_count"]?.toIntOrNull() ?: 0,
+            assemblyCSharpFound = values["native_assembly_csharp_found"] == "1",
+            assemblyCSharpName = values["native_assembly_csharp_name"].nullIfBlank(),
             devicePrimaryAbi = values["device_primary_abi"].nullIfBlank(),
             deviceSupportedAbis = values["device_supported_abis"]
                 .orEmpty()

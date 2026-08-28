@@ -4,7 +4,7 @@ set -euo pipefail
 MODULE_STATUS_SCRIPT=/data/adb/modules/pogo_root_automation/bin/runtime-status.sh
 GOOGLE_PACKAGE=com.nianticlabs.pokemongo
 GALAXY_PACKAGE=com.nianticlabs.pokemongo.ares
-TIMEOUT_SECONDS="${BINDING_PROBE_TIMEOUT_SECONDS:-45}"
+TIMEOUT_SECONDS="${BINDING_PROBE_TIMEOUT_SECONDS:-60}"
 DIAGNOSTICS_OUTPUT="${BINDING_DIAGNOSTICS_OUTPUT:-pogo-binding-diagnostics.txt}"
 
 fail() {
@@ -45,7 +45,7 @@ done
 
 adb shell monkey -p "$package_name" -c android.intent.category.LAUNCHER 1 >/dev/null
 
-echo "Waiting up to ${TIMEOUT_SECONDS}s for runtime binding readiness…"
+echo "Waiting up to ${TIMEOUT_SECONDS}s for runtime/native binding probe…"
 start_seconds=$SECONDS
 last_status=
 while (( SECONDS - start_seconds < TIMEOUT_SECONDS )); do
@@ -53,15 +53,33 @@ while (( SECONDS - start_seconds < TIMEOUT_SECONDS )); do
   last_status="$status"
   runtime_state="$(printf '%s\n' "$status" | read_field runtime_state)"
   probe_state="$(printf '%s\n' "$status" | read_field probe_state)"
-  engine="$(printf '%s\n' "$status" | read_field binding_engine)"
+  native_probe_state="$(printf '%s\n' "$status" | read_field native_probe_state)"
 
-  if [[ "$runtime_state" == "connected" && "$probe_state" == "ready" ]]; then
-    echo "PASS: binding probe ready"
-    echo "  engine=$engine"
+  if [[ "$runtime_state" == "connected" && "$probe_state" == "ready" && "$native_probe_state" == "complete" ]]; then
+    strategy="$(printf '%s\n' "$status" | read_field binding_strategy)"
+    resolved="$(printf '%s\n' "$status" | read_field native_il2cpp_symbol_count)"
+    required="$(printf '%s\n' "$status" | read_field native_il2cpp_required_symbol_count)"
+    survey_state="$(printf '%s\n' "$status" | read_field native_assembly_survey_state)"
+    assembly_count="$(printf '%s\n' "$status" | read_field native_assembly_count)"
+    csharp_found="$(printf '%s\n' "$status" | read_field native_assembly_csharp_found)"
+    csharp_name="$(printf '%s\n' "$status" | read_field native_assembly_csharp_name)"
+
+    echo "PASS: binding probe complete"
+    echo "  engine=$(printf '%s\n' "$status" | read_field binding_engine)"
+    echo "  strategy=$strategy"
+    echo "  il2cpp_symbols=${resolved:-0}/${required:-0}"
+    echo "  assembly_survey=${survey_state:-unavailable}"
+    echo "  assembly_count=${assembly_count:-0}"
+    echo "  assembly_csharp_found=${csharp_found:-0}"
+    [[ -n "$csharp_name" ]] && echo "  assembly_csharp_name=$csharp_name"
     echo "  primary_abi=$(printf '%s\n' "$status" | read_field device_primary_abi)"
     echo "  kernel_machine=$(printf '%s\n' "$status" | read_field kernel_machine)"
     echo "  translation_layer=$(printf '%s\n' "$status" | read_field translation_layer)"
     echo "  libil2cpp=$(printf '%s\n' "$status" | read_field libil2cpp_path)"
+
+    if [[ "$strategy" == "il2cpp_exported_api" && "$survey_state" != "complete" ]]; then
+      echo "WARN: exported IL2CPP API is available but assembly survey did not complete" >&2
+    fi
     exit 0
   fi
 
@@ -80,4 +98,4 @@ if "$script_dir/collect-binding-diagnostics.sh" "$DIAGNOSTICS_OUTPUT"; then
   echo "Diagnostics written to $DIAGNOSTICS_OUTPUT" >&2
 fi
 
-fail "binding probe did not become ready before timeout"
+fail "native binding probe did not complete before timeout"

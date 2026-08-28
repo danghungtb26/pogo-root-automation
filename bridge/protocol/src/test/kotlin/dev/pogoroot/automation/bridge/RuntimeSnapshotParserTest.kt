@@ -8,10 +8,10 @@ import org.junit.Test
 
 class RuntimeSnapshotParserTest {
     @Test
-    fun `parses connected runtime status and binding probe`() {
+    fun `parses connected runtime status and assembly survey`() {
         val snapshot = RuntimeSnapshotParser.parse(
             """
-            protocol=2
+            protocol=3
             runtime_state=connected
             pid=4242
             process=com.nianticlabs.pokemongo
@@ -28,9 +28,14 @@ class RuntimeSnapshotParserTest {
             translation_layer=houdini
             native_probe_state=complete
             native_il2cpp_api_available=1
-            native_il2cpp_symbol_count=8
+            native_il2cpp_symbol_count=10
+            native_il2cpp_required_symbol_count=10
             native_libil2cpp_path=/data/app/example/lib/x86_64/libil2cpp.so
             native_libunity_path=/data/app/example/lib/x86_64/libunity.so
+            native_assembly_survey_state=complete
+            native_assembly_count=137
+            native_assembly_csharp_found=1
+            native_assembly_csharp_name=Assembly-CSharp.dll
             device_primary_abi=x86_64
             device_supported_abis=x86_64,arm64-v8a
             native_bridge=libhoudini.so
@@ -48,8 +53,13 @@ class RuntimeSnapshotParserTest {
         assertEquals("il2cpp", snapshot.bindingEngine)
         assertEquals("il2cpp_exported_api", snapshot.bindingStrategy)
         assertTrue(snapshot.il2cppApiAvailable)
-        assertEquals(8, snapshot.il2cppSymbolCount)
+        assertEquals(10, snapshot.il2cppSymbolCount)
+        assertEquals(10, snapshot.il2cppRequiredSymbolCount)
         assertEquals("complete", snapshot.nativeProbeState)
+        assertEquals("complete", snapshot.assemblySurveyState)
+        assertEquals(137, snapshot.assemblyCount)
+        assertTrue(snapshot.assemblyCSharpFound)
+        assertEquals("Assembly-CSharp.dll", snapshot.assemblyCSharpName)
         assertEquals("/data/app/example/lib/x86_64/libil2cpp.so", snapshot.nativeIl2cppPath)
         assertEquals("/data/app/example/lib/x86_64/libil2cpp.so", snapshot.il2cppPath)
         assertEquals("houdini", snapshot.translationLayer)
@@ -60,7 +70,7 @@ class RuntimeSnapshotParserTest {
     }
 
     @Test
-    fun `parses mapped only strategy without inventing exported api`() {
+    fun `parses mapped only strategy without inventing exported api or assemblies`() {
         val snapshot = RuntimeSnapshotParser.parse(
             """
             runtime_state=connected
@@ -69,20 +79,29 @@ class RuntimeSnapshotParserTest {
             binding_strategy=il2cpp_mapped_only
             native_probe_state=complete
             native_il2cpp_api_available=0
-            native_il2cpp_symbol_count=0
+            native_il2cpp_symbol_count=6
+            native_il2cpp_required_symbol_count=10
+            native_assembly_survey_state=unavailable
+            native_assembly_count=0
+            native_assembly_csharp_found=0
             """.trimIndent(),
         )
 
         assertEquals("il2cpp_mapped_only", snapshot.bindingStrategy)
         assertFalse(snapshot.il2cppApiAvailable)
-        assertEquals(0, snapshot.il2cppSymbolCount)
+        assertEquals(6, snapshot.il2cppSymbolCount)
+        assertEquals(10, snapshot.il2cppRequiredSymbolCount)
+        assertEquals("unavailable", snapshot.assemblySurveyState)
+        assertEquals(0, snapshot.assemblyCount)
+        assertFalse(snapshot.assemblyCSharpFound)
+        assertNull(snapshot.assemblyCSharpName)
     }
 
     @Test
     fun `parses not seen without inventing pid or engine`() {
         val snapshot = RuntimeSnapshotParser.parse(
             """
-            protocol=2
+            protocol=3
             runtime_state=not_seen
             pid=0
             process=

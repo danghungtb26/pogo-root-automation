@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,9 +21,12 @@ constexpr const char *kStateDirectory = "/data/adb/pogo_root_automation";
 constexpr const char *kStatePath = "/data/adb/pogo_root_automation/runtime.status";
 constexpr const char *kTempStatePrefix = "/data/adb/pogo_root_automation/runtime.status.tmp";
 constexpr uint32_t kRuntimeEventMagic = 0x504F474FU;  // POGO
-constexpr uint32_t kRuntimeProtocolVersion = 2U;
+constexpr uint32_t kRuntimeProtocolVersion = 3U;
 constexpr int kProbeAttempts = 60;
+constexpr int kAssemblySurveyAttempts = 20;
 constexpr useconds_t kProbeDelayUs = 500000U;
+constexpr uint32_t kRequiredIl2cppSymbolCount = 10U;
+constexpr size_t kMaxAssembliesToInspect = 4096U;
 
 enum class RuntimeEventType : uint32_t {
     kTargetAttached = 1U,
@@ -36,6 +40,8 @@ enum RuntimeProbeFlags : uint32_t {
     kIl2cppApiAvailable = 1U << 3U,
     kHoudiniTranslation = 1U << 4U,
     kNdkTranslation = 1U << 5U,
+    kAssemblySurveyComplete = 1U << 6U,
+    kAssemblyCSharpFound = 1U << 7U,
 };
 
 struct RuntimeEvent {
@@ -45,10 +51,13 @@ struct RuntimeEvent {
     int32_t pid;
     uint32_t probe_flags;
     uint32_t il2cpp_symbol_count;
+    uint32_t il2cpp_required_symbol_count;
+    uint32_t assembly_count;
     char process_name[128];
     char il2cpp_path[512];
     char unity_path[512];
     char translation_layer[32];
+    char assembly_csharp_name[64];
 };
 
 struct RuntimeState {
@@ -56,16 +65,50 @@ struct RuntimeState {
     int32_t pid = 0;
     uint32_t probe_flags = 0U;
     uint32_t il2cpp_symbol_count = 0U;
+    uint32_t il2cpp_required_symbol_count = kRequiredIl2cppSymbolCount;
+    uint32_t assembly_count = 0U;
     char process_name[128]{};
     char il2cpp_path[512]{};
     char unity_path[512]{};
     char translation_layer[32]{};
+    char assembly_csharp_name[64]{};
 };
 
 struct ProbeContext {
     int fd;
     int32_t pid;
     char process_name[128];
+};
+
+struct Il2CppDomain;
+struct Il2CppAssembly;
+struct Il2CppImage;
+struct Il2CppThread;
+
+using Il2CppDomainGet = Il2CppDomain *(*)();
+using Il2CppThreadAttach = Il2CppThread *(*)(Il2CppDomain *);
+using Il2CppThreadDetach = void (*)(Il2CppThread *);
+using Il2CppDomainGetAssemblies = const Il2CppAssembly **(*)(const Il2CppDomain *, size_t *);
+using Il2CppAssemblyGetImage = const Il2CppImage *(*)(const Il2CppAssembly *);
+using Il2CppImageGetName = const char *(*)(const Il2CppImage *);
+using Il2CppClassFromName = void *(*)(const Il2CppImage *, const char *, const char *);
+using Il2CppClassGetFieldFromName = void *(*)(void *, const char *);
+using Il2CppFieldGetValue = void (*)(void *, void *, void *);
+using Il2CppObjectGetClass = void *(*)(void *);
+
+struct Il2CppApi {
+    void *handle = nullptr;
+    uint32_t symbol_count = 0U;
+    Il2CppDomainGet domain_get = nullptr;
+    Il2CppThreadAttach thread_attach = nullptr;
+    Il2CppThreadDetach thread_detach = nullptr;
+    Il2CppDomainGetAssemblies domain_get_assemblies = nullptr;
+    Il2CppAssemblyGetImage assembly_get_image = nullptr;
+    Il2CppImageGetName image_get_name = nullptr;
+    Il2CppClassFromName class_from_name = nullptr;
+    Il2CppClassGetFieldFromName class_get_field_from_name = nullptr;
+    Il2CppFieldGetValue field_get_value = nullptr;
+    Il2CppObjectGetClass object_get_class = nullptr;
 };
 
 bool is_target_process(const char *process_name) {
@@ -140,11 +183,7 @@ bool find_mapping_path(const char *needle, char *output, size_t output_size) {
     char path[1024]{};
     while (fgets(line, sizeof(line), maps) != nullptr) {
         path[0] = '\0';
-        const int parsed = sscanf(
-            line,
-            "%*s %*s %*s %*s %*s %1023s",
-            path
-        );
+        const int parsed = sscanf(line, "%*s %*s %*s %*s %*s %1023s", path);
         if (parsed == 1 && strstr(path, needle) != nullptr) {
             copy_string(output, output_size, path);
             found = true;
@@ -161,39 +200,179 @@ bool mapping_contains(const char *needle) {
     return find_mapping_path(needle, ignored, sizeof(ignored));
 }
 
-uint32_t resolve_il2cpp_api_symbols(const char *il2cpp_path) {
-    if (il2cpp_path == nullptr || il2cpp_path[0] == '\0') {
-        return 0U;
+template <typename T>
+T resolve_symbol(void *handle, const char *name, uint32_t *resolved_count) {
+    void *symbol = dlsym(handle, name);
+    if (symbol != nullptr && resolved_count != nullptr) {
+        *resolved_count += 1U;
+    }
+    return reinterpret_cast<T>(symbol);
+}
+
+bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
+    if (il2cpp_path == nullptr || il2cpp_path[0] == '\0' || api == nullptr) {
+        return false;
     }
 
-    void *handle = dlopen(il2cpp_path, RTLD_NOW | RTLD_NOLOAD);
-    if (handle == nullptr) {
-        handle = dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD);
+    api->handle = dlopen(il2cpp_path, RTLD_NOW | RTLD_NOLOAD);
+    if (api->handle == nullptr) {
+        api->handle = dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD);
     }
-    if (handle == nullptr) {
-        return 0U;
+    if (api->handle == nullptr) {
+        return false;
     }
 
-    const char *symbols[] = {
+    api->domain_get = resolve_symbol<Il2CppDomainGet>(
+        api->handle,
         "il2cpp_domain_get",
+        &api->symbol_count
+    );
+    api->thread_attach = resolve_symbol<Il2CppThreadAttach>(
+        api->handle,
+        "il2cpp_thread_attach",
+        &api->symbol_count
+    );
+    api->thread_detach = resolve_symbol<Il2CppThreadDetach>(
+        api->handle,
+        "il2cpp_thread_detach",
+        &api->symbol_count
+    );
+    api->domain_get_assemblies = resolve_symbol<Il2CppDomainGetAssemblies>(
+        api->handle,
         "il2cpp_domain_get_assemblies",
+        &api->symbol_count
+    );
+    api->assembly_get_image = resolve_symbol<Il2CppAssemblyGetImage>(
+        api->handle,
         "il2cpp_assembly_get_image",
+        &api->symbol_count
+    );
+    api->image_get_name = resolve_symbol<Il2CppImageGetName>(
+        api->handle,
         "il2cpp_image_get_name",
+        &api->symbol_count
+    );
+    api->class_from_name = resolve_symbol<Il2CppClassFromName>(
+        api->handle,
         "il2cpp_class_from_name",
+        &api->symbol_count
+    );
+    api->class_get_field_from_name = resolve_symbol<Il2CppClassGetFieldFromName>(
+        api->handle,
         "il2cpp_class_get_field_from_name",
+        &api->symbol_count
+    );
+    api->field_get_value = resolve_symbol<Il2CppFieldGetValue>(
+        api->handle,
         "il2cpp_field_get_value",
+        &api->symbol_count
+    );
+    api->object_get_class = resolve_symbol<Il2CppObjectGetClass>(
+        api->handle,
         "il2cpp_object_get_class",
-    };
+        &api->symbol_count
+    );
 
-    uint32_t resolved = 0U;
-    for (const char *symbol : symbols) {
-        if (dlsym(handle, symbol) != nullptr) {
-            resolved += 1U;
+    return api->symbol_count == kRequiredIl2cppSymbolCount;
+}
+
+void close_il2cpp_api(Il2CppApi *api) {
+    if (api != nullptr && api->handle != nullptr) {
+        dlclose(api->handle);
+        api->handle = nullptr;
+    }
+}
+
+bool survey_il2cpp_assemblies(Il2CppApi *api, RuntimeEvent *event) {
+    if (api == nullptr || event == nullptr ||
+        api->domain_get == nullptr || api->thread_attach == nullptr ||
+        api->thread_detach == nullptr || api->domain_get_assemblies == nullptr ||
+        api->assembly_get_image == nullptr || api->image_get_name == nullptr) {
+        return false;
+    }
+
+    Il2CppDomain *domain = api->domain_get();
+    if (domain == nullptr) {
+        return false;
+    }
+
+    Il2CppThread *thread = api->thread_attach(domain);
+    if (thread == nullptr) {
+        return false;
+    }
+
+    size_t assembly_count = 0U;
+    const Il2CppAssembly **assemblies = api->domain_get_assemblies(domain, &assembly_count);
+    if (assemblies == nullptr || assembly_count == 0U) {
+        api->thread_detach(thread);
+        return false;
+    }
+
+    event->assembly_count = assembly_count > 0xFFFFFFFFULL
+        ? 0xFFFFFFFFU
+        : static_cast<uint32_t>(assembly_count);
+
+    const size_t inspect_count = assembly_count < kMaxAssembliesToInspect
+        ? assembly_count
+        : kMaxAssembliesToInspect;
+
+    for (size_t index = 0U; index < inspect_count; ++index) {
+        const Il2CppAssembly *assembly = assemblies[index];
+        if (assembly == nullptr) {
+            continue;
+        }
+
+        const Il2CppImage *image = api->assembly_get_image(assembly);
+        if (image == nullptr) {
+            continue;
+        }
+
+        const char *name = api->image_get_name(image);
+        if (name == nullptr) {
+            continue;
+        }
+
+        if (strcmp(name, "Assembly-CSharp.dll") == 0 || strcmp(name, "Assembly-CSharp") == 0) {
+            event->probe_flags |= kAssemblyCSharpFound;
+            copy_string(
+                event->assembly_csharp_name,
+                sizeof(event->assembly_csharp_name),
+                name
+            );
+            break;
         }
     }
 
-    dlclose(handle);
-    return resolved;
+    api->thread_detach(thread);
+    event->probe_flags |= kAssemblySurveyComplete;
+    return true;
+}
+
+void probe_il2cpp_runtime(RuntimeEvent *event) {
+    if (event == nullptr || event->il2cpp_path[0] == '\0') {
+        return;
+    }
+
+    Il2CppApi api{};
+    const bool complete_api = resolve_il2cpp_api(event->il2cpp_path, &api);
+    event->il2cpp_symbol_count = api.symbol_count;
+    event->il2cpp_required_symbol_count = kRequiredIl2cppSymbolCount;
+
+    if (!complete_api) {
+        close_il2cpp_api(&api);
+        return;
+    }
+
+    event->probe_flags |= kIl2cppApiAvailable;
+
+    for (int attempt = 0; attempt < kAssemblySurveyAttempts; ++attempt) {
+        if (survey_il2cpp_assemblies(&api, event)) {
+            break;
+        }
+        usleep(kProbeDelayUs);
+    }
+
+    close_il2cpp_api(&api);
 }
 
 void persist_runtime_state(const RuntimeState &state) {
@@ -225,6 +404,9 @@ void persist_runtime_state(const RuntimeState &state) {
     const bool il2cpp_loaded = (state.probe_flags & kIl2cppLoaded) != 0U;
     const bool unity_loaded = (state.probe_flags & kUnityLoaded) != 0U;
     const bool api_available = (state.probe_flags & kIl2cppApiAvailable) != 0U;
+    const bool assembly_survey_complete =
+        (state.probe_flags & kAssemblySurveyComplete) != 0U;
+    const bool assembly_csharp_found = (state.probe_flags & kAssemblyCSharpFound) != 0U;
 
     dprintf(fd, "protocol=%u\n", state.protocol_version);
     dprintf(fd, "pid=%d\n", state.pid);
@@ -235,9 +417,22 @@ void persist_runtime_state(const RuntimeState &state) {
     dprintf(fd, "native_libunity_loaded=%d\n", unity_loaded ? 1 : 0);
     dprintf(fd, "native_il2cpp_api_available=%d\n", api_available ? 1 : 0);
     dprintf(fd, "native_il2cpp_symbol_count=%u\n", state.il2cpp_symbol_count);
+    dprintf(
+        fd,
+        "native_il2cpp_required_symbol_count=%u\n",
+        state.il2cpp_required_symbol_count
+    );
     dprintf(fd, "native_libil2cpp_path=%s\n", state.il2cpp_path);
     dprintf(fd, "native_libunity_path=%s\n", state.unity_path);
     dprintf(fd, "native_translation_layer=%s\n", state.translation_layer);
+    dprintf(
+        fd,
+        "native_assembly_survey_state=%s\n",
+        assembly_survey_complete ? "complete" : "unavailable"
+    );
+    dprintf(fd, "native_assembly_count=%u\n", state.assembly_count);
+    dprintf(fd, "native_assembly_csharp_found=%d\n", assembly_csharp_found ? 1 : 0);
+    dprintf(fd, "native_assembly_csharp_name=%s\n", state.assembly_csharp_name);
     fsync(fd);
     close(fd);
 
@@ -265,6 +460,7 @@ void companion_handler(int fd) {
         event.il2cpp_path[sizeof(event.il2cpp_path) - 1U] = '\0';
         event.unity_path[sizeof(event.unity_path) - 1U] = '\0';
         event.translation_layer[sizeof(event.translation_layer) - 1U] = '\0';
+        event.assembly_csharp_name[sizeof(event.assembly_csharp_name) - 1U] = '\0';
 
         if (event.event_type == static_cast<uint32_t>(RuntimeEventType::kTargetAttached)) {
             state = RuntimeState{};
@@ -279,12 +475,19 @@ void companion_handler(int fd) {
             event.pid == state.pid) {
             state.probe_flags = event.probe_flags;
             state.il2cpp_symbol_count = event.il2cpp_symbol_count;
+            state.il2cpp_required_symbol_count = event.il2cpp_required_symbol_count;
+            state.assembly_count = event.assembly_count;
             copy_string(state.il2cpp_path, sizeof(state.il2cpp_path), event.il2cpp_path);
             copy_string(state.unity_path, sizeof(state.unity_path), event.unity_path);
             copy_string(
                 state.translation_layer,
                 sizeof(state.translation_layer),
                 event.translation_layer
+            );
+            copy_string(
+                state.assembly_csharp_name,
+                sizeof(state.assembly_csharp_name),
+                event.assembly_csharp_name
             );
             persist_runtime_state(state);
         }
@@ -302,6 +505,7 @@ void *binding_probe_thread(void *opaque_context) {
     event.protocol_version = kRuntimeProtocolVersion;
     event.event_type = static_cast<uint32_t>(RuntimeEventType::kBindingProbe);
     event.pid = context->pid;
+    event.il2cpp_required_symbol_count = kRequiredIl2cppSymbolCount;
     copy_string(event.process_name, sizeof(event.process_name), context->process_name);
     copy_string(event.translation_layer, sizeof(event.translation_layer), "none");
 
@@ -337,10 +541,7 @@ void *binding_probe_thread(void *opaque_context) {
         }
 
         if (il2cpp_loaded) {
-            event.il2cpp_symbol_count = resolve_il2cpp_api_symbols(event.il2cpp_path);
-            if (event.il2cpp_symbol_count > 0U) {
-                event.probe_flags |= kIl2cppApiAvailable;
-            }
+            probe_il2cpp_runtime(&event);
             break;
         }
 
@@ -359,10 +560,13 @@ void *binding_probe_thread(void *opaque_context) {
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
-            "binding probe: il2cpp=%d unity=%d api_symbols=%u translation=%s",
+            "binding probe: il2cpp=%d unity=%d api_symbols=%u/%u assemblies=%u csharp=%d translation=%s",
             (event.probe_flags & kIl2cppLoaded) != 0U,
             (event.probe_flags & kUnityLoaded) != 0U,
             event.il2cpp_symbol_count,
+            event.il2cpp_required_symbol_count,
+            event.assembly_count,
+            (event.probe_flags & kAssemblyCSharpFound) != 0U,
             event.translation_layer
         );
     }
@@ -404,6 +608,7 @@ public:
                 event.protocol_version = kRuntimeProtocolVersion;
                 event.event_type = static_cast<uint32_t>(RuntimeEventType::kTargetAttached);
                 event.pid = process_pid_;
+                event.il2cpp_required_symbol_count = kRequiredIl2cppSymbolCount;
                 copy_string(event.process_name, sizeof(event.process_name), process_name_);
 
                 if (!write_full(companion_fd_, &event, sizeof(event))) {

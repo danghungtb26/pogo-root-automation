@@ -41,8 +41,6 @@ class MainActivity : Activity() {
                 handler.post {
                     if (!isFinishing && !isDestroyed) {
                         renderRuntime(snapshot)
-                        // Schedule from completion, not from start. A slow or blocked
-                        // root grant can therefore never build an unbounded work queue.
                         handler.postDelayed(runtimeTick, 2_000L)
                     }
                 }
@@ -142,7 +140,18 @@ class MainActivity : Activity() {
                 snapshot.nativeProbeState?.let { state ->
                     append("\n  native probe: $state")
                     if (state == "complete") {
-                        append(" / IL2CPP symbols=${snapshot.il2cppSymbolCount}")
+                        append(
+                            " / IL2CPP symbols=${snapshot.il2cppSymbolCount}" +
+                                "/${snapshot.il2cppRequiredSymbolCount}",
+                        )
+                    }
+                }
+
+                snapshot.assemblySurveyState?.let { state ->
+                    append("\n  assemblies: $state")
+                    if (state == "complete") {
+                        append(" / count=${snapshot.assemblyCount}")
+                        append(" / Assembly-CSharp=${snapshot.assemblyCSharpFound}")
                     }
                 }
 
