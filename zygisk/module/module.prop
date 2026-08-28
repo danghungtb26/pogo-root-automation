@@ -1,0 +1,6 @@
+id=pogo_root_automation
+name=PoGo Root Automation Runtime
+version=0.1.0
+versionCode=1
+author=danghungtb26
+description=Zygisk runtime boundary for pogo-root-automation. Initial build only observes target process lifecycle.

@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+local.properties
+**/build/
+*.iml
+.DS_Store
+.externalNativeBuild/
+.cxx/
+zygisk/module/libs/
+zygisk/module/obj/
