@@ -7,6 +7,14 @@ GALAXY_PACKAGE=com.nianticlabs.pokemongo.ares
 protocol=1
 pid=0
 process_name=
+native_probe_state=not_seen
+native_libil2cpp_loaded=0
+native_libunity_loaded=0
+native_il2cpp_api_available=0
+native_il2cpp_symbol_count=0
+native_libil2cpp_path=
+native_libunity_path=
+native_translation_layer=
 
 if [ -f "$STATE_FILE" ]; then
   status_protocol=$(sed -n 's/^protocol=//p' "$STATE_FILE" | head -n 1)
@@ -16,6 +24,20 @@ if [ -f "$STATE_FILE" ]; then
   [ -n "$status_protocol" ] && protocol="$status_protocol"
   [ -n "$status_pid" ] && pid="$status_pid"
   process_name="$status_process"
+
+  value=$(sed -n 's/^native_probe_state=//p' "$STATE_FILE" | head -n 1)
+  [ -n "$value" ] && native_probe_state="$value"
+  value=$(sed -n 's/^native_libil2cpp_loaded=//p' "$STATE_FILE" | head -n 1)
+  [ -n "$value" ] && native_libil2cpp_loaded="$value"
+  value=$(sed -n 's/^native_libunity_loaded=//p' "$STATE_FILE" | head -n 1)
+  [ -n "$value" ] && native_libunity_loaded="$value"
+  value=$(sed -n 's/^native_il2cpp_api_available=//p' "$STATE_FILE" | head -n 1)
+  [ -n "$value" ] && native_il2cpp_api_available="$value"
+  value=$(sed -n 's/^native_il2cpp_symbol_count=//p' "$STATE_FILE" | head -n 1)
+  [ -n "$value" ] && native_il2cpp_symbol_count="$value"
+  native_libil2cpp_path=$(sed -n 's/^native_libil2cpp_path=//p' "$STATE_FILE" | head -n 1)
+  native_libunity_path=$(sed -n 's/^native_libunity_path=//p' "$STATE_FILE" | head -n 1)
+  native_translation_layer=$(sed -n 's/^native_translation_layer=//p' "$STATE_FILE" | head -n 1)
 fi
 
 runtime_state=not_seen
@@ -70,6 +92,7 @@ fi
 # the runtime/native modules that a later version-specific adapter can bind to.
 probe_state=not_running
 binding_engine=unknown
+binding_strategy=unavailable
 process_exe=
 libil2cpp_path=
 libunity_path=
@@ -96,10 +119,20 @@ if [ "$runtime_state" = connected ] && [ "$pid" -gt 0 ] 2>/dev/null; then
   if [ -n "$libil2cpp_path" ]; then
     binding_engine=il2cpp
     probe_state=ready
+    binding_strategy=il2cpp_mapped_only
+    if [ "$native_probe_state" = complete ] && [ "$native_il2cpp_api_available" = 1 ]; then
+      binding_strategy=il2cpp_exported_api
+    fi
   elif [ -n "$libunity_path" ]; then
     binding_engine=unity_unknown_backend
     probe_state=unity_loaded
   fi
+fi
+
+# Prefer the in-process probe's translation result when available because it is
+# observed from the exact target process namespace.
+if [ -n "$native_translation_layer" ] && [ "$native_translation_layer" != none ]; then
+  translation_layer="$native_translation_layer"
 fi
 
 device_primary_abi=$(getprop ro.product.cpu.abi 2>/dev/null)
@@ -117,11 +150,17 @@ printf 'version_name=%s\n' "$version_name"
 printf 'version_code=%s\n' "$version_code"
 printf 'probe_state=%s\n' "$probe_state"
 printf 'binding_engine=%s\n' "$binding_engine"
+printf 'binding_strategy=%s\n' "$binding_strategy"
 printf 'process_exe=%s\n' "$process_exe"
 printf 'libil2cpp_path=%s\n' "$libil2cpp_path"
 printf 'libunity_path=%s\n' "$libunity_path"
 printf 'libmain_path=%s\n' "$libmain_path"
 printf 'translation_layer=%s\n' "$translation_layer"
+printf 'native_probe_state=%s\n' "$native_probe_state"
+printf 'native_il2cpp_api_available=%s\n' "$native_il2cpp_api_available"
+printf 'native_il2cpp_symbol_count=%s\n' "$native_il2cpp_symbol_count"
+printf 'native_libil2cpp_path=%s\n' "$native_libil2cpp_path"
+printf 'native_libunity_path=%s\n' "$native_libunity_path"
 printf 'device_primary_abi=%s\n' "$device_primary_abi"
 printf 'device_supported_abis=%s\n' "$device_supported_abis"
 printf 'native_bridge=%s\n' "$native_bridge"
