@@ -26,14 +26,14 @@ class MainActivity : Activity() {
     private lateinit var adapterView: TextView
     private lateinit var nearbyView: TextView
 
-    private val renderTick = object : Runnable {
+    private val renderTick: Runnable = object : Runnable {
         override fun run() {
             renderNearby()
             handler.postDelayed(this, 1_000L)
         }
     }
 
-    private val runtimeTick = object : Runnable {
+    private val runtimeTick: Runnable = object : Runnable {
         override fun run() {
             runtimeExecutor.execute {
                 val snapshot = runtimeStatusRepository.read()
