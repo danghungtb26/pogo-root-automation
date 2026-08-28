@@ -137,6 +137,14 @@ class MainActivity : Activity() {
                     },
                 )
                 snapshot.bindingEngine?.let { append(" [$it]") }
+                snapshot.bindingStrategy?.let { append("\n  strategy: $it") }
+
+                snapshot.nativeProbeState?.let { state ->
+                    append("\n  native probe: $state")
+                    if (state == "complete") {
+                        append(" / IL2CPP symbols=${snapshot.il2cppSymbolCount}")
+                    }
+                }
 
                 snapshot.devicePrimaryAbi?.let { append("\n  abi: $it") }
                 snapshot.kernelMachine?.let { append(" / kernel=$it") }
