@@ -54,9 +54,11 @@ hardware="$(getprop_value ro.hardware)"
 primary_abi="$(getprop_value ro.product.cpu.abi)"
 supported_abis="$(getprop_value ro.product.cpu.abilist)"
 native_bridge="$(getprop_value ro.dalvik.vm.native.bridge)"
+bst_service="$(getprop_value init.svc.bstsvcmgrtest)"
+mountsf_service="$(getprop_value init.svc.mountsf)"
 identity="$(printf '%s %s %s %s %s' "$manufacturer" "$brand" "$model" "$product" "$hardware" | tr '[:upper:]' '[:lower:]')"
 environment=android-device
-if [[ "$identity" == *bluestacks* || "$identity" == *bstacks* ]]; then
+if [[ "$identity" == *bluestacks* || "$identity" == *bstacks* || -n "$bst_service" ]]; then
   environment=bluestacks
 fi
 
@@ -74,6 +76,8 @@ fi
   echo "model=$model"
   echo "product=$product"
   echo "hardware=$hardware"
+  echo "bst_service=${bst_service:-unset}"
+  echo "mountsf_service=${mountsf_service:-unset}"
   echo "android_release=$(getprop_value ro.build.version.release)"
   echo "android_sdk=$(getprop_value ro.build.version.sdk)"
   echo "kernel_machine=$(adb shell uname -m | tr -d '\r')"
