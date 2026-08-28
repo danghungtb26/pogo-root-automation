@@ -42,7 +42,7 @@ class MainActivity : Activity() {
                         renderRuntime(snapshot)
                         // Schedule from completion, not from start. A slow or blocked
                         // root grant can therefore never build an unbounded work queue.
-                        handler.postDelayed(this, 2_000L)
+                        handler.postDelayed(runtimeTick, 2_000L)
                     }
                 }
             }
