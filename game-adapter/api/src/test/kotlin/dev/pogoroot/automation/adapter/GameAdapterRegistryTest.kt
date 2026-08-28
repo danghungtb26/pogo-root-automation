@@ -45,15 +45,15 @@ class GameAdapterRegistryTest {
     }
 
     private fun factory(
-        id: String,
+        factoryId: String,
         predicate: (GameBuild) -> Boolean,
     ) = object : GameAdapterFactory {
-        override val id: String = id
+        override val id: String = factoryId
 
         override fun supports(build: GameBuild): Boolean = predicate(build)
 
         override fun create(): GameAdapter = object : GameAdapter {
-            override val id: String = id
+            override val id: String = factoryId
             override val capabilities: Set<GameCapability> = emptySet()
             override fun connect(): Result<Unit> = Result.success(Unit)
             override fun disconnect() = Unit
