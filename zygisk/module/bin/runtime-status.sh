@@ -30,13 +30,33 @@ elif [ -f "$STATE_FILE" ]; then
   runtime_state=disconnected
 fi
 
+is_installed() {
+  candidate_path=$(pm path "$1" 2>/dev/null | head -n 1)
+  case "$candidate_path" in
+    package:*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 package_name=
-for candidate in "$GOOGLE_PACKAGE" "$GALAXY_PACKAGE"; do
-  if pm path "$candidate" >/dev/null 2>&1; then
-    package_name="$candidate"
-    break
-  fi
-done
+# When a runtime process has been observed, prefer its package so dual-install
+# devices report the version of the process we actually attached to.
+case "$process_name" in
+  "$GOOGLE_PACKAGE"|"$GALAXY_PACKAGE")
+    if is_installed "$process_name"; then
+      package_name="$process_name"
+    fi
+    ;;
+esac
+
+if [ -z "$package_name" ]; then
+  for candidate in "$GOOGLE_PACKAGE" "$GALAXY_PACKAGE"; do
+    if is_installed "$candidate"; then
+      package_name="$candidate"
+      break
+    fi
+  done
+fi
 
 version_name=
 version_code=
