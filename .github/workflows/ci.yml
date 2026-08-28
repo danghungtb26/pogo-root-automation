@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -34,13 +32,14 @@ jobs:
           bash -n scripts/package-magisk.sh
           bash -n scripts/device-smoke-test.sh
           bash -n scripts/bluestacks-smoke-test.sh
+          bash -n scripts/binding-probe-test.sh
           bash -n scripts/collect-binding-diagnostics.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
 
       - name: Unit tests
-        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :bridge:protocol:test
+        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :game-adapter:pogo:test :bridge:protocol:test
 
       - name: Build controller APK
         run: gradle :app:assembleDebug
@@ -92,7 +91,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: pogo-root-automation-m1-multiabi
+          name: pogo-root-automation-branch-build
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             build/pogo-root-automation-magisk-multiabi.zip
