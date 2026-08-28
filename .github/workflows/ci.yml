@@ -2,8 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -33,13 +31,15 @@ jobs:
         run: |
           bash -n scripts/package-magisk.sh
           bash -n scripts/device-smoke-test.sh
+          bash -n scripts/bluestacks-smoke-test.sh
+          bash -n scripts/binding-probe-test.sh
           bash -n scripts/collect-binding-diagnostics.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
 
       - name: Unit tests
-        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :bridge:protocol:test
+        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :game-adapter:pogo:test :bridge:protocol:test
 
       - name: Build controller APK
         run: gradle :app:assembleDebug
@@ -65,16 +65,33 @@ jobs:
             -DZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
           "$CMAKE" --build build/zygisk-arm64
 
-      - name: Package Magisk module
+      - name: Build x86_64 Zygisk runtime
+        run: |
+          CMAKE="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          "$CMAKE" \
+            -S zygisk/jni \
+            -B build/zygisk-x86_64 \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-28 \
+            -DZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
+          "$CMAKE" --build build/zygisk-x86_64
+
+      - name: Package multi-ABI Magisk module
         run: |
           ./scripts/package-magisk.sh \
             build/zygisk-arm64/libpogo_root_automation.so \
-            build/pogo-root-automation-magisk-arm64.zip
-          test -s build/pogo-root-automation-magisk-arm64.zip
+            build/zygisk-x86_64/libpogo_root_automation.so \
+            build/pogo-root-automation-magisk-multiabi.zip
+          test -s build/pogo-root-automation-magisk-multiabi.zip
+          unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/arm64-v8a.so'
+          unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/x86_64.so'
 
       - uses: actions/upload-artifact@v4
         with:
-          name: pogo-root-automation-m1
+          name: pogo-root-automation-branch-build
           path: |
             app/build/outputs/apk/debug/app-debug.apk
-            build/pogo-root-automation-magisk-arm64.zip
+            build/pogo-root-automation-magisk-multiabi.zip
