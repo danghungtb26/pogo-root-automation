@@ -30,16 +30,28 @@ hardware="$(getprop_value ro.hardware)"
 primary_abi="$(getprop_value ro.product.cpu.abi)"
 supported_abis="$(getprop_value ro.product.cpu.abilist)"
 native_bridge="$(getprop_value ro.dalvik.vm.native.bridge)"
+bst_service="$(getprop_value init.svc.bstsvcmgrtest)"
+mountsf_service="$(getprop_value init.svc.mountsf)"
 
 identity="$(printf '%s %s %s %s %s' "$manufacturer" "$brand" "$model" "$product" "$hardware" | tr '[:upper:]' '[:lower:]')"
-if [[ "$identity" != *bluestacks* && "$identity" != *bstacks* ]]; then
+is_bluestacks=false
+if [[ "$identity" == *bluestacks* || "$identity" == *bstacks* ]]; then
+  is_bluestacks=true
+fi
+if [[ -n "$bst_service" ]]; then
+  is_bluestacks=true
+fi
+
+if [[ "$is_bluestacks" != true ]]; then
   echo "Environment properties:"
   echo "  manufacturer=$manufacturer"
   echo "  brand=$brand"
   echo "  model=$model"
   echo "  product=$product"
   echo "  hardware=$hardware"
-  fail "connected device does not identify as BlueStacks"
+  echo "  init.svc.bstsvcmgrtest=${bst_service:-unset}"
+  echo "  init.svc.mountsf=${mountsf_service:-unset}"
+  fail "connected device does not expose a BlueStacks runtime signal"
 fi
 
 root_id="$(root_shell 'id -u' 2>/dev/null | tr -d '\r' || true)"
@@ -79,6 +91,8 @@ done
 echo "BlueStacks runtime:"
 echo "  manufacturer=$manufacturer"
 echo "  model=$model"
+echo "  bst_service=${bst_service:-unset}"
+echo "  mountsf_service=${mountsf_service:-unset}"
 echo "  android=$(getprop_value ro.build.version.release) / sdk=$(getprop_value ro.build.version.sdk)"
 echo "  primary_abi=$primary_abi"
 echo "  supported_abis=$supported_abis"
