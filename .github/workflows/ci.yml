@@ -38,7 +38,7 @@ jobs:
           sh -n zygisk/module/uninstall.sh
 
       - name: Unit tests
-        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :bridge:protocol:test
+        run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :game-adapter:pogo:test :bridge:protocol:test
 
       - name: Build controller APK
         run: gradle :app:assembleDebug
