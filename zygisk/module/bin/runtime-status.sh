@@ -66,6 +66,48 @@ if [ -n "$package_name" ]; then
   version_code=$(printf '%s\n' "$package_dump" | sed -n 's/^[[:space:]]*versionCode=\([0-9]*\).*/\1/p' | head -n 1)
 fi
 
+# Read-only binding probe. This does not inspect game objects; it only identifies
+# the runtime/native modules that a later version-specific adapter can bind to.
+probe_state=not_running
+binding_engine=unknown
+process_exe=
+libil2cpp_path=
+libunity_path=
+libmain_path=
+translation_layer=none
+
+if [ "$runtime_state" = connected ] && [ "$pid" -gt 0 ] 2>/dev/null; then
+  probe_state=waiting
+  process_exe=$(readlink "/proc/$pid/exe" 2>/dev/null)
+  maps_path="/proc/$pid/maps"
+
+  if [ -r "$maps_path" ]; then
+    libil2cpp_path=$(awk '$NF ~ /\/libil2cpp\.so$/ { print $NF; exit }' "$maps_path" 2>/dev/null)
+    libunity_path=$(awk '$NF ~ /\/libunity\.so$/ { print $NF; exit }' "$maps_path" 2>/dev/null)
+    libmain_path=$(awk '$NF ~ /\/libmain\.so$/ { print $NF; exit }' "$maps_path" 2>/dev/null)
+
+    if grep -q '/libhoudini[^/]*\.so' "$maps_path" 2>/dev/null; then
+      translation_layer=houdini
+    elif grep -q '/libndk_translation[^/]*\.so' "$maps_path" 2>/dev/null; then
+      translation_layer=ndk_translation
+    fi
+  fi
+
+  if [ -n "$libil2cpp_path" ]; then
+    binding_engine=il2cpp
+    probe_state=ready
+  elif [ -n "$libunity_path" ]; then
+    binding_engine=unity_unknown_backend
+    probe_state=unity_loaded
+  fi
+fi
+
+device_primary_abi=$(getprop ro.product.cpu.abi 2>/dev/null)
+device_supported_abis=$(getprop ro.product.cpu.abilist 2>/dev/null)
+native_bridge=$(getprop ro.dalvik.vm.native.bridge 2>/dev/null)
+zygote=$(getprop ro.zygote 2>/dev/null)
+kernel_machine=$(uname -m 2>/dev/null)
+
 printf 'protocol=%s\n' "$protocol"
 printf 'runtime_state=%s\n' "$runtime_state"
 printf 'pid=%s\n' "$pid"
@@ -73,3 +115,15 @@ printf 'process=%s\n' "$process_name"
 printf 'package=%s\n' "$package_name"
 printf 'version_name=%s\n' "$version_name"
 printf 'version_code=%s\n' "$version_code"
+printf 'probe_state=%s\n' "$probe_state"
+printf 'binding_engine=%s\n' "$binding_engine"
+printf 'process_exe=%s\n' "$process_exe"
+printf 'libil2cpp_path=%s\n' "$libil2cpp_path"
+printf 'libunity_path=%s\n' "$libunity_path"
+printf 'libmain_path=%s\n' "$libmain_path"
+printf 'translation_layer=%s\n' "$translation_layer"
+printf 'device_primary_abi=%s\n' "$device_primary_abi"
+printf 'device_supported_abis=%s\n' "$device_supported_abis"
+printf 'native_bridge=%s\n' "$native_bridge"
+printf 'zygote=%s\n' "$zygote"
+printf 'kernel_machine=%s\n' "$kernel_machine"
