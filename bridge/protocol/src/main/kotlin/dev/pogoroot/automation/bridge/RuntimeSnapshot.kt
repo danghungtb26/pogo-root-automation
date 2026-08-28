@@ -25,11 +25,17 @@ data class RuntimeSnapshot(
     val gameVersionCode: Long?,
     val bindingProbeState: BindingProbeState = BindingProbeState.UNKNOWN,
     val bindingEngine: String? = null,
+    val bindingStrategy: String? = null,
     val processExecutable: String? = null,
     val il2cppPath: String? = null,
     val unityPath: String? = null,
     val libmainPath: String? = null,
     val translationLayer: String? = null,
+    val nativeProbeState: String? = null,
+    val il2cppApiAvailable: Boolean = false,
+    val il2cppSymbolCount: Int = 0,
+    val nativeIl2cppPath: String? = null,
+    val nativeUnityPath: String? = null,
     val devicePrimaryAbi: String? = null,
     val deviceSupportedAbis: List<String> = emptyList(),
     val nativeBridge: String? = null,
@@ -75,11 +81,17 @@ object RuntimeSnapshotParser {
             gameVersionCode = values["version_code"]?.toLongOrNull(),
             bindingProbeState = probeState,
             bindingEngine = values["binding_engine"].nullIfBlankOrUnknown(),
+            bindingStrategy = values["binding_strategy"].nullIfBlankOrUnavailable(),
             processExecutable = values["process_exe"].nullIfBlank(),
             il2cppPath = values["libil2cpp_path"].nullIfBlank(),
             unityPath = values["libunity_path"].nullIfBlank(),
             libmainPath = values["libmain_path"].nullIfBlank(),
             translationLayer = values["translation_layer"].nullIfBlankOrNone(),
+            nativeProbeState = values["native_probe_state"].nullIfBlank(),
+            il2cppApiAvailable = values["native_il2cpp_api_available"] == "1",
+            il2cppSymbolCount = values["native_il2cpp_symbol_count"]?.toIntOrNull() ?: 0,
+            nativeIl2cppPath = values["native_libil2cpp_path"].nullIfBlank(),
+            nativeUnityPath = values["native_libunity_path"].nullIfBlank(),
             devicePrimaryAbi = values["device_primary_abi"].nullIfBlank(),
             deviceSupportedAbis = values["device_supported_abis"]
                 .orEmpty()
@@ -100,4 +112,7 @@ object RuntimeSnapshotParser {
 
     private fun String?.nullIfBlankOrNone(): String? =
         this?.takeIf { it.isNotBlank() && it != "none" }
+
+    private fun String?.nullIfBlankOrUnavailable(): String? =
+        this?.takeIf { it.isNotBlank() && it != "unavailable" }
 }
