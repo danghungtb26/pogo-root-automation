@@ -33,6 +33,7 @@ jobs:
         run: |
           bash -n scripts/package-magisk.sh
           bash -n scripts/device-smoke-test.sh
+          bash -n scripts/collect-binding-diagnostics.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
