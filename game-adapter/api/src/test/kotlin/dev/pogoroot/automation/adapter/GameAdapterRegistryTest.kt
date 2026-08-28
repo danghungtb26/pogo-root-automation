@@ -44,6 +44,33 @@ class GameAdapterRegistryTest {
         )
     }
 
+    @Test
+    fun `fingerprint differentiates translated BlueStacks from native arm`() {
+        val nativeArm = GameBuild(
+            packageName = "com.nianticlabs.pokemongo",
+            versionName = "1.2.3",
+            versionCode = 123L,
+            engine = "il2cpp",
+            bindingStrategy = "il2cpp_exported_api",
+            devicePrimaryAbi = "arm64-v8a",
+            kernelMachine = "aarch64",
+        )
+        val translatedBlueStacks = nativeArm.copy(
+            devicePrimaryAbi = "x86_64",
+            kernelMachine = "x86_64",
+            translationLayer = "houdini",
+        )
+
+        assertEquals(
+            "com.nianticlabs.pokemongo|123|il2cpp|il2cpp_exported_api|arm64-v8a|aarch64|native",
+            nativeArm.fingerprint(),
+        )
+        assertEquals(
+            "com.nianticlabs.pokemongo|123|il2cpp|il2cpp_exported_api|x86_64|x86_64|houdini",
+            translatedBlueStacks.fingerprint(),
+        )
+    }
+
     private fun factory(
         factoryId: String,
         predicate: (GameBuild) -> Boolean,
