@@ -24,6 +24,14 @@ jobs:
         with:
           gradle-version: "9.5.0"
 
+      - name: Shell syntax
+        run: |
+          bash -n scripts/package-magisk.sh
+          bash -n scripts/device-smoke-test.sh
+          sh -n zygisk/module/bin/runtime-status.sh
+          sh -n zygisk/module/post-fs-data.sh
+          sh -n zygisk/module/uninstall.sh
+
       - name: Unit tests
         run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :bridge:protocol:test
 

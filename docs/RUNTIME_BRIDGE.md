@@ -11,7 +11,7 @@ Pokémon GO starts
   -> companion (root) atomically writes /data/adb/pogo_root_automation/runtime.status
   -> controller executes runtime-status.sh through su
   -> script validates that the recorded PID still belongs to the same process
-  -> script also reports installed package version
+  -> script reports the package/version for the attached build
   -> controller parses key=value output into RuntimeSnapshot
 ```
 
@@ -31,7 +31,25 @@ The companion writes only:
 - target process name;
 - observation timestamp.
 
-The controller-side root script derives current liveness and installed game version at read time.
+The controller-side root script derives current liveness and installed game version at read time. If both supported Pokémon GO packages are installed, the observed process is preferred so the reported version matches the actual attached client.
+
+## Device smoke test
+
+After installing the controller APK and the Magisk zip from CI, reboot the rooted device, connect ADB, then run:
+
+```bash
+./scripts/device-smoke-test.sh
+```
+
+The script verifies:
+
+1. ADB can obtain root via `su`;
+2. the module status command exists;
+3. launching Pokémon GO reaches `connected` and reports a version;
+4. force-stop reaches `disconnected`;
+5. relaunch returns to `connected`.
+
+It does not test any game-state hook because M1 intentionally has none.
 
 ## Current limitation
 
