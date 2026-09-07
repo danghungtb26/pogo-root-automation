@@ -6,6 +6,8 @@ import dev.pogoroot.automation.core.model.GameLifecycleState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 class BridgeFrameCodecTest {
     @Test
@@ -52,9 +54,14 @@ class BridgeFrameCodecTest {
             expectedProtocolVersion = BridgeProtocol.VERSION + 1,
         ).isFailure)
 
-        assertTrue(BridgeFrameCodec.encode(
-            frame.copy(payload = ByteArray(BridgeProtocol.HARD_MESSAGE_BYTES + 1)),
-        ).isFailure)
+        val oversizedFrame = ByteBuffer.allocate(BridgeProtocol.FRAME_HEADER_BYTES)
+            .order(ByteOrder.BIG_ENDIAN)
+            .putInt(BridgeProtocol.HARD_MESSAGE_BYTES + 1)
+            .putShort(BridgeProtocol.VERSION.toShort())
+            .putShort(BridgeMessageType.PING.wireValue.toShort())
+            .putLong(1L)
+            .array()
+        assertTrue(BridgeFrameCodec.decode(oversizedFrame).isFailure)
     }
 
     @Test
