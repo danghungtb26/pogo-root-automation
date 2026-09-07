@@ -164,8 +164,8 @@ class JoystickOverlayService : Service() {
                 AutomationSettingsOverlay(
                     context = this@JoystickOverlayService,
                     repository = automationConfigRepository,
+                    onSaved = { renderAutomationSummary() },
                 ).show()
-                mainHandler.postDelayed(::renderAutomationSummary, 500L)
             }
         }
 
