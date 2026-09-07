@@ -9,25 +9,37 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import dev.pogoroot.automation.MainActivity
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
+    private lateinit var maintenanceRunner: MaintenanceAutomationRunner
+    private val maintenanceExecutor = Executors.newSingleThreadScheduledExecutor()
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
+        val eventSink = ToastAutomationEventSink(this, configRepository)
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
-            eventSink = ToastAutomationEventSink(this, configRepository),
+            eventSink = eventSink,
         )
+        maintenanceRunner = MaintenanceAutomationRunner(eventSink = eventSink)
         apiServer = AutomationControlServer(configRepository, engine)
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         apiServer.start()
         engine.start()
+        maintenanceExecutor.scheduleWithFixedDelay(
+            ::runMaintenancePass,
+            2L,
+            2L,
+            TimeUnit.SECONDS,
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -58,9 +70,19 @@ class HeadlessAutomationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        maintenanceExecutor.shutdownNow()
         apiServer.stop()
         engine.shutdown()
         super.onDestroy()
+    }
+
+    private fun runMaintenancePass() {
+        val config = configRepository.read()
+        if (!config.enabled || (!config.autoDiscard && !config.autoTransfer)) return
+
+        // Missing/stale bindings are a normal state while the game is starting or after a game update.
+        // Do not spam a toast; the runtime/API status surface reports readiness separately.
+        maintenanceRunner.runOnce(config)
     }
 
     private fun createNotificationChannel() {
