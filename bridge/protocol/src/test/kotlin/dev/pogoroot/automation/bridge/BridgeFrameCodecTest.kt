@@ -1,6 +1,5 @@
 package dev.pogoroot.automation.bridge
 
-import dev.pogoroot.automation.adapter.GameCapability
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -19,7 +18,7 @@ class BridgeFrameCodecTest {
             packageName = "com.nianticlabs.pokemongo",
             buildFingerprint = "pogo|123|il2cpp|binding|arm64-v8a|aarch64|native|il2cpp=abc",
             strongIdentityVerified = true,
-            capabilities = setOf(GameCapability.READ_LIFECYCLE.name, GameCapability.SPIN.name),
+            capabilities = setOf("READ_LIFECYCLE", "SPIN"),
             gameVersionName = "1.0",
             gameVersionCode = 123L,
             observedAtEpochMs = 10L,
