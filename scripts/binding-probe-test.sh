@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MODULE_STATUS_SCRIPT=/data/adb/modules/pogo_root_automation/bin/runtime-status.sh
+GOOGLE_PACKAGE=com.nianticlabs.pokemongo
+GALAXY_PACKAGE=com.nianticlabs.pokemongo.ares
+TIMEOUT_SECONDS="${BINDING_PROBE_TIMEOUT_SECONDS:-60}"
+DIAGNOSTICS_OUTPUT="${BINDING_DIAGNOSTICS_OUTPUT:-pogo-binding-diagnostics.txt}"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+root_shell() { adb shell su -c "$*"; }
+read_field() { local key="$1"; sed -n "s/^${key}=//p" | head -n 1 | tr -d '\r'; }
+runtime_status() { root_shell "sh $MODULE_STATUS_SCRIPT" 2>/dev/null || true; }
+
+command -v adb >/dev/null 2>&1 || fail "adb is not installed"
+adb get-state >/dev/null 2>&1 || fail "no adb device connected"
+root_id="$(root_shell 'id -u' 2>/dev/null | tr -d '\r' || true)"
+[[ "$root_id" == "0" ]] || fail "adb shell cannot obtain uid 0 through su"
+root_shell "test -x '$MODULE_STATUS_SCRIPT'" || fail "pogo-root-automation Magisk module is not installed/enabled"
+
+package_name=
+for candidate in "$GOOGLE_PACKAGE" "$GALAXY_PACKAGE"; do
+  package_path="$(adb shell pm path "$candidate" 2>/dev/null | head -n 1 | tr -d '\r' || true)"
+  if [[ "$package_path" == package:* ]]; then package_name="$candidate"; break; fi
+done
+[[ -n "$package_name" ]] || fail "official Pokémon GO package not found"
+
+adb shell monkey -p "$package_name" -c android.intent.category.LAUNCHER 1 >/dev/null
+
+echo "Waiting up to ${TIMEOUT_SECONDS}s for runtime/native binding probe…"
+start_seconds=$SECONDS
+last_status=
+while (( SECONDS - start_seconds < TIMEOUT_SECONDS )); do
+  status="$(runtime_status)"
+  last_status="$status"
+  runtime_state="$(printf '%s\n' "$status" | read_field runtime_state)"
+  probe_state="$(printf '%s\n' "$status" | read_field probe_state)"
+  native_probe_state="$(printf '%s\n' "$status" | read_field native_probe_state)"
+
+  if [[ "$runtime_state" == "connected" && "$probe_state" == "ready" && "$native_probe_state" == "complete" ]]; then
+    strategy="$(printf '%s\n' "$status" | read_field binding_strategy)"
+    resolved="$(printf '%s\n' "$status" | read_field native_il2cpp_symbol_count)"
+    required="$(printf '%s\n' "$status" | read_field native_il2cpp_required_symbol_count)"
+    survey_state="$(printf '%s\n' "$status" | read_field native_assembly_survey_state)"
+    class_survey_state="$(printf '%s\n' "$status" | read_field native_class_survey_state)"
+    candidates="$(printf '%s\n' "$status" | read_field native_candidate_classes)"
+
+    echo "PASS: binding probe complete"
+    echo "  engine=$(printf '%s\n' "$status" | read_field binding_engine)"
+    echo "  strategy=$strategy"
+    echo "  il2cpp_symbols=${resolved:-0} resolved / ${required:-0} core required"
+    echo "  assembly_survey=${survey_state:-unavailable}"
+    echo "  assembly_count=$(printf '%s\n' "$status" | read_field native_assembly_count)"
+    echo "  assembly_csharp_found=$(printf '%s\n' "$status" | read_field native_assembly_csharp_found)"
+    echo "  class_survey=${class_survey_state:-unavailable}"
+    echo "  class_count=$(printf '%s\n' "$status" | read_field native_class_count)"
+    echo "  candidate_class_count=$(printf '%s\n' "$status" | read_field native_candidate_class_count)"
+    [[ -n "$candidates" ]] && echo "  candidate_classes=$candidates"
+    echo "  primary_abi=$(printf '%s\n' "$status" | read_field device_primary_abi)"
+    echo "  kernel_machine=$(printf '%s\n' "$status" | read_field kernel_machine)"
+    echo "  translation_layer=$(printf '%s\n' "$status" | read_field translation_layer)"
+    echo "  libil2cpp=$(printf '%s\n' "$status" | read_field libil2cpp_path)"
+    exit 0
+  fi
+
+  [[ "$runtime_state" == "connected" && "$probe_state" == "unity_loaded" ]] && echo "INFO: Unity loaded; waiting for IL2CPP"
+  sleep 1
+done
+
+echo "Last runtime status:" >&2
+printf '%s\n' "$last_status" >&2
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if "$script_dir/collect-binding-diagnostics.sh" "$DIAGNOSTICS_OUTPUT"; then echo "Diagnostics written to $DIAGNOSTICS_OUTPUT" >&2; fi
+fail "native binding probe did not complete before timeout"

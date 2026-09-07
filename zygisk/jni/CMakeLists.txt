@@ -15,4 +15,4 @@ target_include_directories(
 
 target_compile_features(pogo_root_automation PRIVATE cxx_std_17)
 target_compile_options(pogo_root_automation PRIVATE -Wall -Wextra -Werror)
-target_link_libraries(pogo_root_automation log)
+target_link_libraries(pogo_root_automation log dl)

@@ -8,6 +8,7 @@ import android.os.Looper
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.pogoroot.automation.bridge.BindingProbeState
 import dev.pogoroot.automation.bridge.RuntimeConnectionState
 import dev.pogoroot.automation.bridge.RuntimeSnapshot
 import dev.pogoroot.automation.core.time.CountdownService
@@ -40,8 +41,6 @@ class MainActivity : Activity() {
                 handler.post {
                     if (!isFinishing && !isDestroyed) {
                         renderRuntime(snapshot)
-                        // Schedule from completion, not from start. A slow or blocked
-                        // root grant can therefore never build an unbounded work queue.
                         handler.postDelayed(runtimeTick, 2_000L)
                     }
                 }
@@ -124,6 +123,43 @@ class MainActivity : Activity() {
                     append("\n  game: $version")
                     snapshot.gameVersionCode?.let { append(" ($it)") }
                 }
+
+                append("\n  binding: ")
+                append(
+                    when (snapshot.bindingProbeState) {
+                        BindingProbeState.READY -> "ready"
+                        BindingProbeState.UNITY_LOADED -> "Unity loaded / backend unresolved"
+                        BindingProbeState.WAITING -> "waiting for native game modules"
+                        BindingProbeState.NOT_RUNNING -> "not running"
+                        BindingProbeState.UNKNOWN -> "unknown"
+                    },
+                )
+                snapshot.bindingEngine?.let { append(" [$it]") }
+                snapshot.bindingStrategy?.let { append("\n  strategy: $it") }
+
+                snapshot.nativeProbeState?.let { state ->
+                    append("\n  native probe: $state")
+                    if (state == "complete") {
+                        append(
+                            " / IL2CPP symbols=${snapshot.il2cppSymbolCount}" +
+                                "/${snapshot.il2cppRequiredSymbolCount}",
+                        )
+                    }
+                }
+
+                snapshot.assemblySurveyState?.let { state ->
+                    append("\n  assemblies: $state")
+                    if (state == "complete") {
+                        append(" / count=${snapshot.assemblyCount}")
+                        append(" / Assembly-CSharp=${snapshot.assemblyCSharpFound}")
+                    }
+                }
+
+                snapshot.devicePrimaryAbi?.let { append("\n  abi: $it") }
+                snapshot.kernelMachine?.let { append(" / kernel=$it") }
+                snapshot.translationLayer?.let { append("\n  translation: $it") }
+                snapshot.nativeBridge?.let { append(" / bridge=$it") }
+                snapshot.il2cppPath?.let { append("\n  il2cpp: ${it.substringAfterLast('/')}") }
             }
             RuntimeConnectionState.DISCONNECTED -> "○ Root runtime: game process stopped"
             RuntimeConnectionState.NOT_SEEN -> "○ Root runtime: waiting for Pokémon GO"
