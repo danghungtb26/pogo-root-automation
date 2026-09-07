@@ -103,6 +103,7 @@ object MaintenanceSnapshotParser {
                 legendary = parts[7] == "1",
                 mythical = parts[8] == "1",
                 specialBackground = parts[9] == "1",
+                transferMetadataComplete = parts.getOrNull(10) == "1",
             )
         }
     }
