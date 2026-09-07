@@ -35,6 +35,7 @@ jobs:
           bash -n scripts/binding-probe-test.sh
           bash -n scripts/collect-binding-diagnostics.sh
           bash -n scripts/vendor-pogoenhancer-libs.sh
+          bash -n scripts/headless-control.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
