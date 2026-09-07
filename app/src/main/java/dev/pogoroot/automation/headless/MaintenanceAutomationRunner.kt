@@ -35,7 +35,7 @@ class MaintenanceAutomationRunner(
             val inventory = snapshot.inventory ?: error("inventory snapshot unavailable")
             val actions = inventoryPlanner.plan(inventory, policy.inventoryPolicy)
             actions.take(MAX_DISCARD_ACTIONS_PER_PASS).forEach { action ->
-                runtime.execute(action).getOrThrow()
+                runtime.execute(action, config).getOrThrow()
                 discardedStacks += 1
                 discardedItems += action.amount
                 eventSink.publish(
@@ -52,7 +52,7 @@ class MaintenanceAutomationRunner(
             val storage = snapshot.storage ?: error("Pokemon storage snapshot unavailable")
             val actions = transferPlanner.plan(storage, policy.transferPolicy)
             actions.take(MAX_TRANSFER_ACTIONS_PER_PASS).forEach { action ->
-                runtime.execute(action).getOrThrow()
+                runtime.execute(action, config).getOrThrow()
                 transferredPokemon += 1
                 eventSink.publish(
                     AutomationEvent(
