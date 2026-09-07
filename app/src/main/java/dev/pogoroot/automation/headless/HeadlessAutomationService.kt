@@ -18,7 +18,10 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        engine = HeadlessAutomationEngine(configRepository)
+        engine = HeadlessAutomationEngine(
+            configRepository = configRepository,
+            eventSink = ToastAutomationEventSink(this, configRepository),
+        )
         apiServer = AutomationControlServer(configRepository, engine)
 
         createNotificationChannel()

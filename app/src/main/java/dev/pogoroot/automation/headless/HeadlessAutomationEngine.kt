@@ -28,6 +28,7 @@ class HeadlessAutomationEngine(
     private val screenCapture: RootScreenCapture = RootScreenCapture(),
     private val analyzer: GameScreenAnalyzer = GameScreenAnalyzer(),
     private val uiDriver: RootUiDriver = RootUiDriver(ProcessRootShell()),
+    private val eventSink: AutomationEventSink = AutomationEventSink { },
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val loopActive = AtomicBoolean(false)
@@ -38,6 +39,7 @@ class HeadlessAutomationEngine(
     private val sweeps = AtomicLong(0)
     private var sweepIndex = 0
     private var lastActionAt = 0L
+    private var berryAppliedForCurrentEncounter = false
 
     fun start() {
         if (!loopActive.compareAndSet(false, true)) return
@@ -65,10 +67,12 @@ class HeadlessAutomationEngine(
 
     fun manualCatch(): Result<Unit> = withCurrentScreen { bitmap, config ->
         if (!performCatch(bitmap, config)) error("root catch swipe failed")
+        publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
     }
 
     fun manualSpin(): Result<Unit> = withCurrentScreen { bitmap, config ->
         if (!performSpin(bitmap, config)) error("root spin swipe failed")
+        publish(AutomationEventType.SPUN, "PokéStop spun")
     }
 
     private fun runLoop() {
@@ -76,12 +80,7 @@ class HeadlessAutomationEngine(
             val config = configRepository.read()
             if (!config.enabled) {
                 status.updateAndGet {
-                    it.copy(
-                        running = true,
-                        enabled = false,
-                        lastAction = "idle",
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                    )
+                    it.copy(running = true, enabled = false, lastAction = "idle", updatedAtEpochMs = System.currentTimeMillis())
                 }
                 sleepInterruptibly(700L)
                 continue
@@ -89,6 +88,7 @@ class HeadlessAutomationEngine(
 
             val foreground = runCatching { uiDriver.isPokemonGoForeground() }.getOrDefault(false)
             if (!foreground) {
+                berryAppliedForCurrentEncounter = false
                 status.updateAndGet {
                     it.copy(
                         running = true,
@@ -115,6 +115,9 @@ class HeadlessAutomationEngine(
             try {
                 frames.incrementAndGet()
                 val analysis = analyzer.analyze(bitmap)
+                if (analysis.state != GameScreenState.ENCOUNTER) {
+                    berryAppliedForCurrentEncounter = false
+                }
                 status.updateAndGet {
                     it.copy(
                         running = true,
@@ -130,9 +133,18 @@ class HeadlessAutomationEngine(
 
                 when {
                     config.autoCatch && analysis.state == GameScreenState.ENCOUNTER -> {
+                        if (config.berryMode != BerryMode.NONE && !berryAppliedForCurrentEncounter) {
+                            if (performBerry(bitmap, config.berryMode)) {
+                                berryAppliedForCurrentEncounter = true
+                                markAction("berry-${config.berryMode.name.lowercase()}")
+                                publish(AutomationEventType.BERRY_USED, "${berryLabel(config.berryMode)} used")
+                                sleepInterruptibly(550L)
+                            }
+                        }
                         if (actionReady(config) && performCatch(bitmap, config)) {
                             catches.incrementAndGet()
                             markAction("catch-throw")
+                            publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
                             sleepInterruptibly(config.catchResultDelayMs)
                         }
                     }
@@ -141,6 +153,7 @@ class HeadlessAutomationEngine(
                         if (actionReady(config) && performSpin(bitmap, config)) {
                             spins.incrementAndGet()
                             markAction("spin-pokestop")
+                            publish(AutomationEventType.SPUN, "PokéStop spun")
                             sleepInterruptibly(config.spinResultDelayMs)
                         }
                     }
@@ -177,10 +190,18 @@ class HeadlessAutomationEngine(
         val next = screenCapture.capture().getOrNull() ?: return
         try {
             val analysis = analyzer.analyze(next)
-            if (analysis.state == GameScreenState.ENCOUNTER && performCatch(next, config)) {
-                catches.incrementAndGet()
-                markAction("catch-throw")
-                sleepInterruptibly(config.catchResultDelayMs)
+            if (analysis.state == GameScreenState.ENCOUNTER) {
+                if (config.berryMode != BerryMode.NONE && !berryAppliedForCurrentEncounter && performBerry(next, config.berryMode)) {
+                    berryAppliedForCurrentEncounter = true
+                    publish(AutomationEventType.BERRY_USED, "${berryLabel(config.berryMode)} used")
+                    sleepInterruptibly(550L)
+                }
+                if (performCatch(next, config)) {
+                    catches.incrementAndGet()
+                    markAction("catch-throw")
+                    publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
+                    sleepInterruptibly(config.catchResultDelayMs)
+                }
             }
         } finally {
             next.recycle()
@@ -194,11 +215,30 @@ class HeadlessAutomationEngine(
             if (analysis.state == GameScreenState.POKESTOP_DETAIL && performSpin(next, config)) {
                 spins.incrementAndGet()
                 markAction("spin-pokestop")
+                publish(AutomationEventType.SPUN, "PokéStop spun")
                 sleepInterruptibly(config.spinResultDelayMs)
             }
         } finally {
             next.recycle()
         }
+    }
+
+    private fun performBerry(bitmap: Bitmap, mode: BerryMode): Boolean {
+        if (mode == BerryMode.NONE) return true
+        if (!uiDriver.tapNormalized(bitmap.width, bitmap.height, 0.17, 0.88)) return false
+        sleepInterruptibly(350L)
+
+        val slotX = when (mode) {
+            BerryMode.RAZZ -> 0.22
+            BerryMode.NANAB -> 0.36
+            BerryMode.PINAP -> 0.50
+            BerryMode.GOLDEN_RAZZ -> 0.66
+            BerryMode.SILVER_PINAP -> 0.80
+            BerryMode.NONE -> return true
+        }
+        if (!uiDriver.tapNormalized(bitmap.width, bitmap.height, slotX, 0.84)) return false
+        sleepInterruptibly(250L)
+        return uiDriver.tapNormalized(bitmap.width, bitmap.height, 0.50, 0.46)
     }
 
     private fun performCatch(bitmap: Bitmap, config: HeadlessAutomationConfig): Boolean {
@@ -246,21 +286,26 @@ class HeadlessAutomationEngine(
     private fun markAction(action: String) {
         lastActionAt = System.currentTimeMillis()
         status.updateAndGet {
-            it.copy(
-                lastAction = action,
-                lastError = null,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
+            it.copy(lastAction = action, lastError = null, updatedAtEpochMs = System.currentTimeMillis())
         }
     }
 
     private fun recordError(message: String) {
-        status.updateAndGet {
-            it.copy(
-                lastError = message,
-                updatedAtEpochMs = System.currentTimeMillis(),
-            )
-        }
+        status.updateAndGet { it.copy(lastError = message, updatedAtEpochMs = System.currentTimeMillis()) }
+        publish(AutomationEventType.ERROR, message)
+    }
+
+    private fun publish(type: AutomationEventType, message: String) {
+        eventSink.publish(AutomationEvent(type, message))
+    }
+
+    private fun berryLabel(mode: BerryMode): String = when (mode) {
+        BerryMode.NONE -> "Berry"
+        BerryMode.RAZZ -> "Razz Berry"
+        BerryMode.NANAB -> "Nanab Berry"
+        BerryMode.PINAP -> "Pinap Berry"
+        BerryMode.GOLDEN_RAZZ -> "Golden Razz Berry"
+        BerryMode.SILVER_PINAP -> "Silver Pinap Berry"
     }
 
     private fun withCurrentScreen(block: (Bitmap, HeadlessAutomationConfig) -> Unit): Result<Unit> = runCatching {

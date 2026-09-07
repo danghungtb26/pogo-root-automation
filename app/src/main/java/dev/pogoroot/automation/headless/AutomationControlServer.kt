@@ -18,8 +18,7 @@ class AutomationControlServer(
     private val running = AtomicBoolean(false)
     private val acceptExecutor = Executors.newSingleThreadExecutor()
     private val clientExecutor = Executors.newCachedThreadPool()
-    @Volatile
-    private var serverSocket: ServerSocket? = null
+    @Volatile private var serverSocket: ServerSocket? = null
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
@@ -74,49 +73,46 @@ class AutomationControlServer(
     }
 
     private fun route(method: String, path: String, params: Map<String, String>): ApiResponse = when {
-        method == "GET" && (path == "/health" || path == "/v1/health") ->
-            ApiResponse(200, "{\"ok\":true}")
-
-        method == "GET" && path == "/v1/status" ->
-            ApiResponse(200, statusJson(engine.snapshot(), configRepository.read()))
-
+        method == "GET" && (path == "/health" || path == "/v1/health") -> ApiResponse(200, "{\"ok\":true}")
+        method == "GET" && path == "/v1/status" -> ApiResponse(200, statusJson(engine.snapshot(), configRepository.read()))
         method == "POST" && path == "/v1/start" -> {
             val config = configRepository.update { current -> applyParams(current, params).copy(enabled = true) }
             engine.start()
             ApiResponse(200, statusJson(engine.snapshot(), config))
         }
-
         method == "POST" && path == "/v1/stop" -> {
             val config = configRepository.update { it.copy(enabled = false) }
             ApiResponse(200, statusJson(engine.snapshot(), config))
         }
-
         method == "POST" && path == "/v1/config" -> {
             val config = configRepository.update { current -> applyParams(current, params) }
             engine.start()
             ApiResponse(200, configJson(config))
         }
-
         method == "POST" && path == "/v1/actions/catch" -> {
             engine.manualCatch().getOrThrow()
             ApiResponse(200, "{\"ok\":true,\"action\":\"catch\"}")
         }
-
         method == "POST" && path == "/v1/actions/spin" -> {
             engine.manualSpin().getOrThrow()
             ApiResponse(200, "{\"ok\":true,\"action\":\"spin\"}")
         }
-
         else -> ApiResponse(404, jsonError("not found"))
     }
 
-    private fun applyParams(
-        config: HeadlessAutomationConfig,
-        params: Map<String, String>,
-    ): HeadlessAutomationConfig = config.copy(
+    private fun applyParams(config: HeadlessAutomationConfig, params: Map<String, String>): HeadlessAutomationConfig = config.copy(
         autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
         autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
         encounterSweep = params.boolean("encounterSweep") ?: config.encounterSweep,
+        autoDiscard = params.boolean("autoDiscard") ?: config.autoDiscard,
+        autoTransfer = params.boolean("autoTransfer") ?: config.autoTransfer,
+        transferKeepHundo = params.boolean("keepHundo") ?: config.transferKeepHundo,
+        transferKeepShiny = params.boolean("keepShiny") ?: config.transferKeepShiny,
+        transferKeepSpecialBackground = params.boolean("keepBackground") ?: config.transferKeepSpecialBackground,
+        transferKeepFavorite = params.boolean("keepFavorite") ?: config.transferKeepFavorite,
+        transferMinimumIvPercent = params["transferMinIv"]?.toDoubleOrNull()?.coerceIn(0.0, 100.0) ?: config.transferMinimumIvPercent,
+        berryMode = params["berry"]?.let(::parseBerry) ?: config.berryMode,
+        showActionToasts = params.boolean("toasts") ?: config.showActionToasts,
         loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
         catchThrowDurationMs = params["catchThrowDurationMs"]?.toIntOrNull() ?: config.catchThrowDurationMs,
         catchResultDelayMs = params["catchResultDelayMs"]?.toLongOrNull() ?: config.catchResultDelayMs,
@@ -126,18 +122,20 @@ class AutomationControlServer(
         actionCooldownMs = params["actionCooldownMs"]?.toLongOrNull() ?: config.actionCooldownMs,
     )
 
+    private fun parseBerry(raw: String): BerryMode = runCatching {
+        BerryMode.valueOf(raw.trim().uppercase().replace('-', '_').replace(' ', '_'))
+    }.getOrDefault(BerryMode.NONE)
+
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
         return query.split('&').mapNotNull { pair ->
             val key = pair.substringBefore('=', "").trim()
             if (key.isEmpty()) return@mapNotNull null
-            val value = pair.substringAfter('=', "")
-            decode(key) to decode(value)
+            decode(key) to decode(pair.substringAfter('=', ""))
         }.toMap()
     }
 
-    private fun decode(value: String): String =
-        URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+    private fun decode(value: String): String = URLDecoder.decode(value, StandardCharsets.UTF_8.name())
 
     private fun Map<String, String>.boolean(key: String): Boolean? = when (this[key]?.lowercase()) {
         "1", "true", "yes", "on" -> true
@@ -164,23 +162,20 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"encounterSweepTaps":${status.encounterSweepTaps},"screenWidth":${status.screenWidth ?: "null"},"screenHeight":${status.screenHeight ?: "null"},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"loopIntervalMs":${config.loopIntervalMs},"catchThrowDurationMs":${config.catchThrowDurationMs},"catchResultDelayMs":${config.catchResultDelayMs},"spinOpenDelayMs":${config.spinOpenDelayMs},"spinSwipeDurationMs":${config.spinSwipeDurationMs},"spinResultDelayMs":${config.spinResultDelayMs},"actionCooldownMs":${config.actionCooldownMs}}
+        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts}}
     """.trimIndent()
 
-    private fun String?.jsonStringOrNull(): String =
-        this?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\"" } ?: "null"
+    private fun String?.jsonStringOrNull(): String = this?.let {
+        "\"${it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\""
+    } ?: "null"
 
-    private fun jsonError(message: String): String =
-        "{\"ok\":false,\"error\":${message.jsonStringOrNull()}}"
+    private fun jsonError(message: String): String = "{\"ok\":false,\"error\":${message.jsonStringOrNull()}}"
 
-    private data class ApiResponse(
-        val status: Int,
-        val body: String,
-    )
+    private data class ApiResponse(val status: Int, val body: String)
 
     companion object {
         const val DEFAULT_PORT = 8765
