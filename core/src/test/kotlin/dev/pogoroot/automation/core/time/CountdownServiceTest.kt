@@ -42,6 +42,21 @@ class CountdownServiceTest {
         assertFalse(countdown.isExpired)
     }
 
+    @Test
+    fun `samples clock once so remaining and expiry state stay consistent`() {
+        var calls = 0
+        val service = CountdownService {
+            calls += 1
+            now
+        }
+
+        val countdown = service.forSpawn(spawn(expiresAt = now + 1L))
+
+        assertEquals(1, calls)
+        assertEquals(1L, countdown.remainingMillis)
+        assertFalse(countdown.isExpired)
+    }
+
     private fun spawn(
         expiresAt: Long?,
         confidence: SpawnExpiryConfidence = SpawnExpiryConfidence.EXACT,
