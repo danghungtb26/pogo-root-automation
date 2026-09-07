@@ -42,7 +42,7 @@ class HeadlessAutomationEngine(
     fun start() {
         if (!loopActive.compareAndSet(false, true)) return
         status.updateAndGet { it.copy(running = true, updatedAtEpochMs = System.currentTimeMillis()) }
-        executor.execute(::runLoop)
+        executor.execute { runLoop() }
     }
 
     fun stop() {
@@ -103,11 +103,14 @@ class HeadlessAutomationEngine(
                 continue
             }
 
-            val bitmap = screenCapture.capture().getOrElse { error ->
-                recordError("screencap: ${error.message ?: error::class.java.simpleName}")
+            val captureResult = screenCapture.capture()
+            if (captureResult.isFailure) {
+                val error = captureResult.exceptionOrNull()
+                recordError("screencap: ${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}")
                 sleepInterruptibly(config.loopIntervalMs)
                 continue
             }
+            val bitmap = captureResult.getOrThrow()
 
             try {
                 frames.incrementAndGet()
