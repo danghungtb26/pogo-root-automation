@@ -39,6 +39,7 @@ data class RawStoredPokemon(
     val individualDefense: Int? = null,
     val individualStamina: Int? = null,
     val shiny: Boolean = false,
+    val specialBackground: Boolean = false,
     val favorite: Boolean = false,
     val legendary: Boolean = false,
     val mythical: Boolean = false,
