@@ -18,7 +18,11 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        engine = HeadlessAutomationEngine(configRepository)
+        val notifier = AutomationEventNotifier(this, configRepository)
+        engine = HeadlessAutomationEngine(
+            configRepository = configRepository,
+            notifier = notifier,
+        )
         apiServer = AutomationControlServer(configRepository, engine)
 
         createNotificationChannel()
