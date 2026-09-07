@@ -24,9 +24,7 @@ class HeadlessAutomationService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         apiServer.start()
-        if (configRepository.read().enabled) {
-            engine.start()
-        }
+        engine.start()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -44,12 +42,10 @@ class HeadlessAutomationService : Service() {
 
             ACTION_DISABLE -> {
                 configRepository.update { it.copy(enabled = false) }
-                engine.stop()
             }
 
             ACTION_STOP_SERVICE -> {
                 configRepository.update { it.copy(enabled = false) }
-                engine.stop()
                 stopSelf()
             }
         }
@@ -99,7 +95,7 @@ class HeadlessAutomationService : Service() {
             .setContentIntent(openIntent)
             .addAction(
                 Notification.Action.Builder(
-                    null,
+                    android.R.drawable.ic_media_pause,
                     "Disable automation",
                     disableIntent,
                 ).build(),
