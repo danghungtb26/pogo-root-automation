@@ -88,13 +88,12 @@ class AutomationControlServer(
 
         method == "POST" && path == "/v1/stop" -> {
             val config = configRepository.update { it.copy(enabled = false) }
-            engine.stop()
             ApiResponse(200, statusJson(engine.snapshot(), config))
         }
 
         method == "POST" && path == "/v1/config" -> {
             val config = configRepository.update { current -> applyParams(current, params) }
-            if (config.enabled) engine.start()
+            engine.start()
             ApiResponse(200, configJson(config))
         }
 
