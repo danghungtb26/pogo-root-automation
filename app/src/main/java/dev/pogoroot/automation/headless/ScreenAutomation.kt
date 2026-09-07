@@ -183,8 +183,7 @@ class GameScreenAnalyzer {
         val red = r >= 150 && r >= g * 1.25 && r >= b * 1.20
         val blue = b >= 135 && b >= r * 1.18 && b >= g * 1.05
         val yellow = r >= 155 && g >= 130 && b <= 120
-        val dark = r <= 65 && g <= 65 && b <= 65
-        return red || blue || yellow || dark
+        return red || blue || yellow
     }
 
     private fun isPokestopBlue(r: Int, g: Int, b: Int): Boolean {
