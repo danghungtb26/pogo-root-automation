@@ -4,7 +4,7 @@ import dev.pogoroot.automation.core.automation.InventoryPlanner
 import dev.pogoroot.automation.core.automation.TransferPlanner
 
 class MaintenanceAutomationRunner(
-    private val bridge: MaintenanceRuntimeBridge = MaintenanceRuntimeBridge(),
+    private val runtime: MaintenanceRuntime = MaintenanceRuntimeBridge(),
     private val inventoryPlanner: InventoryPlanner = InventoryPlanner(),
     private val transferPlanner: TransferPlanner = TransferPlanner(),
     private val eventSink: AutomationEventSink = AutomationEventSink { },
@@ -16,7 +16,7 @@ class MaintenanceAutomationRunner(
             return@runCatching MaintenanceRunResult()
         }
 
-        val snapshot = bridge.readSnapshot().getOrThrow()
+        val snapshot = runtime.readSnapshot().getOrThrow()
         val now = System.currentTimeMillis()
         check(snapshot.isFresh(now)) { "maintenance snapshot is stale" }
         snapshot.error?.let { error(it) }
@@ -35,7 +35,7 @@ class MaintenanceAutomationRunner(
             val inventory = snapshot.inventory ?: error("inventory snapshot unavailable")
             val actions = inventoryPlanner.plan(inventory, policy.inventoryPolicy)
             actions.take(MAX_DISCARD_ACTIONS_PER_PASS).forEach { action ->
-                bridge.execute(action).getOrThrow()
+                runtime.execute(action).getOrThrow()
                 discardedStacks += 1
                 discardedItems += action.amount
                 eventSink.publish(
@@ -52,7 +52,7 @@ class MaintenanceAutomationRunner(
             val storage = snapshot.storage ?: error("Pokemon storage snapshot unavailable")
             val actions = transferPlanner.plan(storage, policy.transferPolicy)
             actions.take(MAX_TRANSFER_ACTIONS_PER_PASS).forEach { action ->
-                bridge.execute(action).getOrThrow()
+                runtime.execute(action).getOrThrow()
                 transferredPokemon += 1
                 eventSink.publish(
                     AutomationEvent(
