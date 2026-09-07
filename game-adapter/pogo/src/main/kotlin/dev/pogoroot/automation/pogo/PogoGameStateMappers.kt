@@ -101,6 +101,7 @@ class PogoStorageMapper(
             favorite = raw.favorite,
             legendary = raw.legendary,
             mythical = raw.mythical,
+            hasSpecialBackground = raw.hasSpecialBackground,
         )
     }
 }
