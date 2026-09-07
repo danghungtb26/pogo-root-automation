@@ -19,37 +19,39 @@ The local API is a control API for this tool; it is not a direct Niantic/Pokémo
 
 ## Start
 
-Open the controller once after installing the APK. `HeadlessAutomationService` starts and binds its API to loopback only:
+The service binds its API to loopback only:
 
 ```text
 127.0.0.1:8765
 ```
 
-The service is also registered for boot completed so it can come back after an emulator/device reboot. Automation itself stays at its last persisted enabled/disabled state.
+For first install, the host helper can briefly launch the controller activity to bootstrap the foreground service and then control it entirely over ADB-forwarded HTTP:
+
+```bash
+bash scripts/headless-control.sh bootstrap
+```
+
+The service is also registered for `BOOT_COMPLETED`, so after it has been installed it can come back after a normal emulator/device reboot. Automation itself stays at its last persisted enabled/disabled state.
 
 ## Control from the host
 
-Forward the loopback API through ADB:
+The helper automatically establishes:
 
 ```bash
 adb forward tcp:8765 tcp:8765
 ```
 
-Then:
+Common commands:
 
 ```bash
-curl http://127.0.0.1:8765/v1/status
-curl -X POST 'http://127.0.0.1:8765/v1/start?catch=true&spin=true&encounterSweep=true'
-curl -X POST http://127.0.0.1:8765/v1/stop
-```
-
-Or use:
-
-```bash
+bash scripts/headless-control.sh bootstrap
 bash scripts/headless-control.sh status
 bash scripts/headless-control.sh start
+bash scripts/headless-control.sh game
 bash scripts/headless-control.sh stop
 ```
+
+`start` enables auto-catch, auto-spin and the encounter sweep. `game` brings Pokémon GO to foreground. After that the controller UI can remain hidden/backgrounded.
 
 Manual executor smoke tests:
 
@@ -116,4 +118,4 @@ These are useful for calibrating a BlueStacks resolution before enabling the ful
 
 The current executor is resolution-independent by using normalized coordinates, but screen recognition is heuristic and needs real-device/BlueStacks calibration. The controller can stay in the background, but Pokémon GO must stay foreground because the executor currently uses root `screencap` plus Android `input tap/swipe`.
 
-The longer-term runtime path is to replace this screen driver with the PogoEnhancer-style injected executor: observe game objects/RPC data and invoke encounter/spin/catch game methods directly. The local control API and automation policy can remain unchanged when that executor is introduced.
+The longer-term runtime path is to replace this screen driver with the PogoEnhancer-style injected executor: observe game objects/RPC data and invoke encounter/spin/catch game methods directly. PogoEnhancer's auto-spin, for example, calls the game's interactive-mode/search-RPC functions once a stop is active, in range and off cooldown. The local control API and automation policy can remain unchanged when that executor is introduced.
