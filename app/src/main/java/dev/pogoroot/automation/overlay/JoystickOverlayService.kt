@@ -25,6 +25,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
@@ -48,10 +49,12 @@ class JoystickOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var controller: JoystickLocationController
+    private lateinit var automationConfigRepository: AutomationConfigRepository
     private lateinit var rootView: LinearLayout
     private lateinit var windowParams: WindowManager.LayoutParams
     private lateinit var statusView: TextView
     private lateinit var locationView: TextView
+    private lateinit var automationView: TextView
     private lateinit var speedButton: Button
 
     private var controllerStarted = false
@@ -61,6 +64,7 @@ class JoystickOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
+        automationConfigRepository = AutomationConfigRepository(this)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
@@ -77,6 +81,7 @@ class JoystickOverlayService : Service() {
         }
 
         ensureOverlay()
+        renderAutomationSummary()
         if (!controllerStarted) {
             controllerStarted = true
             controller.start(loadSavedPoint())
@@ -116,6 +121,12 @@ class JoystickOverlayService : Service() {
             typeface = android.graphics.Typeface.MONOSPACE
             text = "Teleport to a location first"
         }
+        automationView = TextView(this).apply {
+            setTextColor(0xFFB3E5FC.toInt())
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, padding / 3, 0, padding / 3)
+        }
 
         val header = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -147,6 +158,17 @@ class JoystickOverlayService : Service() {
             }
         }
 
+        val settingsButton = Button(this).apply {
+            text = "Automation ⚙"
+            setOnClickListener {
+                AutomationSettingsOverlay(
+                    context = this@JoystickOverlayService,
+                    repository = automationConfigRepository,
+                ).show()
+                mainHandler.postDelayed(::renderAutomationSummary, 500L)
+            }
+        }
+
         val teleportButton = Button(this).apply {
             text = "Teleport"
             setOnClickListener { showTeleportDialog() }
@@ -173,8 +195,10 @@ class JoystickOverlayService : Service() {
             addView(header)
             addView(statusView)
             addView(locationView)
+            addView(automationView)
             addView(joystick)
             addView(speedButton)
+            addView(settingsButton)
             addView(actions)
         }
 
@@ -198,6 +222,20 @@ class JoystickOverlayService : Service() {
 
         makeDraggable(header)
         windowManager.addView(rootView, windowParams)
+        renderAutomationSummary()
+    }
+
+    private fun renderAutomationSummary() {
+        if (!::automationView.isInitialized) return
+        val config = automationConfigRepository.read()
+        automationView.text = buildString {
+            append(if (config.enabled) "AUTO ON" else "AUTO OFF")
+            append(" · Catch ${config.autoCatch.onOff()}")
+            append(" · Spin ${config.autoSpin.onOff()}")
+            append("\nBerry ${config.autoBerry.onOff()}")
+            append(" · Discard ${config.autoDiscard.onOff()}")
+            append(" · Transfer ${config.autoTransfer.onOff()}")
+        }
     }
 
     private fun makeDraggable(handle: View) {
@@ -354,11 +392,13 @@ class JoystickOverlayService : Service() {
         return builder
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PoGo built-in joystick")
-            .setContentText("Location overlay is active")
+            .setContentText("Location + automation overlay is active")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
+
+    private fun Boolean.onOff(): String = if (this) "ON" else "OFF"
 
     private fun Double.formatSpeed(): String = if (this % 1.0 == 0.0) {
         toInt().toString()
