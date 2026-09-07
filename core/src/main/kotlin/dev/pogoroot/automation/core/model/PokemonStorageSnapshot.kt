@@ -6,6 +6,7 @@ data class StoredPokemon(
     val speciesName: String,
     val iv: PokemonIv? = null,
     val shiny: Boolean = false,
+    val specialBackground: Boolean = false,
     val favorite: Boolean = false,
     val legendary: Boolean = false,
     val mythical: Boolean = false,
