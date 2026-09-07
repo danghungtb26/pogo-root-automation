@@ -10,15 +10,16 @@ class TransferPlannerTest {
     private val planner = TransferPlanner()
 
     @Test
-    fun `protects shiny hundo favorite legendary and mythical pokemon`() {
+    fun `protects shiny hundo background favorite legendary and mythical pokemon`() {
         val storage = PokemonStorageSnapshot(
             observedAtEpochMs = 1_000L,
-            usedSlots = 6,
+            usedSlots = 7,
             capacity = 100,
             pokemon = listOf(
                 pokemon("normal-low", iv = PokemonIv(1, 1, 1)),
                 pokemon("shiny-low", iv = PokemonIv(1, 1, 1), shiny = true),
                 pokemon("hundo", iv = PokemonIv(15, 15, 15)),
+                pokemon("background-low", iv = PokemonIv(1, 1, 1), specialBackground = true),
                 pokemon("favorite-low", iv = PokemonIv(1, 1, 1), favorite = true),
                 pokemon("legendary-low", iv = PokemonIv(1, 1, 1), legendary = true),
                 pokemon("mythical-low", iv = PokemonIv(1, 1, 1), mythical = true),
@@ -35,6 +36,7 @@ class TransferPlannerTest {
         id: String,
         iv: PokemonIv,
         shiny: Boolean = false,
+        specialBackground: Boolean = false,
         favorite: Boolean = false,
         legendary: Boolean = false,
         mythical: Boolean = false,
@@ -44,6 +46,7 @@ class TransferPlannerTest {
         speciesName = "Pikachu",
         iv = iv,
         shiny = shiny,
+        specialBackground = specialBackground,
         favorite = favorite,
         legendary = legendary,
         mythical = mythical,
