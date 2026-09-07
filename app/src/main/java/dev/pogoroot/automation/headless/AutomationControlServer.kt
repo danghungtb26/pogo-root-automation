@@ -1,0 +1,189 @@
+package dev.pogoroot.automation.headless
+
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.net.InetAddress
+import java.net.ServerSocket
+import java.net.Socket
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+class AutomationControlServer(
+    private val configRepository: AutomationConfigRepository,
+    private val engine: HeadlessAutomationEngine,
+    private val port: Int = DEFAULT_PORT,
+) {
+    private val running = AtomicBoolean(false)
+    private val acceptExecutor = Executors.newSingleThreadExecutor()
+    private val clientExecutor = Executors.newCachedThreadPool()
+    @Volatile
+    private var serverSocket: ServerSocket? = null
+
+    fun start() {
+        if (!running.compareAndSet(false, true)) return
+        acceptExecutor.execute {
+            try {
+                ServerSocket(port, 16, InetAddress.getByName("127.0.0.1")).use { server ->
+                    serverSocket = server
+                    while (running.get()) {
+                        val socket = runCatching { server.accept() }.getOrNull() ?: break
+                        clientExecutor.execute { handle(socket) }
+                    }
+                }
+            } finally {
+                serverSocket = null
+                running.set(false)
+            }
+        }
+    }
+
+    fun stop() {
+        running.set(false)
+        runCatching { serverSocket?.close() }
+        acceptExecutor.shutdownNow()
+        clientExecutor.shutdownNow()
+    }
+
+    private fun handle(socket: Socket) {
+        socket.use { client ->
+            client.soTimeout = 3_000
+            val reader = BufferedReader(InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8))
+            val requestLine = reader.readLine() ?: return
+            val parts = requestLine.split(' ')
+            if (parts.size < 2) {
+                respond(client, 400, jsonError("invalid request"))
+                return
+            }
+
+            val method = parts[0].uppercase()
+            val target = parts[1]
+            while (true) {
+                val line = reader.readLine() ?: break
+                if (line.isEmpty()) break
+            }
+
+            val path = target.substringBefore('?')
+            val params = parseQuery(target.substringAfter('?', ""))
+            val response = runCatching { route(method, path, params) }.getOrElse { error ->
+                ApiResponse(500, jsonError(error.message ?: error::class.java.simpleName))
+            }
+            respond(client, response.status, response.body)
+        }
+    }
+
+    private fun route(method: String, path: String, params: Map<String, String>): ApiResponse = when {
+        method == "GET" && (path == "/health" || path == "/v1/health") ->
+            ApiResponse(200, "{\"ok\":true}")
+
+        method == "GET" && path == "/v1/status" ->
+            ApiResponse(200, statusJson(engine.snapshot(), configRepository.read()))
+
+        method == "POST" && path == "/v1/start" -> {
+            val config = configRepository.update { current -> applyParams(current, params).copy(enabled = true) }
+            engine.start()
+            ApiResponse(200, statusJson(engine.snapshot(), config))
+        }
+
+        method == "POST" && path == "/v1/stop" -> {
+            val config = configRepository.update { it.copy(enabled = false) }
+            engine.stop()
+            ApiResponse(200, statusJson(engine.snapshot(), config))
+        }
+
+        method == "POST" && path == "/v1/config" -> {
+            val config = configRepository.update { current -> applyParams(current, params) }
+            if (config.enabled) engine.start()
+            ApiResponse(200, configJson(config))
+        }
+
+        method == "POST" && path == "/v1/actions/catch" -> {
+            engine.manualCatch().getOrThrow()
+            ApiResponse(200, "{\"ok\":true,\"action\":\"catch\"}")
+        }
+
+        method == "POST" && path == "/v1/actions/spin" -> {
+            engine.manualSpin().getOrThrow()
+            ApiResponse(200, "{\"ok\":true,\"action\":\"spin\"}")
+        }
+
+        else -> ApiResponse(404, jsonError("not found"))
+    }
+
+    private fun applyParams(
+        config: HeadlessAutomationConfig,
+        params: Map<String, String>,
+    ): HeadlessAutomationConfig = config.copy(
+        autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
+        autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
+        encounterSweep = params.boolean("encounterSweep") ?: config.encounterSweep,
+        loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
+        catchThrowDurationMs = params["catchThrowDurationMs"]?.toIntOrNull() ?: config.catchThrowDurationMs,
+        catchResultDelayMs = params["catchResultDelayMs"]?.toLongOrNull() ?: config.catchResultDelayMs,
+        spinOpenDelayMs = params["spinOpenDelayMs"]?.toLongOrNull() ?: config.spinOpenDelayMs,
+        spinSwipeDurationMs = params["spinSwipeDurationMs"]?.toIntOrNull() ?: config.spinSwipeDurationMs,
+        spinResultDelayMs = params["spinResultDelayMs"]?.toLongOrNull() ?: config.spinResultDelayMs,
+        actionCooldownMs = params["actionCooldownMs"]?.toLongOrNull() ?: config.actionCooldownMs,
+    )
+
+    private fun parseQuery(query: String): Map<String, String> {
+        if (query.isBlank()) return emptyMap()
+        return query.split('&').mapNotNull { pair ->
+            val key = pair.substringBefore('=', "").trim()
+            if (key.isEmpty()) return@mapNotNull null
+            val value = pair.substringAfter('=', "")
+            decode(key) to decode(value)
+        }.toMap()
+    }
+
+    private fun decode(value: String): String =
+        URLDecoder.decode(value, StandardCharsets.UTF_8.name())
+
+    private fun Map<String, String>.boolean(key: String): Boolean? = when (this[key]?.lowercase()) {
+        "1", "true", "yes", "on" -> true
+        "0", "false", "no", "off" -> false
+        else -> null
+    }
+
+    private fun respond(socket: Socket, status: Int, body: String) {
+        val statusText = when (status) {
+            200 -> "OK"
+            400 -> "Bad Request"
+            404 -> "Not Found"
+            else -> "Internal Server Error"
+        }
+        val bytes = body.toByteArray(StandardCharsets.UTF_8)
+        socket.getOutputStream().buffered().use { output ->
+            output.write("HTTP/1.1 $status $statusText\r\n".toByteArray())
+            output.write("Content-Type: application/json; charset=utf-8\r\n".toByteArray())
+            output.write("Content-Length: ${bytes.size}\r\n".toByteArray())
+            output.write("Connection: close\r\n\r\n".toByteArray())
+            output.write(bytes)
+            output.flush()
+        }
+    }
+
+    private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
+        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"encounterSweepTaps":${status.encounterSweepTaps},"screenWidth":${status.screenWidth ?: "null"},"screenHeight":${status.screenHeight ?: "null"},"port":$port}
+    """.trimIndent()
+
+    private fun configJson(config: HeadlessAutomationConfig): String = """
+        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"loopIntervalMs":${config.loopIntervalMs},"catchThrowDurationMs":${config.catchThrowDurationMs},"catchResultDelayMs":${config.catchResultDelayMs},"spinOpenDelayMs":${config.spinOpenDelayMs},"spinSwipeDurationMs":${config.spinSwipeDurationMs},"spinResultDelayMs":${config.spinResultDelayMs},"actionCooldownMs":${config.actionCooldownMs}}
+    """.trimIndent()
+
+    private fun String?.jsonStringOrNull(): String =
+        this?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\"" } ?: "null"
+
+    private fun jsonError(message: String): String =
+        "{\"ok\":false,\"error\":${message.jsonStringOrNull()}}"
+
+    private data class ApiResponse(
+        val status: Int,
+        val body: String,
+    )
+
+    companion object {
+        const val DEFAULT_PORT = 8765
+    }
+}
