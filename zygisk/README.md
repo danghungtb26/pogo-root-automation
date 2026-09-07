@@ -2,7 +2,12 @@
 
 This directory is the root/instrumentation boundary.
 
-Current implementation intentionally does only one thing: load in app specialization, detect the supported Pokémon GO process names, and log that the target process was seen. It does **not** hook game functions yet.
+The runtime loads in app specialization, detects the supported Pokémon GO
+processes, probes IL2CPP, and starts a companion-owned persistent bridge after
+the probe completes. The bridge publishes a versioned `RuntimeReady` message
+and safely rejects commands while no verified client-owned binding/capability
+is installed. It does **not** invent game method offsets or invoke gameplay
+methods yet.
 
 ## Why this is separate
 
@@ -17,3 +22,12 @@ The automation core must not depend on offsets, symbols, hook frameworks, or a p
 5. Package the resulting ABI library under the Magisk module's `zygisk/` directory using the ABI filename expected by Zygisk.
 
 The official Zygisk sample is the source of truth for API compatibility and packaging conventions.
+
+## Bridge peer authorization
+
+The companion socket is `/data/adb/pogo_root_automation/runtime.sock`. The
+controller registers its Android UID in `controller.uids` through root before
+connecting. The companion checks that file and the peer's `SO_PEERCRED`; an
+unregistered app is rejected. The socket is a transport endpoint only: raw
+observation payloads remain opaque and are decoded in the controller's
+`game-adapter:pogo` module.

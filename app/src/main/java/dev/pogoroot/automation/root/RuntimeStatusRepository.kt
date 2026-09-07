@@ -3,6 +3,7 @@ package dev.pogoroot.automation.root
 import dev.pogoroot.automation.bridge.RuntimeConnectionState
 import dev.pogoroot.automation.bridge.RuntimeSnapshot
 import dev.pogoroot.automation.bridge.RuntimeSnapshotParser
+import dev.pogoroot.automation.adapter.GameBuild
 
 class RuntimeStatusRepository(
     private val rootShell: RootShell = ProcessRootShell(),
@@ -28,4 +29,20 @@ class RuntimeStatusRepository(
 
         return RuntimeSnapshotParser.parse(result.stdout)
     }
+}
+
+fun RuntimeSnapshot.toGameBuild(): GameBuild? = packageName?.let { packageName ->
+    GameBuild(
+        packageName = packageName,
+        versionName = gameVersionName,
+        versionCode = gameVersionCode,
+        engine = bindingEngine,
+        bindingStrategy = bindingStrategy,
+        devicePrimaryAbi = devicePrimaryAbi,
+        kernelMachine = kernelMachine,
+        translationLayer = translationLayer,
+        il2cppBuildId = nativeIl2cppBuildId,
+        metadataHash = nativeMetadataHash,
+        apkDigest = apkDigest,
+    )
 }

@@ -1,19 +1,28 @@
 # Headless auto-catch and PokéStop spin
 
-This mode runs the controller as an Android foreground service. The controller UI does not need to remain visible. Pokémon GO must remain the foreground game for the current root screen-driver implementation.
+This mode runs the controller as an Android foreground service. The service
+defaults to the existing screen automation path, so current headless behavior
+continues to work. The structured-runtime path is an explicit opt-in and does
+not use screenshots or `input tap/swipe` to decide game state.
 
 ## Execution path
 
 ```text
-Pokémon GO foreground
-  -> root screencap
-  -> lightweight screen-state analyzer
-       -> encounter: throw ball with root input swipe
-       -> PokéStop detail: spin disc with root input swipe
-       -> overworld blue stop candidate: tap and verify detail screen
-       -> optional encounter sweep: tap conservative map points and verify encounter
-  -> repeat
+Foreground service
+  -> runtimeMode=screen (default) -> screencap + analyzer + root input
+  -> runtimeMode=structured -> Zygisk runtime + companion broker
+       -> persistent binary bridge
+       -> RuntimeReady / structured observations
+       -> PogoProtoDecoder + PogoGameAdapter
+       -> AutomationRunner (one mutation, await outcome, resync)
+       -> persistent companion command channel
 ```
+
+The native probe-only build currently exposes liveness and a read-only ready
+event; it rejects commands until a verified binding announces the required
+capability. The structured mode is not selected automatically from readiness;
+it must be explicitly configured after live observations and bindings are
+verified.
 
 The local API is a control API for this tool; it is not a direct Niantic/Pokémon GO server API. Direct server RPC would require the live game session/auth/signing stack and is intentionally not used by this implementation.
 
@@ -98,6 +107,8 @@ Supported parameters:
 - `spinSwipeDurationMs`
 - `spinResultDelayMs`
 - `actionCooldownMs`
+- `runtimeMode=screen|structured` (hot-switches the running engine; structured bridge connects only while selected)
+- `buildFingerprints=<comma-separated exact fingerprints>` for structured mutation allowlisting
 
 Example:
 
@@ -112,10 +123,15 @@ POST /v1/actions/catch
 POST /v1/actions/spin
 ```
 
-These are useful for calibrating a BlueStacks resolution before enabling the full loop.
+Manual actions are available in `screen` mode. They are rejected in
+`structured` mode because that mode has no screen/input policy source.
 
 ## Current limitations
 
-The current executor is resolution-independent by using normalized coordinates, but screen recognition is heuristic and needs real-device/BlueStacks calibration. The controller can stay in the background, but Pokémon GO must stay foreground because the executor currently uses root `screencap` plus Android `input tap/swipe`.
-
-The longer-term runtime path is to replace this screen driver with the PogoEnhancer-style injected executor: observe game objects/RPC data and invoke encounter/spin/catch game methods directly. PogoEnhancer's auto-spin, for example, calls the game's interactive-mode/search-RPC functions once a stop is active, in range and off cooldown. The local control API and automation policy can remain unchanged when that executor is introduced.
+The structured path still needs live observation hooks in the injected runtime and
+version-scoped client-owned invokers. Until those are verified, the native broker
+announces no mutation capabilities and the controller remains read-only. Its
+command channel is persistent end-to-end, but currently returns a safe rejection
+for unimplemented bindings. Mutation additionally requires `strongIdentityVerified`
+from the runtime, an exact allowlisted fingerprint, and the action capability.
+The screen path remains the service default.

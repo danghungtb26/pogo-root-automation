@@ -71,6 +71,24 @@ class GameAdapterRegistryTest {
         )
     }
 
+    @Test
+    fun `strong runtime identity is included only when available`() {
+        val build = GameBuild(
+            packageName = "com.nianticlabs.pokemongo",
+            versionName = "1.2.3",
+            versionCode = 123L,
+            engine = "il2cpp",
+            bindingStrategy = "il2cpp_exported_api",
+            il2cppBuildId = "build-id",
+            metadataHash = "metadata-hash",
+        )
+
+        assertEquals(
+            "com.nianticlabs.pokemongo|123|il2cpp|il2cpp_exported_api|unknown-abi|unknown-kernel|native|il2cpp=build-id|metadata=metadata-hash",
+            build.fingerprint(),
+        )
+    }
+
     private fun factory(
         factoryId: String,
         predicate: (GameBuild) -> Boolean,

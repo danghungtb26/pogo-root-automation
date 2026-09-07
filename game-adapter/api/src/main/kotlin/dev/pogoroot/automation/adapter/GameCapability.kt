@@ -11,4 +11,7 @@ enum class GameCapability {
     SPIN,
     DISCARD_ITEM,
     TRANSFER_POKEMON,
+    MOVE,
+    OPEN_ENCOUNTER,
+    USE_BERRY,
 }

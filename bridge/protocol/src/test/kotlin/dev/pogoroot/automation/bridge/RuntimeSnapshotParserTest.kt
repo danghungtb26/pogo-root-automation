@@ -16,6 +16,8 @@ class RuntimeSnapshotParserTest {
             pid=4242
             process=com.nianticlabs.pokemongo
             package=com.nianticlabs.pokemongo
+            runtime_session_id=session-a
+            runtime_message_seq=12
             version_name=0.999.1
             version_code=2026082801
             probe_state=ready
@@ -42,6 +44,8 @@ class RuntimeSnapshotParserTest {
         )
 
         assertEquals(RuntimeConnectionState.CONNECTED, snapshot.state)
+        assertEquals("session-a", snapshot.runtimeSessionId)
+        assertEquals(12L, snapshot.runtimeMessageSeq)
         assertEquals(4, snapshot.protocolVersion)
         assertEquals("il2cpp_exported_api", snapshot.bindingStrategy)
         assertTrue(snapshot.il2cppApiAvailable)

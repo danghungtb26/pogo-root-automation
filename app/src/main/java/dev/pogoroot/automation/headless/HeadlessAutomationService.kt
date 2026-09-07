@@ -9,18 +9,32 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import dev.pogoroot.automation.MainActivity
+import dev.pogoroot.automation.root.RuntimeBridgeClient
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
+    private var runtimeBridge: RuntimeBridgeClient? = null
+    private var structuredController: StructuredAutomationController? = null
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
+        runtimeBridge = RuntimeBridgeClient()
+        structuredController = StructuredAutomationController(
+            bridge = runtimeBridge!!,
+            eventSink = ToastAutomationEventSink(this, configRepository),
+            // A verified fingerprint must be explicitly provisioned per device/build.
+            // Empty means structured observation is available but mutations stay disabled.
+            allowedBuildFingerprintsProvider = {
+                configRepository.read().structuredAllowedBuildFingerprints
+            },
+        )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
             eventSink = ToastAutomationEventSink(this, configRepository),
+            structuredController = structuredController,
         )
         apiServer = AutomationControlServer(configRepository, engine)
 
@@ -60,6 +74,8 @@ class HeadlessAutomationService : Service() {
     override fun onDestroy() {
         apiServer.stop()
         engine.shutdown()
+        structuredController?.stop()
+        runtimeBridge?.disconnect()
         super.onDestroy()
     }
 

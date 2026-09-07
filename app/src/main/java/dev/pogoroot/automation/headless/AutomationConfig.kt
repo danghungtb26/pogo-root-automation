@@ -11,6 +11,11 @@ enum class BerryMode {
     SILVER_PINAP,
 }
 
+enum class AutomationRuntimeMode {
+    SCREEN,
+    STRUCTURED,
+}
+
 data class HeadlessAutomationConfig(
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
@@ -33,6 +38,10 @@ data class HeadlessAutomationConfig(
     val spinSwipeDurationMs: Int = 450,
     val spinResultDelayMs: Long = 1_000L,
     val actionCooldownMs: Long = 1_000L,
+    /** Exact strong fingerprints verified for client-owned mutation. */
+    val structuredAllowedBuildFingerprints: Set<String> = emptySet(),
+    /** SCREEN preserves the existing automation path until structured observations are live. */
+    val runtimeMode: AutomationRuntimeMode = AutomationRuntimeMode.SCREEN,
 ) {
     companion object {
         // Common Poké Ball / berry limits. Users can override these from overlay settings.
@@ -76,6 +85,18 @@ class AutomationConfigRepository(context: Context) {
         spinSwipeDurationMs = prefs.getInt(KEY_SPIN_SWIPE_DURATION, 450).coerceIn(100, 1_500),
         spinResultDelayMs = prefs.getLong(KEY_SPIN_RESULT_DELAY, 1_000L).coerceIn(300L, 5_000L),
         actionCooldownMs = prefs.getLong(KEY_ACTION_COOLDOWN, 1_000L).coerceIn(250L, 10_000L),
+        structuredAllowedBuildFingerprints = prefs.getString(KEY_STRUCTURED_ALLOWLIST, null)
+            .orEmpty()
+            .split(',')
+            .map(String::trim)
+            .filter(String::isNotBlank)
+            .toSet(),
+        runtimeMode = runCatching {
+            AutomationRuntimeMode.valueOf(
+                prefs.getString(KEY_RUNTIME_MODE, AutomationRuntimeMode.SCREEN.name)
+                    ?: AutomationRuntimeMode.SCREEN.name,
+            )
+        }.getOrDefault(AutomationRuntimeMode.SCREEN),
     )
 
     fun update(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig): HeadlessAutomationConfig {
@@ -102,6 +123,11 @@ class AutomationConfigRepository(context: Context) {
             .putInt(KEY_SPIN_SWIPE_DURATION, next.spinSwipeDurationMs.coerceIn(100, 1_500))
             .putLong(KEY_SPIN_RESULT_DELAY, next.spinResultDelayMs.coerceIn(300L, 5_000L))
             .putLong(KEY_ACTION_COOLDOWN, next.actionCooldownMs.coerceIn(250L, 10_000L))
+            .putString(KEY_STRUCTURED_ALLOWLIST, next.structuredAllowedBuildFingerprints
+                .filter(String::isNotBlank)
+                .sorted()
+                .joinToString(","))
+            .putString(KEY_RUNTIME_MODE, next.runtimeMode.name)
             .apply()
         return read()
     }
@@ -143,5 +169,7 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_SPIN_SWIPE_DURATION = "spin_swipe_duration_ms"
         private const val KEY_SPIN_RESULT_DELAY = "spin_result_delay_ms"
         private const val KEY_ACTION_COOLDOWN = "action_cooldown_ms"
+        private const val KEY_STRUCTURED_ALLOWLIST = "structured_allowed_build_fingerprints"
+        private const val KEY_RUNTIME_MODE = "runtime_mode"
     }
 }

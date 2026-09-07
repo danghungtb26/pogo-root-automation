@@ -6,7 +6,7 @@
 Controller APK
     |
     v
-Bridge protocol
+    Persistent bridge protocol
     |
     v
 GameAdapter API <--- Fake adapter (development/tests)
@@ -44,10 +44,18 @@ Port used by the application/automation layer. Version-specific runtime code imp
 Deterministic development adapter used to build UI, countdown logic, and tests before game instrumentation exists.
 
 ### `bridge:protocol`
-Messages crossing the controller/runtime boundary. Serialization transport is intentionally deferred until the native runtime lifecycle is proven.
+Versioned binary-framed messages crossing the controller/runtime boundary.
+The runtime session, observation sequence, command correlation, result phases,
+and size limits are transport contracts; game payload decoding remains in the
+POGO adapter.
 
 ### `app`
-Controller APK. The first screen intentionally uses the fake adapter and demonstrates live countdown behavior.
+Controller APK. The headless service defaults to the existing screen
+analyzer/input driver. An explicit `runtimeMode=structured` configuration opts
+into the structured runtime controller; the two policy paths are not mixed.
 
 ### `zygisk`
-Native/root boundary. The first stub only targets Pokémon GO process lifecycle and leaves all game internals untouched.
+Native/root boundary. It owns process/binding discovery and the companion
+broker. The current build exposes only a read-only runtime-ready contract;
+version-specific game invocation remains disabled until a verified binding is
+available.

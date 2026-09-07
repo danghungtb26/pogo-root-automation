@@ -86,6 +86,14 @@ class AutomationCoordinator(
         }
 
         return buildList {
+            policy.berryType?.let { berryType ->
+                add(
+                    AutomationAction.UseBerry(
+                        encounterId = encounter.encounterId,
+                        berryType = berryType,
+                    ),
+                )
+            }
             if (encounter.isShundo) {
                 add(
                     AutomationAction.Alert(
