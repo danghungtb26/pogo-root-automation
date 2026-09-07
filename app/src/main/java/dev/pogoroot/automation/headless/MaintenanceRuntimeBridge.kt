@@ -7,18 +7,23 @@ import dev.pogoroot.automation.root.ProcessRootShell
 import dev.pogoroot.automation.root.RootShell
 import java.util.concurrent.atomic.AtomicLong
 
+interface MaintenanceRuntime {
+    fun readSnapshot(): Result<MaintenanceSnapshot>
+    fun execute(action: AutomationAction): Result<Unit>
+}
+
 class MaintenanceRuntimeBridge(
     private val rootShell: RootShell = ProcessRootShell(),
-) {
+) : MaintenanceRuntime {
     private val commandSequence = AtomicLong(System.currentTimeMillis())
 
-    fun readSnapshot(): Result<MaintenanceSnapshot> = runCatching {
+    override fun readSnapshot(): Result<MaintenanceSnapshot> = runCatching {
         val result = rootShell.execute("cat $SNAPSHOT_PATH 2>/dev/null", 1_500L)
         check(result.isSuccess) { result.stderr.ifBlank { "maintenance snapshot unavailable" } }
         MaintenanceSnapshotParser.parse(result.stdout)
     }
 
-    fun execute(action: AutomationAction): Result<Unit> = when (action) {
+    override fun execute(action: AutomationAction): Result<Unit> = when (action) {
         is AutomationAction.DiscardItem -> sendCommand(
             action = "discard",
             fields = mapOf(
