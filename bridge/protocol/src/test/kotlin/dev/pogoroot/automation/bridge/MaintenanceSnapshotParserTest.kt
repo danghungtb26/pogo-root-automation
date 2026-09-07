@@ -24,7 +24,7 @@ class MaintenanceSnapshotParserTest {
             item_2=100
             pokemon_capacity=500
             pokemon_used_slots=2
-            pokemon_storage=a|25|15|15|15|1|0|0|0|1;b|4|3|4|5|0|0|0|0|0
+            pokemon_storage=a|25|15|15|15|1|0|0|0|1|1;b|4|3|4|5|0|0|0|0|0|1
             """.trimIndent(),
         )
 
@@ -37,6 +37,22 @@ class MaintenanceSnapshotParserTest {
         assertTrue(protected.iv!!.isHundo)
         assertTrue(protected.shiny)
         assertTrue(protected.specialBackground)
+        assertTrue(protected.transferMetadataComplete)
+    }
+
+    @Test
+    fun `missing completeness flag keeps pokemon fail closed`() {
+        val snapshot = MaintenanceSnapshotParser.parse(
+            """
+            maintenance_protocol=1
+            maintenance_seen_at_epoch_ms=1
+            pokemon_capacity=1
+            pokemon_used_slots=1
+            pokemon_storage=a|25|1|1|1|0|0|0|0|0
+            """.trimIndent(),
+        )
+
+        assertFalse(snapshot.storage!!.pokemon.single().transferMetadataComplete)
     }
 
     @Test
