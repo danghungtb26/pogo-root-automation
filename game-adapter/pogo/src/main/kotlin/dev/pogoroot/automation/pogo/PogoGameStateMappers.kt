@@ -98,6 +98,7 @@ class PogoStorageMapper(
             speciesName = speciesNameResolver.resolve(raw.speciesId) ?: "#${raw.speciesId}",
             iv = iv,
             shiny = raw.shiny,
+            specialBackground = raw.specialBackground,
             favorite = raw.favorite,
             legendary = raw.legendary,
             mythical = raw.mythical,
