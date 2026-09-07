@@ -34,9 +34,19 @@ jobs:
           bash -n scripts/bluestacks-smoke-test.sh
           bash -n scripts/binding-probe-test.sh
           bash -n scripts/collect-binding-diagnostics.sh
+          bash -n scripts/vendor-pogoenhancer-libs.sh
+          bash -n scripts/headless-control.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
+
+      - name: Verify vendored PogoEnhancer libraries
+        run: |
+          test "$(git hash-object app/libs/POGOProtos-2.60.8.jar)" = "e183c559262427fef17a9c82af585e67dab4e753"
+          test "$(git hash-object app/libs/bcpkix-jdk15on-1.60.jar)" = "87ce8b473aeb3200c6ab63af512e25030f180658"
+          test "$(git hash-object app/libs/bcprov-jdk15on-1.60.jar)" = "5be567cbb3dee2cc616602a479b97f05d0498efd"
+          test "$(git hash-object app/libs/parser-1.6.0.aar)" = "477b7512e2aa76283330de9e659635a4f9a19680"
+          test "$(git hash-object app/libs/virtualjoystick-1.10.1.aar)" = "de697c4501bf8b2fac31343b1bee7f572eee208c"
 
       - name: Unit tests
         run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :game-adapter:pogo:test :bridge:protocol:test

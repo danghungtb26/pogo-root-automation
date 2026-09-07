@@ -1,79 +1,59 @@
 package dev.pogoroot.automation
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import dev.pogoroot.automation.bridge.BindingProbeState
-import dev.pogoroot.automation.bridge.RuntimeConnectionState
-import dev.pogoroot.automation.bridge.RuntimeSnapshot
-import dev.pogoroot.automation.core.time.CountdownService
-import dev.pogoroot.automation.fake.FakeGameAdapter
-import dev.pogoroot.automation.root.RuntimeStatusRepository
-import java.util.concurrent.Executors
+import android.widget.Toast
+import dev.pogoroot.automation.headless.AutomationConfigRepository
+import dev.pogoroot.automation.headless.AutomationControlServer
+import dev.pogoroot.automation.headless.HeadlessAutomationService
+import dev.pogoroot.automation.overlay.JoystickOverlayService
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
-    private val runtimeExecutor = Executors.newSingleThreadExecutor()
-    private val adapter = FakeGameAdapter()
-    private val countdownService = CountdownService()
-    private val runtimeStatusRepository = RuntimeStatusRepository()
+    private lateinit var configRepository: AutomationConfigRepository
+    private lateinit var statusView: TextView
+    private var startJoystickAfterOverlayGrant = false
 
-    private lateinit var runtimeView: TextView
-    private lateinit var adapterView: TextView
-    private lateinit var nearbyView: TextView
-
-    private val renderTick: Runnable = object : Runnable {
+    private val statusTick = object : Runnable {
         override fun run() {
-            renderNearby()
+            renderStatus()
             handler.postDelayed(this, 1_000L)
-        }
-    }
-
-    private val runtimeTick: Runnable = object : Runnable {
-        override fun run() {
-            runtimeExecutor.execute {
-                val snapshot = runtimeStatusRepository.read()
-                handler.post {
-                    if (!isFinishing && !isDestroyed) {
-                        renderRuntime(snapshot)
-                        handler.postDelayed(runtimeTick, 2_000L)
-                    }
-                }
-            }
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        configRepository = AutomationConfigRepository(this)
+        HeadlessAutomationService.start(this)
         setContentView(buildContent())
+        handler.post(statusTick)
+    }
 
-        val connected = adapter.connect().isSuccess
-        adapterView.text = if (connected) {
-            "● GameAdapter: fake/read-only"
-        } else {
-            "● GameAdapter connection failed"
+    override fun onResume() {
+        super.onResume()
+        if (startJoystickAfterOverlayGrant && Settings.canDrawOverlays(this)) {
+            startJoystickAfterOverlayGrant = false
+            startBuiltInJoystick()
         }
-
-        handler.post(renderTick)
-        handler.post(runtimeTick)
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(renderTick)
-        handler.removeCallbacks(runtimeTick)
-        runtimeExecutor.shutdownNow()
-        adapter.disconnect()
+        handler.removeCallbacks(statusTick)
         super.onDestroy()
     }
 
     private fun buildContent(): LinearLayout {
         val padding = (24 * resources.displayMetrics.density).toInt()
-
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.START
@@ -85,110 +65,107 @@ class MainActivity : Activity() {
                 setTypeface(typeface, Typeface.BOLD)
             })
 
-            runtimeView = TextView(context).apply {
-                text = "● Root runtime: checking…"
-                textSize = 16f
-                setPadding(0, padding / 2, 0, padding / 4)
-            }
-            addView(runtimeView)
+            addView(TextView(context).apply {
+                text = "Headless mode: no Nearby/Encounter preview is required. Keep Pokémon GO in foreground; this controller may stay in background."
+                textSize = 15f
+                setPadding(0, padding / 2, 0, padding / 2)
+            })
 
-            adapterView = TextView(context).apply {
+            statusView = TextView(context).apply {
                 textSize = 16f
-                setPadding(0, 0, 0, padding)
+                typeface = Typeface.MONOSPACE
+                setPadding(0, 0, 0, padding / 2)
             }
-            addView(adapterView)
+            addView(statusView)
+
+            addView(Button(context).apply {
+                text = "Enable auto catch + auto spin"
+                setOnClickListener {
+                    HeadlessAutomationService.enable(context, autoCatch = true, autoSpin = true)
+                    Toast.makeText(context, "Headless automation enabled", Toast.LENGTH_SHORT).show()
+                    renderStatus()
+                }
+            })
+
+            addView(Button(context).apply {
+                text = "Disable automation"
+                setOnClickListener {
+                    HeadlessAutomationService.disable(context)
+                    Toast.makeText(context, "Automation disabled; API service stays available", Toast.LENGTH_SHORT).show()
+                    renderStatus()
+                }
+            })
 
             addView(TextView(context).apply {
-                text = "Nearby"
+                text = "Local control API"
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, padding / 2, 0, padding / 4)
+            })
+
+            addView(TextView(context).apply {
+                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?catch=true&spin=true\nPOST /v1/stop\nPOST /v1/config?..."
+                textSize = 14f
+                typeface = Typeface.MONOSPACE
+                setPadding(0, 0, 0, padding / 2)
+            })
+
+            addView(TextView(context).apply {
+                text = "Location"
                 textSize = 20f
                 setTypeface(typeface, Typeface.BOLD)
             })
 
-            nearbyView = TextView(context).apply {
-                textSize = 18f
-                setPadding(0, padding / 2, 0, 0)
-                typeface = Typeface.MONOSPACE
-            }
-            addView(nearbyView)
+            addView(Button(context).apply {
+                text = "Start built-in joystick"
+                setOnClickListener { requestOverlayAndStartJoystick() }
+            })
+
+            addView(Button(context).apply {
+                text = "Stop joystick"
+                setOnClickListener {
+                    stopService(Intent(context, JoystickOverlayService::class.java))
+                }
+            })
         }
     }
 
-    private fun renderRuntime(snapshot: RuntimeSnapshot) {
-        runtimeView.text = when (snapshot.state) {
-            RuntimeConnectionState.CONNECTED -> buildString {
-                append("● Root runtime: connected")
-                snapshot.processName?.let { append("\n  process: $it") }
-                snapshot.pid?.let { append(" ($it)") }
-                snapshot.gameVersionName?.let { version ->
-                    append("\n  game: $version")
-                    snapshot.gameVersionCode?.let { append(" ($it)") }
-                }
-
-                append("\n  binding: ")
-                append(
-                    when (snapshot.bindingProbeState) {
-                        BindingProbeState.READY -> "ready"
-                        BindingProbeState.UNITY_LOADED -> "Unity loaded / backend unresolved"
-                        BindingProbeState.WAITING -> "waiting for native game modules"
-                        BindingProbeState.NOT_RUNNING -> "not running"
-                        BindingProbeState.UNKNOWN -> "unknown"
-                    },
-                )
-                snapshot.bindingEngine?.let { append(" [$it]") }
-                snapshot.bindingStrategy?.let { append("\n  strategy: $it") }
-
-                snapshot.nativeProbeState?.let { state ->
-                    append("\n  native probe: $state")
-                    if (state == "complete") {
-                        append(
-                            " / IL2CPP symbols=${snapshot.il2cppSymbolCount}" +
-                                "/${snapshot.il2cppRequiredSymbolCount}",
-                        )
-                    }
-                }
-
-                snapshot.assemblySurveyState?.let { state ->
-                    append("\n  assemblies: $state")
-                    if (state == "complete") {
-                        append(" / count=${snapshot.assemblyCount}")
-                        append(" / Assembly-CSharp=${snapshot.assemblyCSharpFound}")
-                    }
-                }
-
-                snapshot.devicePrimaryAbi?.let { append("\n  abi: $it") }
-                snapshot.kernelMachine?.let { append(" / kernel=$it") }
-                snapshot.translationLayer?.let { append("\n  translation: $it") }
-                snapshot.nativeBridge?.let { append(" / bridge=$it") }
-                snapshot.il2cppPath?.let { append("\n  il2cpp: ${it.substringAfterLast('/')}") }
-            }
-            RuntimeConnectionState.DISCONNECTED -> "○ Root runtime: game process stopped"
-            RuntimeConnectionState.NOT_SEEN -> "○ Root runtime: waiting for Pokémon GO"
-            RuntimeConnectionState.ERROR -> "! Root runtime: ${snapshot.error ?: "unavailable"}"
+    private fun renderStatus() {
+        if (!::statusView.isInitialized || !::configRepository.isInitialized) return
+        val config = configRepository.read()
+        statusView.text = buildString {
+            append("automation: ${if (config.enabled) "ON" else "OFF"}")
+            append("\nautoCatch: ${config.autoCatch}")
+            append("\nautoSpin: ${config.autoSpin}")
+            append("\nencounterSweep: ${config.encounterSweep}")
+            append("\nAPI: localhost:${AutomationControlServer.DEFAULT_PORT}")
         }
     }
 
-    private fun renderNearby() {
-        val snapshot = adapter.readNearby().getOrElse {
-            nearbyView.text = "Unavailable: ${it.message ?: "unknown error"}"
+    private fun requestOverlayAndStartJoystick() {
+        if (Settings.canDrawOverlays(this)) {
+            startBuiltInJoystick()
             return
         }
-
-        nearbyView.text = snapshot.spawns.joinToString(separator = "\n") { spawn ->
-            val countdown = countdownService.forSpawn(spawn)
-            val remaining = countdown.remainingMillis?.let(::formatDuration) ?: "--:--"
-            val marker = when {
-                countdown.isExpired -> "expired "
-                countdown.isEstimated -> "~"
-                else -> " "
-            }
-            "${spawn.speciesName.padEnd(12)} $marker$remaining"
-        }
+        startJoystickAfterOverlayGrant = true
+        Toast.makeText(
+            this,
+            "Allow display over other apps, then return to PoGo Root Automation.",
+            Toast.LENGTH_LONG,
+        ).show()
+        startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName"),
+            ),
+        )
     }
 
-    private fun formatDuration(remainingMillis: Long): String {
-        val totalSeconds = remainingMillis / 1_000L
-        val minutes = totalSeconds / 60L
-        val seconds = totalSeconds % 60L
-        return "%02d:%02d".format(minutes, seconds)
+    private fun startBuiltInJoystick() {
+        startForegroundService(
+            Intent(this, JoystickOverlayService::class.java)
+                .setAction(JoystickOverlayService.ACTION_START),
+        )
+        Toast.makeText(this, "Built-in joystick started", Toast.LENGTH_SHORT).show()
     }
 }

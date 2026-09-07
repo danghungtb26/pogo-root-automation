@@ -1,6 +1,13 @@
 package dev.pogoroot.automation.core.automation
 
+import dev.pogoroot.automation.core.model.GeoPoint
+
 sealed interface AutomationAction {
+    data class MoveTo(
+        val target: GeoPoint,
+        val mode: MovementMode = MovementMode.WALK,
+    ) : AutomationAction
+
     data class OpenEncounter(
         val spawnId: String,
     ) : AutomationAction
@@ -27,6 +34,11 @@ sealed interface AutomationAction {
         val kind: AlertKind,
         val message: String,
     ) : AutomationAction
+}
+
+enum class MovementMode {
+    WALK,
+    TELEPORT,
 }
 
 enum class CatchReason {
