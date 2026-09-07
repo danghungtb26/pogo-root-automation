@@ -24,11 +24,11 @@ interface PogoRuntimeSource {
 
     fun readEncounter(): Result<RawEncounterObservation?>
 
-    fun readForts(): Result<FortSnapshot> = unsupported(GameCapability.READ_FORTS)
+    fun readForts(): Result<RawFortObservation> = unsupported(GameCapability.READ_FORTS)
 
-    fun readInventory(): Result<InventorySnapshot> = unsupported(GameCapability.READ_INVENTORY)
+    fun readInventory(): Result<RawInventoryObservation> = unsupported(GameCapability.READ_INVENTORY)
 
-    fun readPokemonStorage(): Result<PokemonStorageSnapshot> =
+    fun readPokemonStorage(): Result<RawPokemonStorageObservation> =
         unsupported(GameCapability.READ_POKEMON_STORAGE)
 }
 
@@ -43,6 +43,9 @@ class PogoGameAdapter(
     private val actionExecutor: PogoActionExecutor? = null,
     private val nearbyMapper: PogoNearbyMapper = PogoNearbyMapper(),
     private val encounterMapper: PogoEncounterMapper = PogoEncounterMapper(),
+    private val fortMapper: PogoFortMapper = PogoFortMapper(),
+    private val inventoryMapper: PogoInventoryMapper = PogoInventoryMapper(),
+    private val storageMapper: PogoStorageMapper = PogoStorageMapper(),
 ) : GameAdapter {
     override val id: String = "pogo-runtime-v1"
 
@@ -77,10 +80,13 @@ class PogoGameAdapter(
     }
 
     override fun readForts(): Result<FortSnapshot> = runtimeSource.readForts()
+        .mapCatching { raw -> fortMapper.map(raw).getOrThrow() }
 
     override fun readInventory(): Result<InventorySnapshot> = runtimeSource.readInventory()
+        .mapCatching { raw -> inventoryMapper.map(raw).getOrThrow() }
 
     override fun readPokemonStorage(): Result<PokemonStorageSnapshot> = runtimeSource.readPokemonStorage()
+        .mapCatching { raw -> storageMapper.map(raw).getOrThrow() }
 
     override fun execute(action: AutomationAction): Result<AutomationActionResult> {
         val executor = actionExecutor ?: return Result.failure(
