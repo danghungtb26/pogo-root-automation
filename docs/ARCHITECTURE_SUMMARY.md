@@ -2,6 +2,11 @@
 
 > Tài liệu này được tổng hợp trực tiếp từ source trong repository. Reviewed: 2026-09-07.
 
+> Cập nhật: structured runtime path đã được nối vào foreground service qua persistent
+> Unix-domain-socket bridge. Native side hiện vẫn chỉ probe/forward và công bố zero
+> capabilities, nên mutation giữ nguyên trạng thái read-only cho tới khi có fingerprint
+> và binding client-owned đã verify.
+
 ## 1. Project đang làm gì?
 
 Đây là một Android controller app dành cho Pokémon GO chạy trên thiết bị/emulator đã root, mục tiêu là tự động hóa các thao tác trong game nhưng vẫn tách phần quyết định khỏi phần runtime phụ thuộc từng phiên bản game.
@@ -10,7 +15,7 @@ Các khả năng chính hiện có:
 
 - Chạy controller dưới dạng Android foreground service.
 - Điều khiển từ host qua HTTP loopback `127.0.0.1:8765`, thường đi qua `adb forward`.
-- Auto-catch và auto-spin bằng root `screencap` + nhận diện màn hình heuristic + `input tap/swipe`.
+- Structured auto-catch/auto-spin pipeline qua runtime bridge; screen driver chỉ còn là legacy calibration/fallback path.
 - Floating joystick nội bộ, phát GPS/network test location qua Android `LocationManager`.
 - Magisk/Zygisk module nhận diện process Pokémon GO, kiểm tra native runtime/IL2CPP và ghi runtime status.
 - Bộ domain model, planner và game-adapter contract cho hướng structured game-state automation.
@@ -23,10 +28,10 @@ Source hiện tại có hai luồng tồn tại song song:
 
 | Luồng | Trạng thái | Cách hoạt động |
 |---|---|---|
-| Headless screen automation | Đang được app sử dụng | Chụp màn hình game, phân loại màn hình, gửi root input |
-| Structured runtime automation | Framework/scaffold, chưa nối vào app | Runtime observation → protobuf/mapper → `GameAdapter` → core planner → action executor |
+| Structured runtime automation | Đường chạy của headless service | Runtime observation → protobuf/mapper → `GameAdapter` → core planner → serialized action runner |
+| Headless screen automation | Legacy fallback/direct construction | Chụp màn hình game, phân loại màn hình, gửi root input |
 
-Điểm này rất quan trọng: `HeadlessAutomationEngine` không gọi `AutomationCoordinator`, `PogoGameAdapter`, `PogoProtoDecoder` hoặc `RuntimeStatusRepository`. Vì vậy các planner/adapter hiện chưa phải đường chạy chính của auto-catch/auto-spin.
+`HeadlessAutomationService` tạo `StructuredAutomationController`, giữ session/identity và đưa observation vào `AutomationRunner`. Runner chỉ gửi tối đa một mutation cho mỗi snapshot; build allowlist, capability, lifecycle, freshness và outcome đều được kiểm tra trước khi replan.
 
 ## 3. System context
 
@@ -231,7 +236,7 @@ Probe hiện là read-only. Nó kiểm tra `libil2cpp.so`, `libunity.so`, transl
 
 `runtime-status.sh` dùng PID và `/proc/<pid>/cmdline` để tránh status file stale bị báo connected. Script cũng derive package/version hiện cài, native paths, ABI, zygote và kernel machine.
 
-Lưu ý: `RuntimeStatusRepository` và bridge protocol đã có trong source nhưng hiện không được MainActivity/HeadlessAutomationEngine/GameAdapterRegistry sử dụng để quyết định runtime adapter.
+`RuntimeStatusRepository` vẫn giữ vai trò diagnostics/build identity. Structured control/data path dùng `RuntimeBridgeClient`, `RuntimeSessionManager`, `BridgePogoRuntimeSource` và `BridgePayloadCodec`; khi native binding chưa sẵn sàng, runtime chỉ phát readiness read-only và reject command.
 
 ## 9. Structured game-state architecture
 
@@ -344,15 +349,13 @@ Unit tests hiện bao phủ:
 
 ## 12. Khoảng trống và thứ tự nối tiếp hợp lý
 
-Các phần còn thiếu để biến scaffold structured thành runtime automation đầy đủ:
+Các phần còn thiếu để biến structured pipeline thành runtime automation đầy đủ:
 
-1. Implement runtime source thật lấy observation từ process game sau khi probe xác định build/binding.
-2. Nối runtime status → `GameBuild` → `GameAdapterRegistry`, và fail closed với build/ABI không hỗ trợ.
-3. Nối `PogoProtoDecoder`/mapper vào pipeline snapshot live.
-4. Dùng `AutomationCoordinator` trong service thay cho logic screen-only khi structured state đã đáng tin cậy.
-5. Implement một serialized `PogoActionExecutor` cho catch/spin/discard/transfer.
-6. Bổ sung outcome/recovery: game restart, hook loss, action timeout, duplicate action và dry-run trước mutation.
-7. Giữ screen driver như fallback/calibration tool, không coi heuristic pixel detection là nguồn game state chính.
+1. Implement observation hooks trong runtime để phát lifecycle/nearby/encounter payload đã validate.
+2. Nối verified native/metadata/APK identity vào `GameBuild` và pin adapter allowlist trên thiết bị.
+3. Implement version-scoped client-owned invoker cho từng capability, bắt đầu từ `Spin` rồi `Catch`.
+4. Hoàn thiện outcome hooks (`accepted`/`started`/`completed`) và device read-only/contract validation.
+5. Giữ screen driver như fallback/calibration tool, không coi heuristic pixel detection là nguồn game state chính.
 
 ## 13. Source map nhanh
 

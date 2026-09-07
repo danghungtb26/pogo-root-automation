@@ -7,6 +7,8 @@ GALAXY_PACKAGE=com.nianticlabs.pokemongo.ares
 protocol=1
 pid=0
 process_name=
+runtime_session_id=
+runtime_message_seq=0
 native_probe_state=not_seen
 native_libil2cpp_loaded=0
 native_libunity_loaded=0
@@ -33,6 +35,8 @@ if [ -f "$STATE_FILE" ]; then
   value=$(read_state_field protocol); [ -n "$value" ] && protocol="$value"
   value=$(read_state_field pid); [ -n "$value" ] && pid="$value"
   process_name=$(read_state_field process)
+  runtime_session_id=$(read_state_field runtime_session_id)
+  value=$(read_state_field runtime_message_seq); [ -n "$value" ] && runtime_message_seq="$value"
   value=$(read_state_field native_probe_state); [ -n "$value" ] && native_probe_state="$value"
   value=$(read_state_field native_libil2cpp_loaded); [ -n "$value" ] && native_libil2cpp_loaded="$value"
   value=$(read_state_field native_libunity_loaded); [ -n "$value" ] && native_libunity_loaded="$value"
@@ -126,6 +130,8 @@ printf 'protocol=%s\n' "$protocol"
 printf 'runtime_state=%s\n' "$runtime_state"
 printf 'pid=%s\n' "$pid"
 printf 'process=%s\n' "$process_name"
+printf 'runtime_session_id=%s\n' "$runtime_session_id"
+printf 'runtime_message_seq=%s\n' "$runtime_message_seq"
 printf 'package=%s\n' "$package_name"
 printf 'version_name=%s\n' "$version_name"
 printf 'version_code=%s\n' "$version_code"

@@ -20,6 +20,11 @@ data class HeadlessAutomationStatus(
     val encounterSweepTaps: Long = 0,
     val screenWidth: Int? = null,
     val screenHeight: Int? = null,
+    val structuredRuntime: Boolean = false,
+    val runtimeSessionId: String? = null,
+    val runtimeLifecycle: String? = null,
+    val runtimeSuspended: Boolean = false,
+    val observationSeq: Long? = null,
     val updatedAtEpochMs: Long = System.currentTimeMillis(),
 )
 
@@ -29,6 +34,7 @@ class HeadlessAutomationEngine(
     private val analyzer: GameScreenAnalyzer = GameScreenAnalyzer(),
     private val uiDriver: RootUiDriver = RootUiDriver(ProcessRootShell()),
     private val eventSink: AutomationEventSink = AutomationEventSink { },
+    private val structuredController: StructuredAutomationController? = null,
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val loopActive = AtomicBoolean(false)
@@ -65,17 +71,31 @@ class HeadlessAutomationEngine(
         updatedAtEpochMs = System.currentTimeMillis(),
     )
 
-    fun manualCatch(): Result<Unit> = withCurrentScreen { bitmap, config ->
+    fun manualCatch(): Result<Unit> {
+        if (structuredController != null) {
+            return Result.failure(UnsupportedOperationException("manual screen actions are disabled for structured runtime"))
+        }
+        return withCurrentScreen { bitmap, config ->
         if (!performCatch(bitmap, config)) error("root catch swipe failed")
         publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
+        }
     }
 
-    fun manualSpin(): Result<Unit> = withCurrentScreen { bitmap, config ->
+    fun manualSpin(): Result<Unit> {
+        if (structuredController != null) {
+            return Result.failure(UnsupportedOperationException("manual screen actions are disabled for structured runtime"))
+        }
+        return withCurrentScreen { bitmap, config ->
         if (!performSpin(bitmap, config)) error("root spin swipe failed")
         publish(AutomationEventType.SPUN, "PokéStop spun")
+        }
     }
 
     private fun runLoop() {
+        if (structuredController != null) {
+            runStructuredLoop()
+            return
+        }
         while (loopActive.get()) {
             val config = configRepository.read()
             if (!config.enabled) {
@@ -183,6 +203,55 @@ class HeadlessAutomationEngine(
 
             sleepInterruptibly(config.loopIntervalMs)
         }
+        status.updateAndGet { it.copy(running = false, updatedAtEpochMs = System.currentTimeMillis()) }
+    }
+
+    private fun runStructuredLoop() {
+        val controller = structuredController ?: return
+        while (loopActive.get()) {
+            val config = configRepository.read()
+            if (!config.enabled) {
+                controller.stop()
+                status.updateAndGet {
+                    it.copy(
+                        running = true,
+                        enabled = false,
+                        structuredRuntime = true,
+                        lastAction = "idle",
+                        updatedAtEpochMs = System.currentTimeMillis(),
+                    )
+                }
+                sleepInterruptibly(700L)
+                continue
+            }
+
+            controller.tick(config)
+                .onSuccess { tick ->
+                    status.updateAndGet {
+                        it.copy(
+                            running = true,
+                            enabled = true,
+                            structuredRuntime = true,
+                            pokemonGoForeground = tick.runtimeSessionId != null,
+                            screenState = tick.lifecycleState.toScreenState(),
+                            runtimeSessionId = tick.runtimeSessionId,
+                            runtimeLifecycle = tick.lifecycleState.name,
+                            runtimeSuspended = tick.suspended,
+                            observationSeq = tick.observationSeq,
+                            lastAction = tick.lastAction,
+                            lastError = tick.lastError,
+                            updatedAtEpochMs = System.currentTimeMillis(),
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    recordError(
+                        "runtime bridge: ${error.message ?: error::class.java.simpleName}",
+                    )
+                }
+            sleepInterruptibly(config.loopIntervalMs)
+        }
+        controller.stop()
         status.updateAndGet { it.copy(running = false, updatedAtEpochMs = System.currentTimeMillis()) }
     }
 
@@ -297,6 +366,12 @@ class HeadlessAutomationEngine(
 
     private fun publish(type: AutomationEventType, message: String) {
         eventSink.publish(AutomationEvent(type, message))
+    }
+
+    private fun dev.pogoroot.automation.core.model.GameLifecycleState.toScreenState(): GameScreenState = when (this) {
+        dev.pogoroot.automation.core.model.GameLifecycleState.ENCOUNTER -> GameScreenState.ENCOUNTER
+        dev.pogoroot.automation.core.model.GameLifecycleState.OVERWORLD -> GameScreenState.OVERWORLD
+        else -> GameScreenState.UNKNOWN
     }
 
     private fun berryLabel(mode: BerryMode): String = when (mode) {

@@ -80,4 +80,31 @@ class AutomationCoordinatorTest {
             actions,
         )
     }
+
+    @Test
+    fun `berry is a separate action before catch`() {
+        val actions = coordinator.plan(
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.ENCOUNTER,
+                encounter = EncounterSnapshot(
+                    encounterId = "enc-berry",
+                    speciesId = 25,
+                    speciesName = "Pikachu",
+                    observedAtEpochMs = 1_000L,
+                ),
+            ),
+            policy = AutomationPolicy(
+                autoCatch = true,
+                berryType = BerryType.RAZZ,
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                AutomationAction.UseBerry("enc-berry", BerryType.RAZZ),
+                AutomationAction.Catch("enc-berry", CatchReason.CATCH_ALL),
+            ),
+            actions,
+        )
+    }
 }

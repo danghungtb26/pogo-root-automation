@@ -54,3 +54,18 @@ It does not test any game-state hook because M1 intentionally has none.
 ## Current limitation
 
 There is no explicit process-death callback from this M1 stub. A dead/reused PID is detected by checking both liveness and `/proc/<pid>/cmdline`. Runtime state therefore converges to disconnected on the controller's next poll.
+
+## Structured bridge contract
+
+The controller-side structured path now uses a persistent Unix-domain-socket
+contract with binary framing (`length`, protocol version, message type, and
+sequence). Typed messages include `RuntimeReady`, `ObservationEvent`,
+`AutomationCommand`, `AutomationCommandResult`, `BindingLost`, and
+`RuntimeError`. Raw observation payloads remain opaque to the bridge and are
+decoded by `game-adapter:pogo`.
+
+`HeadlessAutomationService` runs the structured controller and no longer uses
+screen recognition as its policy source. Mutation remains disabled until an
+exact, strong build fingerprint is added to the local allowlist. The native
+probe currently publishes diagnostics and a read-only `RuntimeReady`; it
+rejects commands until a verified runtime binding/capability is installed.

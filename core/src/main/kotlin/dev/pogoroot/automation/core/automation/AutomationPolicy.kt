@@ -9,6 +9,7 @@ data class AutomationPolicy(
     val catchPolicy: CatchPolicy = CatchPolicy(),
     val inventoryPolicy: InventoryPolicy = InventoryPolicy(),
     val transferPolicy: TransferPolicy = TransferPolicy(),
+    val berryType: BerryType? = null,
 )
 
 data class CatchPolicy(

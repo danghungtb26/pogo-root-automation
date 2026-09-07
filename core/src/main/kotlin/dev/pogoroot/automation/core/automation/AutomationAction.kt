@@ -10,25 +10,45 @@ sealed interface AutomationAction {
 
     data class OpenEncounter(
         val spawnId: String,
-    ) : AutomationAction
+    ) : AutomationAction {
+        init { require(spawnId.isNotBlank()) { "spawnId must not be blank" } }
+    }
 
     data class Catch(
         val encounterId: String,
         val reason: CatchReason,
-    ) : AutomationAction
+    ) : AutomationAction {
+        init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
+    }
 
     data class Spin(
         val fortId: String,
-    ) : AutomationAction
+    ) : AutomationAction {
+        init { require(fortId.isNotBlank()) { "fortId must not be blank" } }
+    }
 
     data class DiscardItem(
         val itemId: Int,
         val amount: Int,
-    ) : AutomationAction
+    ) : AutomationAction {
+        init {
+            require(itemId > 0) { "itemId must be positive" }
+            require(amount > 0) { "amount must be positive" }
+        }
+    }
 
     data class TransferPokemon(
         val pokemonId: String,
-    ) : AutomationAction
+    ) : AutomationAction {
+        init { require(pokemonId.isNotBlank()) { "pokemonId must not be blank" } }
+    }
+
+    data class UseBerry(
+        val encounterId: String,
+        val berryType: BerryType,
+    ) : AutomationAction {
+        init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
+    }
 
     data class Alert(
         val kind: AlertKind,
@@ -47,6 +67,14 @@ enum class CatchReason {
     HUNDO,
     IV_THRESHOLD,
     CATCH_ALL,
+}
+
+enum class BerryType {
+    RAZZ,
+    NANAB,
+    PINAP,
+    GOLDEN_RAZZ,
+    SILVER_PINAP,
 }
 
 enum class AlertKind {

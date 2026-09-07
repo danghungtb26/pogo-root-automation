@@ -1,4 +1,5 @@
 #include <android/log.h>
+#include <atomic>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -8,8 +9,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <poll.h>
+#include <signal.h>
 #include <time.h>
 #include <unistd.h>
+#include <vector>
+#include <string>
 
 #include "zygisk.hpp"
 
@@ -20,8 +27,14 @@ constexpr const char *kGalaxyProcess = "com.nianticlabs.pokemongo.ares";
 constexpr const char *kStateDirectory = "/data/adb/pogo_root_automation";
 constexpr const char *kStatePath = "/data/adb/pogo_root_automation/runtime.status";
 constexpr const char *kTempStatePrefix = "/data/adb/pogo_root_automation/runtime.status.tmp";
+constexpr const char *kBridgeSocketPath = "/data/adb/pogo_root_automation/runtime.sock";
+constexpr const char *kControllerUidPath = "/data/adb/pogo_root_automation/controller.uids";
 constexpr uint32_t kRuntimeEventMagic = 0x504F474FU;
 constexpr uint32_t kRuntimeProtocolVersion = 4U;
+constexpr uint16_t kBridgeProtocolVersion = 2U;
+constexpr uint32_t kBridgeCommandType = 4U;
+constexpr uint32_t kBridgeCommandResultType = 5U;
+constexpr uint32_t kBridgeHardMessageBytes = 4U * 1024U * 1024U;
 constexpr int kProbeAttempts = 60;
 constexpr int kAssemblySurveyAttempts = 20;
 constexpr useconds_t kProbeDelayUs = 500000U;
@@ -29,6 +42,7 @@ constexpr uint32_t kRequiredIl2cppCoreSymbolCount = 10U;
 constexpr size_t kMaxAssembliesToInspect = 4096U;
 constexpr size_t kMaxClassesToInspect = 50000U;
 constexpr uint32_t kMaxCandidateClasses = 32U;
+uint64_t g_session_counter = 0U;
 
 enum class RuntimeEventType : uint32_t {
     kTargetAttached = 1U,
@@ -75,7 +89,9 @@ struct RuntimeState {
     uint32_t assembly_count = 0U;
     uint32_t class_count = 0U;
     uint32_t candidate_class_count = 0U;
+    uint64_t runtime_message_seq = 0U;
     char process_name[128]{};
+    char runtime_session_id[64]{};
     char il2cpp_path[512]{};
     char unity_path[512]{};
     char translation_layer[32]{};
@@ -88,6 +104,15 @@ struct ProbeContext {
     int32_t pid;
     char process_name[128];
 };
+
+struct BrokerContext {
+    int32_t pid;
+    char process_name[128];
+    char runtime_session_id[64];
+    uint64_t next_message_seq = 1U;
+};
+
+std::atomic_bool g_broker_running{false};
 
 struct Il2CppDomain;
 struct Il2CppAssembly;
@@ -166,9 +191,260 @@ long long now_epoch_millis() {
         static_cast<long long>(value.tv_nsec / 1000000L);
 }
 
+long long now_elapsed_nanos() {
+    timespec value{};
+    if (clock_gettime(CLOCK_MONOTONIC, &value) != 0) return 0LL;
+    return static_cast<long long>(value.tv_sec) * 1000000000LL +
+        static_cast<long long>(value.tv_nsec);
+}
+
 void copy_string(char *destination, size_t destination_size, const char *source) {
     if (destination == nullptr || destination_size == 0U) return;
     snprintf(destination, destination_size, "%s", source == nullptr ? "" : source);
+}
+
+void append_u32(std::vector<uint8_t> *output, uint32_t value) {
+    if (output == nullptr) return;
+    output->push_back(static_cast<uint8_t>((value >> 24U) & 0xffU));
+    output->push_back(static_cast<uint8_t>((value >> 16U) & 0xffU));
+    output->push_back(static_cast<uint8_t>((value >> 8U) & 0xffU));
+    output->push_back(static_cast<uint8_t>(value & 0xffU));
+}
+
+void append_u64(std::vector<uint8_t> *output, uint64_t value) {
+    if (output == nullptr) return;
+    for (int shift = 56; shift >= 0; shift -= 8) {
+        output->push_back(static_cast<uint8_t>((value >> shift) & 0xffU));
+    }
+}
+
+void append_string(std::vector<uint8_t> *output, const char *value) {
+    const char *safe_value = value == nullptr ? "" : value;
+    const size_t length = strnlen(safe_value, 65536U);
+    append_u32(output, static_cast<uint32_t>(length));
+    output->insert(output->end(), safe_value, safe_value + length);
+}
+
+void append_nullable_string(std::vector<uint8_t> *output, const char *value) {
+    output->push_back(value == nullptr ? 0U : 1U);
+    if (value != nullptr) append_string(output, value);
+}
+
+bool read_be32(const std::vector<uint8_t> &input, size_t *offset, uint32_t *value) {
+    if (offset == nullptr || value == nullptr || *offset + 4U > input.size()) return false;
+    *value = (static_cast<uint32_t>(input[*offset]) << 24U) |
+        (static_cast<uint32_t>(input[*offset + 1U]) << 16U) |
+        (static_cast<uint32_t>(input[*offset + 2U]) << 8U) |
+        static_cast<uint32_t>(input[*offset + 3U]);
+    *offset += 4U;
+    return true;
+}
+
+bool read_string(const std::vector<uint8_t> &input, size_t *offset, std::string *value) {
+    uint32_t length = 0U;
+    if (value == nullptr || !read_be32(input, offset, &length) || length > 65536U ||
+        *offset + length > input.size()) return false;
+    value->assign(reinterpret_cast<const char *>(input.data() + *offset), length);
+    *offset += length;
+    return true;
+}
+
+bool authorized_controller(int fd) {
+    struct ucred credentials{};
+    socklen_t length = sizeof(credentials);
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0) return false;
+
+    FILE *allowlist = fopen(kControllerUidPath, "re");
+    if (allowlist == nullptr) return false;
+    bool allowed = false;
+    char line[32]{};
+    while (fgets(line, sizeof(line), allowlist) != nullptr) {
+        char *end = nullptr;
+        const long uid = strtol(line, &end, 10);
+        if (end != line && uid >= 0L && static_cast<uid_t>(uid) == credentials.uid) {
+            allowed = true;
+            break;
+        }
+    }
+    fclose(allowlist);
+    return allowed;
+}
+
+bool send_bridge_frame(int fd, uint16_t message_type, uint64_t message_seq, const std::vector<uint8_t> &payload) {
+    if (payload.size() > kBridgeHardMessageBytes) return false;
+    std::vector<uint8_t> frame;
+    frame.reserve(16U + payload.size());
+    append_u32(&frame, static_cast<uint32_t>(payload.size()));
+    frame.push_back(static_cast<uint8_t>((kBridgeProtocolVersion >> 8U) & 0xffU));
+    frame.push_back(static_cast<uint8_t>(kBridgeProtocolVersion & 0xffU));
+    frame.push_back(static_cast<uint8_t>((message_type >> 8U) & 0xffU));
+    frame.push_back(static_cast<uint8_t>(message_type & 0xffU));
+    append_u64(&frame, message_seq);
+    frame.insert(frame.end(), payload.begin(), payload.end());
+    return write_full(fd, frame.data(), frame.size());
+}
+
+bool read_bridge_frame(int fd, uint16_t *message_type, std::vector<uint8_t> *payload) {
+    uint8_t length_bytes[4]{};
+    if (!read_full(fd, length_bytes, sizeof(length_bytes))) return false;
+    const uint32_t length = (static_cast<uint32_t>(length_bytes[0]) << 24U) |
+        (static_cast<uint32_t>(length_bytes[1]) << 16U) |
+        (static_cast<uint32_t>(length_bytes[2]) << 8U) |
+        static_cast<uint32_t>(length_bytes[3]);
+    if (length > kBridgeHardMessageBytes) return false;
+
+    uint8_t header[12]{};
+    if (!read_full(fd, header, sizeof(header))) return false;
+    const uint16_t protocol = static_cast<uint16_t>(header[0] << 8U | header[1]);
+    if (protocol != kBridgeProtocolVersion) return false;
+    if (message_type != nullptr) *message_type = static_cast<uint16_t>(header[2] << 8U | header[3]);
+    if (payload == nullptr) return false;
+    payload->resize(length);
+    return length == 0U || read_full(fd, payload->data(), payload->size());
+}
+
+int make_bridge_server() {
+    if (mkdir(kStateDirectory, 0700) != 0 && errno != EEXIST) return -1;
+    if (chmod(kStateDirectory, 0711) != 0) return -1;
+    unlink(kBridgeSocketPath);
+    const int server = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (server < 0) return -1;
+    sockaddr_un address{};
+    address.sun_family = AF_UNIX;
+    if (strlen(kBridgeSocketPath) >= sizeof(address.sun_path)) {
+        close(server);
+        return -1;
+    }
+    strncpy(address.sun_path, kBridgeSocketPath, sizeof(address.sun_path) - 1U);
+    if (bind(server, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0 ||
+        chmod(kBridgeSocketPath, 0666) != 0 || listen(server, 1) != 0) {
+        close(server);
+        unlink(kBridgeSocketPath);
+        return -1;
+    }
+    return server;
+}
+
+void append_optional_absent(std::vector<uint8_t> *output) {
+    output->push_back(0U);
+}
+
+bool send_runtime_ready(int fd, BrokerContext &context) {
+    const uint64_t message_seq = context.next_message_seq++;
+    std::vector<uint8_t> payload;
+    append_u32(&payload, 1U);
+    append_string(&payload, context.runtime_session_id);
+    append_u64(&payload, message_seq);
+    append_u32(&payload, static_cast<uint32_t>(context.pid));
+    append_string(&payload, context.process_name);
+    append_string(&payload, context.process_name);
+
+    char fingerprint[192]{};
+    snprintf(fingerprint, sizeof(fingerprint), "unverified|%s", context.process_name);
+    append_string(&payload, fingerprint);
+    append_u32(&payload, 0U);  // No mutation/read capability is announced by the probe-only runtime.
+    append_optional_absent(&payload);  // version name
+    append_optional_absent(&payload);  // version code
+    append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
+    append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
+    return send_bridge_frame(fd, 2U, message_seq, payload);
+}
+
+bool send_command_rejected(int fd, BrokerContext &context, const char *command_id) {
+    if (command_id == nullptr || command_id[0] == '\0') return false;
+    const uint64_t message_seq = context.next_message_seq++;
+    std::vector<uint8_t> payload;
+    append_u32(&payload, 1U);
+    append_string(&payload, context.runtime_session_id);
+    append_u64(&payload, message_seq);
+    append_string(&payload, command_id);
+    append_u32(&payload, 3U);  // CommandPhase.REJECTED
+    append_nullable_string(&payload, "binding_not_implemented");
+    append_nullable_string(&payload, "runtime probe has no client-owned action binding");
+    append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
+    append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
+    return send_bridge_frame(fd, kBridgeCommandResultType, message_seq, payload);
+}
+
+void handle_controller(int fd, BrokerContext &context) {
+    if (!authorized_controller(fd)) return;
+    if (!send_runtime_ready(fd, context)) return;
+
+    while (kill(context.pid, 0) == 0) {
+        pollfd descriptor{};
+        descriptor.fd = fd;
+        descriptor.events = POLLIN;
+        if (poll(&descriptor, 1, 1000) <= 0) continue;
+        uint16_t message_type = 0U;
+        std::vector<uint8_t> payload;
+        if (!read_bridge_frame(fd, &message_type, &payload)) return;
+        if (message_type != kBridgeCommandType) continue;
+
+        size_t offset = 0U;
+        uint32_t payload_version = 0U;
+        std::string session_id;
+        std::string command_id;
+        if (!read_be32(payload, &offset, &payload_version) || payload_version != 1U ||
+            !read_string(payload, &offset, &session_id) ||
+            !read_string(payload, &offset, &command_id)) return;
+        if (session_id != context.runtime_session_id) return;
+        if (!send_command_rejected(fd, context, command_id.c_str())) return;
+    }
+}
+
+void *runtime_bridge_broker_thread(void *opaque_context) {
+    auto *context = static_cast<BrokerContext *>(opaque_context);
+    if (context == nullptr) {
+        g_broker_running.store(false);
+        return nullptr;
+    }
+
+    const int server = make_bridge_server();
+    if (server < 0) {
+        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "cannot create runtime bridge socket");
+        g_broker_running.store(false);
+        delete context;
+        return nullptr;
+    }
+
+    while (kill(context->pid, 0) == 0) {
+        pollfd descriptor{};
+        descriptor.fd = server;
+        descriptor.events = POLLIN;
+        const int polled = poll(&descriptor, 1, 1000);
+        if (polled <= 0) continue;
+        const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
+        if (client < 0) continue;
+        handle_controller(client, *context);
+        close(client);
+    }
+
+    close(server);
+    unlink(kBridgeSocketPath);
+    g_broker_running.store(false);
+    delete context;
+    return nullptr;
+}
+
+void start_runtime_bridge_broker(const RuntimeState &state) {
+    bool expected = false;
+    if (!g_broker_running.compare_exchange_strong(expected, true)) return;
+
+    auto *context = new BrokerContext{};
+    context->pid = state.pid;
+    copy_string(context->process_name, sizeof(context->process_name), state.process_name);
+    copy_string(
+        context->runtime_session_id,
+        sizeof(context->runtime_session_id),
+        state.runtime_session_id
+    );
+    pthread_t thread{};
+    if (pthread_create(&thread, nullptr, runtime_bridge_broker_thread, context) != 0) {
+        delete context;
+        g_broker_running.store(false);
+        return;
+    }
+    pthread_detach(thread);
 }
 
 bool find_mapping_path(const char *needle, char *output, size_t output_size) {
@@ -403,6 +679,8 @@ void persist_runtime_state(const RuntimeState &state) {
     dprintf(fd, "protocol=%u\n", state.protocol_version);
     dprintf(fd, "pid=%d\n", state.pid);
     dprintf(fd, "process=%s\n", state.process_name);
+    dprintf(fd, "runtime_session_id=%s\n", state.runtime_session_id);
+    dprintf(fd, "runtime_message_seq=%llu\n", static_cast<unsigned long long>(state.runtime_message_seq));
     dprintf(fd, "seen_at_epoch_ms=%lld\n", now_epoch_millis());
     dprintf(fd, "native_probe_state=%s\n", probe_complete ? "complete" : "pending");
     dprintf(fd, "native_libil2cpp_loaded=%d\n", il2cpp_loaded ? 1 : 0);
@@ -445,11 +723,29 @@ void companion_handler(int fd) {
             state.protocol_version = event.protocol_version;
             state.pid = event.pid;
             copy_string(state.process_name, sizeof(state.process_name), event.process_name);
+            state.runtime_message_seq = 1U;
+            snprintf(
+                state.runtime_session_id,
+                sizeof(state.runtime_session_id),
+                "%d-%lld",
+                state.pid,
+                now_epoch_millis()
+            );
+            const size_t session_length = strnlen(state.runtime_session_id, sizeof(state.runtime_session_id));
+            if (session_length < sizeof(state.runtime_session_id) - 1U) {
+                snprintf(
+                    state.runtime_session_id + session_length,
+                    sizeof(state.runtime_session_id) - session_length,
+                    "-%llu",
+                    static_cast<unsigned long long>(++g_session_counter)
+                );
+            }
             persist_runtime_state(state);
             continue;
         }
         if (event.event_type == static_cast<uint32_t>(RuntimeEventType::kBindingProbe) && event.pid == state.pid) {
             state.probe_flags = event.probe_flags;
+            state.runtime_message_seq += 1U;
             state.il2cpp_symbol_count = event.il2cpp_symbol_count;
             state.il2cpp_required_symbol_count = event.il2cpp_required_symbol_count;
             state.assembly_count = event.assembly_count;
@@ -461,6 +757,9 @@ void companion_handler(int fd) {
             copy_string(state.assembly_csharp_name, sizeof(state.assembly_csharp_name), event.assembly_csharp_name);
             copy_string(state.candidate_classes, sizeof(state.candidate_classes), event.candidate_classes);
             persist_runtime_state(state);
+            if ((event.probe_flags & kProbeComplete) != 0U) {
+                start_runtime_bridge_broker(state);
+            }
         }
     }
 }

@@ -4,6 +4,7 @@ import dev.pogoroot.automation.adapter.GameAdapter
 import dev.pogoroot.automation.adapter.GameCapability
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.AutomationActionResult
+import dev.pogoroot.automation.core.automation.ActionRequest
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.FortSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -13,6 +14,9 @@ import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
 
 interface PogoRuntimeSource {
     val capabilities: Set<GameCapability>
+
+    val runtimeMetadata: PogoRuntimeMetadata?
+        get() = null
 
     fun connect(): Result<Unit>
 
@@ -36,6 +40,8 @@ interface PogoActionExecutor {
     val capabilities: Set<GameCapability>
 
     fun execute(action: AutomationAction): Result<AutomationActionResult>
+
+    fun submit(request: ActionRequest): Result<Unit> = execute(request.action).map { Unit }
 }
 
 class PogoGameAdapter(
@@ -93,6 +99,13 @@ class PogoGameAdapter(
             UnsupportedOperationException("No Pogo action executor configured"),
         )
         return executor.execute(action)
+    }
+
+    override fun submit(request: ActionRequest): Result<Unit> {
+        val executor = actionExecutor ?: return Result.failure(
+            UnsupportedOperationException("No Pogo action executor configured"),
+        )
+        return executor.submit(request)
     }
 }
 

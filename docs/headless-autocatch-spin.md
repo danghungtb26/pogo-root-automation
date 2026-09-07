@@ -1,19 +1,27 @@
 # Headless auto-catch and PokéStop spin
 
-This mode runs the controller as an Android foreground service. The controller UI does not need to remain visible. Pokémon GO must remain the foreground game for the current root screen-driver implementation.
+This mode runs the controller as an Android foreground service. The service's
+automation policy path is structured-runtime first and does not use screenshots
+or `input tap/swipe` to decide game state. The legacy screen driver remains in
+the source only for calibration/backward-compatible direct engine construction.
 
 ## Execution path
 
 ```text
-Pokémon GO foreground
-  -> root screencap
-  -> lightweight screen-state analyzer
-       -> encounter: throw ball with root input swipe
-       -> PokéStop detail: spin disc with root input swipe
-       -> overworld blue stop candidate: tap and verify detail screen
-       -> optional encounter sweep: tap conservative map points and verify encounter
-  -> repeat
+Pokémon GO process
+  -> Zygisk runtime + companion broker
+  -> persistent binary bridge
+  -> RuntimeReady / structured observations
+  -> PogoProtoDecoder + PogoGameAdapter
+  -> AutomationCoordinator
+  -> AutomationRunner (one mutation, await outcome, resync)
+  -> client-owned runtime command
 ```
+
+The native probe-only build currently exposes liveness and a read-only ready
+event; it rejects commands until a verified binding announces the required
+capability. Screen capture/input helpers are retained only as legacy code and
+are not used by the service policy loop.
 
 The local API is a control API for this tool; it is not a direct Niantic/Pokémon GO server API. Direct server RPC would require the live game session/auth/signing stack and is intentionally not used by this implementation.
 
@@ -112,10 +120,13 @@ POST /v1/actions/catch
 POST /v1/actions/spin
 ```
 
-These are useful for calibrating a BlueStacks resolution before enabling the full loop.
+These are retained for legacy screen-driver calibration only; the production
+structured service rejects manual screen actions.
 
 ## Current limitations
 
-The current executor is resolution-independent by using normalized coordinates, but screen recognition is heuristic and needs real-device/BlueStacks calibration. The controller can stay in the background, but Pokémon GO must stay foreground because the executor currently uses root `screencap` plus Android `input tap/swipe`.
-
-The longer-term runtime path is to replace this screen driver with the PogoEnhancer-style injected executor: observe game objects/RPC data and invoke encounter/spin/catch game methods directly. PogoEnhancer's auto-spin, for example, calls the game's interactive-mode/search-RPC functions once a stop is active, in range and off cooldown. The local control API and automation policy can remain unchanged when that executor is introduced.
+The structured path still needs live observation hooks in the injected runtime and
+version-scoped client-owned invokers. Until those are verified, the native broker
+announces no mutation capabilities and the controller remains read-only. The
+legacy normalized-coordinate executor is retained for calibration/direct use,
+but is not a source of state or decisions for the foreground service.

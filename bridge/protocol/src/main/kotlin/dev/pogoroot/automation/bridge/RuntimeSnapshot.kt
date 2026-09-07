@@ -25,6 +25,9 @@ data class RuntimeSnapshot(
     val il2cppRequiredSymbolCount: Int = 0,
     val nativeIl2cppPath: String? = null,
     val nativeUnityPath: String? = null,
+    val nativeIl2cppBuildId: String? = null,
+    val nativeMetadataHash: String? = null,
+    val apkDigest: String? = null,
     val assemblySurveyState: String? = null,
     val assemblyCount: Int = 0,
     val assemblyCSharpFound: Boolean = false,
@@ -38,6 +41,8 @@ data class RuntimeSnapshot(
     val zygote: String? = null,
     val kernelMachine: String? = null,
     val error: String? = null,
+    val runtimeSessionId: String? = null,
+    val runtimeMessageSeq: Long? = null,
 )
 
 object RuntimeSnapshotParser {
@@ -71,6 +76,8 @@ object RuntimeSnapshotParser {
             pid = values["pid"]?.toIntOrNull()?.takeIf { it > 0 },
             processName = values["process"].nullIfBlank(),
             packageName = values["package"].nullIfBlank(),
+            runtimeSessionId = values["runtime_session_id"].nullIfBlank(),
+            runtimeMessageSeq = values["runtime_message_seq"]?.toLongOrNull(),
             gameVersionName = values["version_name"].nullIfBlank(),
             gameVersionCode = values["version_code"]?.toLongOrNull(),
             bindingProbeState = probeState,
@@ -87,6 +94,9 @@ object RuntimeSnapshotParser {
             il2cppRequiredSymbolCount = values["native_il2cpp_required_symbol_count"]?.toIntOrNull() ?: 0,
             nativeIl2cppPath = values["native_libil2cpp_path"].nullIfBlank(),
             nativeUnityPath = values["native_libunity_path"].nullIfBlank(),
+            nativeIl2cppBuildId = values["native_libil2cpp_build_id"].nullIfBlank(),
+            nativeMetadataHash = values["native_metadata_hash"].nullIfBlank(),
+            apkDigest = values["apk_digest"].nullIfBlank(),
             assemblySurveyState = values["native_assembly_survey_state"].nullIfBlank(),
             assemblyCount = values["native_assembly_count"]?.toIntOrNull() ?: 0,
             assemblyCSharpFound = values["native_assembly_csharp_found"] == "1",

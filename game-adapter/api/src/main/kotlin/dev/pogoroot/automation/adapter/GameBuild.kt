@@ -9,8 +9,12 @@ data class GameBuild(
     val devicePrimaryAbi: String? = null,
     val kernelMachine: String? = null,
     val translationLayer: String? = null,
+    val il2cppBuildId: String? = null,
+    val metadataHash: String? = null,
+    val apkDigest: String? = null,
 ) {
-    fun fingerprint(): String = listOf(
+    fun fingerprint(): String {
+        val base = listOf(
         packageName,
         versionCode?.toString() ?: versionName.orEmpty().ifBlank { "unknown-version" },
         engine.orEmpty().ifBlank { "unknown-engine" },
@@ -18,7 +22,15 @@ data class GameBuild(
         devicePrimaryAbi.orEmpty().ifBlank { "unknown-abi" },
         kernelMachine.orEmpty().ifBlank { "unknown-kernel" },
         translationLayer.orEmpty().ifBlank { "native" },
-    ).joinToString("|")
+        ).joinToString("|")
+
+        val strongIdentity = listOfNotNull(
+            il2cppBuildId?.takeIf(String::isNotBlank)?.let { "il2cpp=$it" },
+            metadataHash?.takeIf(String::isNotBlank)?.let { "metadata=$it" },
+            apkDigest?.takeIf(String::isNotBlank)?.let { "apk=$it" },
+        )
+        return if (strongIdentity.isEmpty()) base else "$base|${strongIdentity.joinToString("|")}"
+    }
 }
 
 interface GameAdapterFactory {

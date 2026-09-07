@@ -9,6 +9,7 @@ Rooted Android automation framework for experimenting with structured game-state
 - The project is split into a stable automation core and version-specific Pokémon GO/runtime adapters.
 - POGOProtos is vendored for decoding known Pokémon GO protobuf payloads into stable internal observation models.
 - Catch, spin, discard and transfer rules live in the automation core; live mutation executors are kept separate from decision logic.
+- The headless service uses a persistent, versioned runtime bridge for structured observations and client-owned commands; mutation is disabled until an exact build fingerprint is allowlisted.
 - No Play Integrity bypass, root hiding, anti-detection or account-safety evasion is implemented.
 
 ## Target architecture
@@ -100,7 +101,7 @@ After installing the controller APK and multi-ABI Magisk ZIP and rebooting the i
 5. **M3 Automation core** — encounter/IV/Shundo, catch, spin, discard and transfer planners.
 6. **M4 Built-in location** — PogoEnhancer-style joystick, teleport, speed control and root mock provider.
 7. **M5 POGOProtos/live binding** — connect intercepted runtime RPC payloads to `PogoProtoDecoder` and the live `PogoRuntimeSource`.
-8. **M6 Executors** — live catch/spin/discard/transfer/movement action execution.
+8. **M6 Executors** — live catch/spin/discard/transfer/movement action execution after verified runtime bindings.
 9. **M7 Hardening** — version adapters, recovery, diagnostics and long-run tests.
 
 > Gameplay automation can violate Pokémon GO's terms of service. Use test accounts and devices you control.
