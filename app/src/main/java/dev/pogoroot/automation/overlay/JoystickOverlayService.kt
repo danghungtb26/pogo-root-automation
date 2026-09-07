@@ -25,6 +25,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
@@ -48,11 +49,13 @@ class JoystickOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var controller: JoystickLocationController
+    private lateinit var automationConfigRepository: AutomationConfigRepository
     private lateinit var rootView: LinearLayout
     private lateinit var windowParams: WindowManager.LayoutParams
     private lateinit var statusView: TextView
     private lateinit var locationView: TextView
     private lateinit var speedButton: Button
+    private lateinit var automationSummaryView: TextView
 
     private var controllerStarted = false
     private var speedPresetIndex = 2
@@ -61,6 +64,7 @@ class JoystickOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
+        automationConfigRepository = AutomationConfigRepository(this)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
@@ -77,6 +81,7 @@ class JoystickOverlayService : Service() {
         }
 
         ensureOverlay()
+        renderAutomationSummary()
         if (!controllerStarted) {
             controllerStarted = true
             controller.start(loadSavedPoint())
@@ -103,7 +108,7 @@ class JoystickOverlayService : Service() {
 
         val density = resources.displayMetrics.density
         val padding = (10 * density).toInt()
-        val panelWidth = (220 * density).toInt()
+        val panelWidth = (230 * density).toInt()
 
         statusView = TextView(this).apply {
             setTextColor(Color.WHITE)
@@ -116,11 +121,17 @@ class JoystickOverlayService : Service() {
             typeface = android.graphics.Typeface.MONOSPACE
             text = "Teleport to a location first"
         }
+        automationSummaryView = TextView(this).apply {
+            setTextColor(0xFFE8EAED.toInt())
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, padding / 2, 0, padding / 2)
+        }
 
         val header = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 15f
-            text = "PoGo Joystick  ↕"
+            text = "PoGo Tools  ↕"
             gravity = Gravity.CENTER
             setPadding(0, padding / 2, 0, padding / 2)
         }
@@ -147,6 +158,13 @@ class JoystickOverlayService : Service() {
             }
         }
 
+        val settingsButton = Button(this).apply {
+            text = "⚙ Automation Settings"
+            setOnClickListener {
+                AutomationSettingsDialog(this@JoystickOverlayService, automationConfigRepository).show()
+                mainHandler.postDelayed(::renderAutomationSummary, 500L)
+            }
+        }
         val teleportButton = Button(this).apply {
             text = "Teleport"
             setOnClickListener { showTeleportDialog() }
@@ -173,6 +191,8 @@ class JoystickOverlayService : Service() {
             addView(header)
             addView(statusView)
             addView(locationView)
+            addView(automationSummaryView)
+            addView(settingsButton)
             addView(joystick)
             addView(speedButton)
             addView(actions)
@@ -199,6 +219,18 @@ class JoystickOverlayService : Service() {
         makeDraggable(header)
         windowManager.addView(rootView, windowParams)
     }
+
+    private fun renderAutomationSummary() {
+        if (!::automationSummaryView.isInitialized) return
+        val config = automationConfigRepository.read()
+        automationSummaryView.text = buildString {
+            append("Catch=${onOff(config.autoCatch)} Spin=${onOff(config.autoSpin)}")
+            append("\nDiscard=${onOff(config.autoDiscard)} Transfer=${onOff(config.autoTransfer)}")
+            append("\nBerry=${config.berryMode.name}")
+        }
+    }
+
+    private fun onOff(value: Boolean): String = if (value) "ON" else "OFF"
 
     private fun makeDraggable(handle: View) {
         var initialX = 0
@@ -354,7 +386,7 @@ class JoystickOverlayService : Service() {
         return builder
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PoGo built-in joystick")
-            .setContentText("Location overlay is active")
+            .setContentText("Joystick + automation settings overlay is active")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
