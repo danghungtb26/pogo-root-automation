@@ -1,0 +1,55 @@
+name: M7 Wire Native
+
+on:
+  push:
+    branches:
+      - feat/m7-auto-discard-transfer
+    paths:
+      - .github/workflows/m7-wire-native.yml
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/m7-auto-discard-transfer
+          fetch-depth: 0
+      - name: Wire maintenance runtime into Zygisk lifecycle
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('zygisk/jni/main.cpp')
+          text = path.read_text()
+
+          include = '#include "maintenance_runtime.h"'
+          if include not in text:
+              text = text.replace(
+                  '#include "zygisk.hpp"',
+                  '#include "zygisk.hpp"\n#include "maintenance_runtime.h"',
+                  1,
+              )
+
+          call = '        start_maintenance_runtime(process_name_);\n'
+          marker = '        if (!target_process_ || companion_fd_ < 0) return;\n'
+          if call not in text:
+              if marker not in text:
+                  raise SystemExit('postAppSpecialize marker not found')
+              text = text.replace(marker, marker + call, 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit wiring
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add zygisk/jni/main.cpp
+          git commit -m "feat(zygisk): start maintenance runtime for Pokemon GO"
+          git push origin HEAD:feat/m7-auto-discard-transfer
