@@ -2,7 +2,12 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -17,15 +22,59 @@ jobs:
 
       - uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install Android SDK / NDK
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "9.5.0"
+
+      - name: Shell syntax
+        run: |
+          bash -n scripts/package-magisk.sh
+          bash -n scripts/device-smoke-test.sh
+          bash -n scripts/collect-binding-diagnostics.sh
+          sh -n zygisk/module/bin/runtime-status.sh
+          sh -n zygisk/module/post-fs-data.sh
+          sh -n zygisk/module/uninstall.sh
 
       - name: Unit tests
         run: gradle :core:test :game-adapter:api:test :game-adapter:fake:test :bridge:protocol:test
 
       - name: Build controller APK
         run: gradle :app:assembleDebug
+
+      - name: Fetch canonical Zygisk API header
+        run: |
+          mkdir -p "$RUNNER_TEMP/zygisk-api"
+          curl -fsSL \
+            https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp \
+            -o "$RUNNER_TEMP/zygisk-api/zygisk.hpp"
+
+      - name: Build arm64 Zygisk runtime
+        run: |
+          CMAKE="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
+          NDK="$ANDROID_HOME/ndk/28.2.13676358"
+          "$CMAKE" \
+            -S zygisk/jni \
+            -B build/zygisk-arm64 \
+            -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-28 \
+            -DZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
+          "$CMAKE" --build build/zygisk-arm64
+
+      - name: Package Magisk module
+        run: |
+          ./scripts/package-magisk.sh \
+            build/zygisk-arm64/libpogo_root_automation.so \
+            build/pogo-root-automation-magisk-arm64.zip
+          test -s build/pogo-root-automation-magisk-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pogo-root-automation-m1
+          path: |
+            app/build/outputs/apk/debug/app-debug.apk
+            build/pogo-root-automation-magisk-arm64.zip

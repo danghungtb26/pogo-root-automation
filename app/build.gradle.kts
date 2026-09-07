@@ -17,6 +17,7 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    implementation(project(":bridge:protocol"))
     implementation(project(":game-adapter:api"))
     implementation(project(":game-adapter:fake"))
 }

@@ -8,21 +8,44 @@ import android.os.Looper
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
+import dev.pogoroot.automation.bridge.RuntimeConnectionState
+import dev.pogoroot.automation.bridge.RuntimeSnapshot
 import dev.pogoroot.automation.core.time.CountdownService
 import dev.pogoroot.automation.fake.FakeGameAdapter
+import dev.pogoroot.automation.root.RuntimeStatusRepository
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
+    private val runtimeExecutor = Executors.newSingleThreadExecutor()
     private val adapter = FakeGameAdapter()
     private val countdownService = CountdownService()
+    private val runtimeStatusRepository = RuntimeStatusRepository()
 
-    private lateinit var statusView: TextView
+    private lateinit var runtimeView: TextView
+    private lateinit var adapterView: TextView
     private lateinit var nearbyView: TextView
 
-    private val renderTick = object : Runnable {
+    private val renderTick: Runnable = object : Runnable {
         override fun run() {
             renderNearby()
             handler.postDelayed(this, 1_000L)
+        }
+    }
+
+    private val runtimeTick: Runnable = object : Runnable {
+        override fun run() {
+            runtimeExecutor.execute {
+                val snapshot = runtimeStatusRepository.read()
+                handler.post {
+                    if (!isFinishing && !isDestroyed) {
+                        renderRuntime(snapshot)
+                        // Schedule from completion, not from start. A slow or blocked
+                        // root grant can therefore never build an unbounded work queue.
+                        handler.postDelayed(runtimeTick, 2_000L)
+                    }
+                }
+            }
         }
     }
 
@@ -31,17 +54,20 @@ class MainActivity : Activity() {
         setContentView(buildContent())
 
         val connected = adapter.connect().isSuccess
-        statusView.text = if (connected) {
-            "● Adapter connected (fake/read-only)"
+        adapterView.text = if (connected) {
+            "● GameAdapter: fake/read-only"
         } else {
-            "● Adapter connection failed"
+            "● GameAdapter connection failed"
         }
 
         handler.post(renderTick)
+        handler.post(runtimeTick)
     }
 
     override fun onDestroy() {
         handler.removeCallbacks(renderTick)
+        handler.removeCallbacks(runtimeTick)
+        runtimeExecutor.shutdownNow()
         adapter.disconnect()
         super.onDestroy()
     }
@@ -60,11 +86,18 @@ class MainActivity : Activity() {
                 setTypeface(typeface, Typeface.BOLD)
             })
 
-            statusView = TextView(context).apply {
+            runtimeView = TextView(context).apply {
+                text = "● Root runtime: checking…"
                 textSize = 16f
-                setPadding(0, padding / 2, 0, padding)
+                setPadding(0, padding / 2, 0, padding / 4)
             }
-            addView(statusView)
+            addView(runtimeView)
+
+            adapterView = TextView(context).apply {
+                textSize = 16f
+                setPadding(0, 0, 0, padding)
+            }
+            addView(adapterView)
 
             addView(TextView(context).apply {
                 text = "Nearby"
@@ -81,6 +114,23 @@ class MainActivity : Activity() {
         }
     }
 
+    private fun renderRuntime(snapshot: RuntimeSnapshot) {
+        runtimeView.text = when (snapshot.state) {
+            RuntimeConnectionState.CONNECTED -> buildString {
+                append("● Root runtime: connected")
+                snapshot.processName?.let { append("\n  process: $it") }
+                snapshot.pid?.let { append(" ($it)") }
+                snapshot.gameVersionName?.let { version ->
+                    append("\n  game: $version")
+                    snapshot.gameVersionCode?.let { append(" ($it)") }
+                }
+            }
+            RuntimeConnectionState.DISCONNECTED -> "○ Root runtime: game process stopped"
+            RuntimeConnectionState.NOT_SEEN -> "○ Root runtime: waiting for Pokémon GO"
+            RuntimeConnectionState.ERROR -> "! Root runtime: ${snapshot.error ?: "unavailable"}"
+        }
+    }
+
     private fun renderNearby() {
         val snapshot = adapter.readNearby().getOrElse {
             nearbyView.text = "Unavailable: ${it.message ?: "unknown error"}"
@@ -91,7 +141,7 @@ class MainActivity : Activity() {
             val countdown = countdownService.forSpawn(spawn)
             val remaining = countdown.remainingMillis?.let(::formatDuration) ?: "--:--"
             val marker = when {
-                countdown.isExpired -> "expired"
+                countdown.isExpired -> "expired "
                 countdown.isEstimated -> "~"
                 else -> " "
             }
