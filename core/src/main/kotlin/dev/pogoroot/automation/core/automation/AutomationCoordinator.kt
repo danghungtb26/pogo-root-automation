@@ -51,8 +51,7 @@ class AutomationCoordinator(
             snapshot.forts?.forts
                 ?.asSequence()
                 ?.filter { it.spinAvailable }
-                ?.map { AutomationAction.Spin(it.fortId) }
-                ?.forEach(actions::add)
+                ?.forEach { actions += AutomationAction.Spin(it.fortId) }
         }
 
         if (policy.autoEncounter) {
