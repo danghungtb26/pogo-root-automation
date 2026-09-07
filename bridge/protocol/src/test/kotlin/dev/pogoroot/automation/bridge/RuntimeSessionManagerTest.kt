@@ -39,4 +39,15 @@ class RuntimeSessionManagerTest {
         assertTrue(manager.accept(ready).isSuccess)
         assertFalse(manager.mutationsAllowed)
     }
+
+    @Test
+    fun `allowlist can be refreshed without replacing the runtime session`() {
+        val manager = RuntimeSessionManager(expectedPackageName = ready.packageName)
+        assertTrue(manager.accept(ready).isSuccess)
+        assertFalse(manager.mutationsAllowed)
+
+        manager.updateAllowedBuildFingerprints(setOf(ready.buildFingerprint))
+
+        assertTrue(manager.mutationsAllowed)
+    }
 }

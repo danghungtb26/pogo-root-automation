@@ -11,6 +11,11 @@ enum class BerryMode {
     SILVER_PINAP,
 }
 
+enum class AutomationRuntimeMode {
+    SCREEN,
+    STRUCTURED,
+}
+
 data class HeadlessAutomationConfig(
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
@@ -35,6 +40,8 @@ data class HeadlessAutomationConfig(
     val actionCooldownMs: Long = 1_000L,
     /** Exact strong fingerprints verified for client-owned mutation. */
     val structuredAllowedBuildFingerprints: Set<String> = emptySet(),
+    /** SCREEN preserves the existing automation path until structured observations are live. */
+    val runtimeMode: AutomationRuntimeMode = AutomationRuntimeMode.SCREEN,
 ) {
     companion object {
         // Common Poké Ball / berry limits. Users can override these from overlay settings.
@@ -84,6 +91,12 @@ class AutomationConfigRepository(context: Context) {
             .map(String::trim)
             .filter(String::isNotBlank)
             .toSet(),
+        runtimeMode = runCatching {
+            AutomationRuntimeMode.valueOf(
+                prefs.getString(KEY_RUNTIME_MODE, AutomationRuntimeMode.SCREEN.name)
+                    ?: AutomationRuntimeMode.SCREEN.name,
+            )
+        }.getOrDefault(AutomationRuntimeMode.SCREEN),
     )
 
     fun update(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig): HeadlessAutomationConfig {
@@ -114,6 +127,7 @@ class AutomationConfigRepository(context: Context) {
                 .filter(String::isNotBlank)
                 .sorted()
                 .joinToString(","))
+            .putString(KEY_RUNTIME_MODE, next.runtimeMode.name)
             .apply()
         return read()
     }
@@ -156,5 +170,6 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_SPIN_RESULT_DELAY = "spin_result_delay_ms"
         private const val KEY_ACTION_COOLDOWN = "action_cooldown_ms"
         private const val KEY_STRUCTURED_ALLOWLIST = "structured_allowed_build_fingerprints"
+        private const val KEY_RUNTIME_MODE = "runtime_mode"
     }
 }

@@ -15,20 +15,25 @@ class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
-    private lateinit var runtimeBridge: RuntimeBridgeClient
-    private lateinit var structuredController: StructuredAutomationController
+    private var runtimeBridge: RuntimeBridgeClient? = null
+    private var structuredController: StructuredAutomationController? = null
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        runtimeBridge = RuntimeBridgeClient()
-        structuredController = StructuredAutomationController(
-            bridge = runtimeBridge,
-            eventSink = ToastAutomationEventSink(this, configRepository),
-            // A verified fingerprint must be explicitly provisioned per device/build.
-            // Empty means structured observation is available but mutations stay disabled.
-            allowedBuildFingerprints = configRepository.read().structuredAllowedBuildFingerprints,
-        )
+        val initialConfig = configRepository.read()
+        if (initialConfig.runtimeMode == AutomationRuntimeMode.STRUCTURED) {
+            runtimeBridge = RuntimeBridgeClient()
+            structuredController = StructuredAutomationController(
+                bridge = runtimeBridge!!,
+                eventSink = ToastAutomationEventSink(this, configRepository),
+                // A verified fingerprint must be explicitly provisioned per device/build.
+                // Empty means structured observation is available but mutations stay disabled.
+                allowedBuildFingerprintsProvider = {
+                    configRepository.read().structuredAllowedBuildFingerprints
+                },
+            )
+        }
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
             eventSink = ToastAutomationEventSink(this, configRepository),
@@ -72,6 +77,8 @@ class HeadlessAutomationService : Service() {
     override fun onDestroy() {
         apiServer.stop()
         engine.shutdown()
+        structuredController?.stop()
+        runtimeBridge?.disconnect()
         super.onDestroy()
     }
 

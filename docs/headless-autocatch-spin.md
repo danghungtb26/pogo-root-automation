@@ -1,27 +1,28 @@
 # Headless auto-catch and PokéStop spin
 
-This mode runs the controller as an Android foreground service. The service's
-automation policy path is structured-runtime first and does not use screenshots
-or `input tap/swipe` to decide game state. The legacy screen driver remains in
-the source only for calibration/backward-compatible direct engine construction.
+This mode runs the controller as an Android foreground service. The service
+defaults to the existing screen automation path, so current headless behavior
+continues to work. The structured-runtime path is an explicit opt-in and does
+not use screenshots or `input tap/swipe` to decide game state.
 
 ## Execution path
 
 ```text
-Pokémon GO process
-  -> Zygisk runtime + companion broker
-  -> persistent binary bridge
-  -> RuntimeReady / structured observations
-  -> PogoProtoDecoder + PogoGameAdapter
-  -> AutomationCoordinator
-  -> AutomationRunner (one mutation, await outcome, resync)
-  -> client-owned runtime command
+Foreground service
+  -> runtimeMode=screen (default) -> screencap + analyzer + root input
+  -> runtimeMode=structured -> Zygisk runtime + companion broker
+       -> persistent binary bridge
+       -> RuntimeReady / structured observations
+       -> PogoProtoDecoder + PogoGameAdapter
+       -> AutomationRunner (one mutation, await outcome, resync)
+       -> persistent companion command channel
 ```
 
 The native probe-only build currently exposes liveness and a read-only ready
 event; it rejects commands until a verified binding announces the required
-capability. Screen capture/input helpers are retained only as legacy code and
-are not used by the service policy loop.
+capability. The structured mode is not selected automatically from readiness;
+it must be explicitly configured after live observations and bindings are
+verified.
 
 The local API is a control API for this tool; it is not a direct Niantic/Pokémon GO server API. Direct server RPC would require the live game session/auth/signing stack and is intentionally not used by this implementation.
 
@@ -106,6 +107,8 @@ Supported parameters:
 - `spinSwipeDurationMs`
 - `spinResultDelayMs`
 - `actionCooldownMs`
+- `runtimeMode=screen|structured` (takes effect when the service is next created)
+- `buildFingerprints=<comma-separated exact fingerprints>` for structured mutation allowlisting
 
 Example:
 
@@ -120,13 +123,13 @@ POST /v1/actions/catch
 POST /v1/actions/spin
 ```
 
-These are retained for legacy screen-driver calibration only; the production
-structured service rejects manual screen actions.
+Manual actions are available in `screen` mode. They are rejected in
+`structured` mode because that mode has no screen/input policy source.
 
 ## Current limitations
 
 The structured path still needs live observation hooks in the injected runtime and
 version-scoped client-owned invokers. Until those are verified, the native broker
-announces no mutation capabilities and the controller remains read-only. The
-legacy normalized-coordinate executor is retained for calibration/direct use,
-but is not a source of state or decisions for the foreground service.
+announces no mutation capabilities and the controller remains read-only. Its
+command channel is persistent end-to-end, but currently returns a safe rejection
+for unimplemented bindings. The screen path remains the service default.

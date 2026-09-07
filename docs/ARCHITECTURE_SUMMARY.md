@@ -3,9 +3,10 @@
 > Tài liệu này được tổng hợp trực tiếp từ source trong repository. Reviewed: 2026-09-07.
 
 > Cập nhật: structured runtime path đã được nối vào foreground service qua persistent
-> Unix-domain-socket bridge. Native side hiện vẫn chỉ probe/forward và công bố zero
-> capabilities, nên mutation giữ nguyên trạng thái read-only cho tới khi có fingerprint
-> và binding client-owned đã verify.
+> Unix-domain-socket bridge nhưng là chế độ opt-in. Mặc định service giữ screen
+> automation hiện có; native side hiện vẫn chỉ probe/forward và công bố zero
+> capabilities, nên mutation structured giữ nguyên trạng thái read-only cho tới khi
+> có fingerprint và binding client-owned đã verify.
 
 ## 1. Project đang làm gì?
 
@@ -15,7 +16,7 @@ Các khả năng chính hiện có:
 
 - Chạy controller dưới dạng Android foreground service.
 - Điều khiển từ host qua HTTP loopback `127.0.0.1:8765`, thường đi qua `adb forward`.
-- Structured auto-catch/auto-spin pipeline qua runtime bridge; screen driver chỉ còn là legacy calibration/fallback path.
+- Structured auto-catch/auto-spin pipeline qua runtime bridge (opt-in); screen driver vẫn là đường chạy mặc định của headless service.
 - Floating joystick nội bộ, phát GPS/network test location qua Android `LocationManager`.
 - Magisk/Zygisk module nhận diện process Pokémon GO, kiểm tra native runtime/IL2CPP và ghi runtime status.
 - Bộ domain model, planner và game-adapter contract cho hướng structured game-state automation.
@@ -28,8 +29,8 @@ Source hiện tại có hai luồng tồn tại song song:
 
 | Luồng | Trạng thái | Cách hoạt động |
 |---|---|---|
-| Structured runtime automation | Đường chạy của headless service | Runtime observation → protobuf/mapper → `GameAdapter` → core planner → serialized action runner |
-| Headless screen automation | Legacy fallback/direct construction | Chụp màn hình game, phân loại màn hình, gửi root input |
+| Structured runtime automation | Chế độ opt-in của headless service | Runtime observation → protobuf/mapper → `GameAdapter` → core planner → serialized action runner |
+| Headless screen automation | Đường chạy mặc định | Chụp màn hình game, phân loại màn hình, gửi root input |
 
 `HeadlessAutomationService` tạo `StructuredAutomationController`, giữ session/identity và đưa observation vào `AutomationRunner`. Runner chỉ gửi tối đa một mutation cho mỗi snapshot; build allowlist, capability, lifecycle, freshness và outcome đều được kiểm tra trước khi replan.
 

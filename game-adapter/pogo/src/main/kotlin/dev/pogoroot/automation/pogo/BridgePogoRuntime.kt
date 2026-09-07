@@ -19,6 +19,12 @@ data class PogoRuntimeMetadata(
     val lastObservationElapsedNs: Long? = null,
 )
 
+private data class CachedRuntimeState(
+    val lifecycle: GameLifecycleState,
+    val nearby: RawNearbyObservation?,
+    val encounter: RawEncounterObservation?,
+)
+
 /**
  * Controller-side POGO source. The runtime only tags/copies payloads; this
  * class is the sole owner of protobuf decoding and stable model mapping.
@@ -36,7 +42,9 @@ class BridgePogoRuntimeSource(
     private var nearby: RawNearbyObservation? = null
     private var encounter: RawEncounterObservation? = null
     private var lastError: String? = null
-    private val commandResults = ArrayDeque<BridgeEvent.AutomationCommandResult>()
+    private val pendingEvents = ArrayDeque<BridgeEvent>()
+    private val observationStates = LinkedHashMap<Long, CachedRuntimeState>()
+    private var selectedObservationState: CachedRuntimeState? = null
 
     override val capabilities: Set<GameCapability>
         get() = ready?.capabilities.orEmpty().mapNotNull { raw ->
@@ -66,6 +74,9 @@ class BridgePogoRuntimeSource(
         nearby = null
         encounter = null
         lastError = null
+        pendingEvents.clear()
+        observationStates.clear()
+        selectedObservationState = null
     }
 
     override fun disconnect() {
@@ -78,49 +89,81 @@ class BridgePogoRuntimeSource(
         lifecycle = GameLifecycleState.DISCONNECTED
         nearby = null
         encounter = null
-        commandResults.clear()
+        pendingEvents.clear()
+        observationStates.clear()
+        selectedObservationState = null
     }
 
-    override fun lifecycleState(): GameLifecycleState = lifecycle
+    override fun lifecycleState(): GameLifecycleState = selectedObservationState?.lifecycle ?: lifecycle
 
-    override fun readNearby(): Result<RawNearbyObservation> = refresh().mapCatching {
-        nearby ?: error(lastError ?: "no nearby observation received")
-    }
-
-    override fun readEncounter(): Result<RawEncounterObservation?> = refresh().mapCatching {
-        if (lifecycle != GameLifecycleState.ENCOUNTER) null
-        else encounter ?: error(lastError ?: "no encounter observation received")
-    }
-
-    fun drainCommandResults(): Result<List<BridgeEvent.AutomationCommandResult>> = refresh().map {
-        buildList {
-            while (commandResults.isNotEmpty()) add(commandResults.removeFirst())
+    override fun readNearby(): Result<RawNearbyObservation> = runCatching {
+        val state = selectedObservationState
+        state?.nearby ?: if (state == null) {
+            nearby ?: error(lastError ?: "no nearby observation received")
+        } else {
+            error(lastError ?: "no nearby observation in selected observation state")
         }
+    }
+
+    override fun readEncounter(): Result<RawEncounterObservation?> = runCatching {
+        val state = selectedObservationState
+        if (state != null) {
+            if (state.lifecycle != GameLifecycleState.ENCOUNTER) null
+            else state.encounter ?: error(lastError ?: "no encounter observation in selected observation state")
+        } else if (lifecycle != GameLifecycleState.ENCOUNTER) {
+            null
+        } else {
+            encounter ?: error(lastError ?: "no encounter observation received")
+        }
+    }
+
+    fun drainEvents(): Result<List<BridgeEvent>> = runCatching {
+        buildList {
+            while (pendingEvents.isNotEmpty()) add(pendingEvents.removeFirst())
+        }
+    }
+
+    fun selectObservation(observationSeq: Long): Result<Unit> = runCatching {
+        selectedObservationState = observationStates[observationSeq]
+            ?: error("observation state $observationSeq is no longer cached")
+    }
+
+    fun clearObservationSelection() {
+        selectedObservationState = null
     }
 
     fun refresh(): Result<Unit> = runCatching {
         val current = ready ?: error("runtime is not connected")
-        bridge.receiveEvents().getOrThrow().forEach { event ->
-            if (event.protocolVersion != BridgeProtocol.VERSION) {
-                error("bridge protocol mismatch")
+        bridge.receiveEvents().getOrThrow()
+            .sortedBy { it.messageSeq ?: Long.MAX_VALUE }
+            .forEach { event ->
+                if (event.protocolVersion != BridgeProtocol.VERSION) {
+                    error("bridge protocol mismatch")
+                }
+                val eventSession = event.runtimeSessionId
+                if (eventSession != null && eventSession != current.runtimeSessionId) return@forEach
+                if (!matchesRuntimeIdentity(event, current)) {
+                    lastError = "runtime identity mismatch"
+                    return@forEach
+                }
+                val sequence = event.messageSeq
+                if (sequence != null && sequence <= lastMessageSeq) return@forEach
+                if (sequence != null) lastMessageSeq = sequence
+                consume(event)
+                when (event) {
+                    is BridgeEvent.ObservationEvent,
+                    is BridgeEvent.AutomationCommandResult,
+                    is BridgeEvent.BindingLost,
+                    is BridgeEvent.RuntimeError,
+                    -> pendingEvents.addLast(event)
+                    else -> Unit
+                }
             }
-            val eventSession = event.runtimeSessionId
-            if (eventSession != null && eventSession != current.runtimeSessionId) return@forEach
-            if (!matchesRuntimeIdentity(event, current)) {
-                lastError = "runtime identity mismatch"
-                return@forEach
-            }
-            val sequence = event.messageSeq
-            if (sequence != null && sequence <= lastMessageSeq) return@forEach
-            if (sequence != null) lastMessageSeq = sequence
-            consume(event)
-        }
     }
 
     private fun consume(event: BridgeEvent) {
         when (event) {
             is BridgeEvent.ObservationEvent -> consumeObservation(event)
-            is BridgeEvent.AutomationCommandResult -> commandResults.addLast(event)
             is BridgeEvent.BindingLost -> {
                 lifecycle = GameLifecycleState.DISCONNECTED
                 lastError = event.reason
@@ -189,6 +232,14 @@ class BridgePogoRuntimeSource(
             ObservationType.POKEMON_STORAGE,
             -> Unit
         }
+        observationStates[event.messageSeq] = CachedRuntimeState(lifecycle, nearby, encounter)
+        while (observationStates.size > MAX_OBSERVATION_STATES) {
+            observationStates.remove(observationStates.entries.first().key)
+        }
+    }
+
+    private companion object {
+        const val MAX_OBSERVATION_STATES = 64
     }
 }
 
@@ -199,11 +250,17 @@ class BridgePogoRuntimeSource(
 class BridgeBackedPogoActionExecutor(
     private val bridge: RuntimeBridge,
     private val runtimeReady: () -> BridgeEvent.RuntimeReady?,
-    private val allowedBuildFingerprints: Set<String> = emptySet(),
+    allowedBuildFingerprints: Set<String> = emptySet(),
     private val nowEpochMs: () -> Long = System::currentTimeMillis,
     private val nowElapsedNs: () -> Long = System::nanoTime,
     private val timeoutNs: Long = 15_000_000_000L,
 ) : PogoActionExecutor {
+    @Volatile private var currentAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
+
+    fun updateAllowedBuildFingerprints(fingerprints: Set<String>) {
+        currentAllowedBuildFingerprints = fingerprints.toSet()
+    }
+
     override val capabilities: Set<GameCapability>
         get() = runtimeReady()?.capabilities.orEmpty().mapNotNull { raw ->
             runCatching { GameCapability.valueOf(raw) }.getOrNull()
@@ -240,7 +297,7 @@ class BridgeBackedPogoActionExecutor(
         require(request.buildFingerprint == null || request.buildFingerprint == ready.buildFingerprint) {
             "action build fingerprint does not match runtime"
         }
-        require(allowedBuildFingerprints.contains(ready.buildFingerprint)) {
+        require(currentAllowedBuildFingerprints.contains(ready.buildFingerprint)) {
             "mutation blocked: build fingerprint is not allowlisted"
         }
 

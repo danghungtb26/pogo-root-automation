@@ -930,3 +930,46 @@ CommandResult:
 | AC-27 | Timeout semantics | Timeout trước acceptance và có xác nhận chưa deliver → `SAFE_TIMEOUT`; sau acceptance/started hoặc delivery không rõ → `INDETERMINATE` | Không auto-retry mutation indeterminate |
 | AC-28 | Broker ownership | Root companion là broker duy nhất giữa runtime và app; socket peer được validate bằng credential/UID | App không authorized bị reject |
 | AC-29 | Sequence vocabulary | Message runtime dùng `runtimeSessionId` + `messageSeq`; command dùng `commandId` + `basedOnObservationSeq` | Không trộn nhiều sequence names |
+
+## Section 15 — Review update: giữ screen path, persistent command channel và ordering
+
+### 15.1. Không disable automation screen hiện có
+
+`AutomationRuntimeMode.SCREEN` được thêm làm giá trị mặc định. `HeadlessAutomationService`
+chỉ khởi tạo `RuntimeBridgeClient`/`StructuredAutomationController` khi cấu hình là
+`STRUCTURED`; vì vậy engine screen hiện có tiếp tục là đường chạy mặc định. Structured
+runtime chỉ được bật explicit sau khi live observations và bindings đã verify.
+
+### 15.2. Companion fd được giữ sống cho command path
+
+Sau probe complete, root companion chuyển ownership của một duplicate fd cho broker,
+còn runtime-side probe thread giữ fd gốc để đọc command và gửi result:
+
+```text
+PoGo runtime
+    ↕ persistent companion fd
+Root companion broker
+    ↕ runtime.sock
+Controller app
+```
+
+Command được broker forward nguyên payload tới runtime; result đi ngược lại cùng
+companion channel. Khi binding chưa được implement, runtime trả `REJECTED` an toàn.
+
+### 15.3. Một lần drain và snapshot theo đúng sequence
+
+Mỗi controller tick chỉ gọi một lần `refresh()`/event drain. Event được sắp theo
+`messageSeq`, result và observation được xử lý trong cùng thứ tự, còn read methods chỉ
+đọc cache. Controller chọn cached state của chính observation đang xử lý để tránh ghép
+state ở sequence mới hơn vào observation cũ.
+
+### 15.4. Safety config và wire contract
+
+Allowlist fingerprint được đọc qua provider ở mỗi tick và cập nhật cả session manager
+lẫn executor, nên API update có hiệu lực ngay trong service đang chạy. Các enum trên
+wire dùng giá trị explicit, không còn phụ thuộc `ordinal`; broker/runtime cũng dùng
+`CommandPhase.REJECTED = 4` tương ứng.
+
+Các race lifecycle nhỏ hơn cũng được xử lý: broker cleanup chỉ unlink socket nếu còn là
+session owner hiện tại, và file `controller.uids` được overwrite bằng UID hiện hành để
+không giữ authorization stale.

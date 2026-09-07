@@ -1,5 +1,4 @@
 #include <android/log.h>
-#include <atomic>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -15,6 +14,7 @@
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
+#include <mutex>
 #include <vector>
 #include <string>
 
@@ -35,6 +35,8 @@ constexpr uint16_t kBridgeProtocolVersion = 2U;
 constexpr uint32_t kBridgeCommandType = 4U;
 constexpr uint32_t kBridgeCommandResultType = 5U;
 constexpr uint32_t kBridgeHardMessageBytes = 4U * 1024U * 1024U;
+constexpr uint32_t kRuntimeCommandMagic = 0x504F4743U;
+constexpr uint32_t kRuntimeResultMagic = 0x504F4752U;
 constexpr int kProbeAttempts = 60;
 constexpr int kAssemblySurveyAttempts = 20;
 constexpr useconds_t kProbeDelayUs = 500000U;
@@ -107,12 +109,15 @@ struct ProbeContext {
 
 struct BrokerContext {
     int32_t pid;
+    int runtime_fd;
     char process_name[128];
     char runtime_session_id[64];
     uint64_t next_message_seq = 1U;
 };
 
-std::atomic_bool g_broker_running{false};
+std::mutex g_broker_mutex;
+bool g_broker_running = false;
+std::string g_broker_session_id;
 
 struct Il2CppDomain;
 struct Il2CppAssembly;
@@ -240,6 +245,16 @@ bool read_be32(const std::vector<uint8_t> &input, size_t *offset, uint32_t *valu
     return true;
 }
 
+bool read_be64(const std::vector<uint8_t> &input, size_t *offset, uint64_t *value) {
+    if (offset == nullptr || value == nullptr || *offset + 8U > input.size()) return false;
+    *value = 0U;
+    for (size_t index = 0U; index < 8U; ++index) {
+        *value = (*value << 8U) | input[*offset + index];
+    }
+    *offset += 8U;
+    return true;
+}
+
 bool read_string(const std::vector<uint8_t> &input, size_t *offset, std::string *value) {
     uint32_t length = 0U;
     if (value == nullptr || !read_be32(input, offset, &length) || length > 65536U ||
@@ -270,21 +285,37 @@ bool authorized_controller(int fd) {
     return allowed;
 }
 
+bool encode_bridge_frame(
+    uint16_t message_type,
+    uint64_t message_seq,
+    const std::vector<uint8_t> &payload,
+    std::vector<uint8_t> *frame
+) {
+    if (frame == nullptr || payload.size() > kBridgeHardMessageBytes) return false;
+    frame->clear();
+    frame->reserve(16U + payload.size());
+    append_u32(frame, static_cast<uint32_t>(payload.size()));
+    frame->push_back(static_cast<uint8_t>((kBridgeProtocolVersion >> 8U) & 0xffU));
+    frame->push_back(static_cast<uint8_t>(kBridgeProtocolVersion & 0xffU));
+    frame->push_back(static_cast<uint8_t>((message_type >> 8U) & 0xffU));
+    frame->push_back(static_cast<uint8_t>(message_type & 0xffU));
+    append_u64(frame, message_seq);
+    frame->insert(frame->end(), payload.begin(), payload.end());
+    return true;
+}
+
 bool send_bridge_frame(int fd, uint16_t message_type, uint64_t message_seq, const std::vector<uint8_t> &payload) {
-    if (payload.size() > kBridgeHardMessageBytes) return false;
     std::vector<uint8_t> frame;
-    frame.reserve(16U + payload.size());
-    append_u32(&frame, static_cast<uint32_t>(payload.size()));
-    frame.push_back(static_cast<uint8_t>((kBridgeProtocolVersion >> 8U) & 0xffU));
-    frame.push_back(static_cast<uint8_t>(kBridgeProtocolVersion & 0xffU));
-    frame.push_back(static_cast<uint8_t>((message_type >> 8U) & 0xffU));
-    frame.push_back(static_cast<uint8_t>(message_type & 0xffU));
-    append_u64(&frame, message_seq);
-    frame.insert(frame.end(), payload.begin(), payload.end());
+    if (!encode_bridge_frame(message_type, message_seq, payload, &frame)) return false;
     return write_full(fd, frame.data(), frame.size());
 }
 
-bool read_bridge_frame(int fd, uint16_t *message_type, std::vector<uint8_t> *payload) {
+bool read_bridge_frame(
+    int fd,
+    uint16_t *message_type,
+    uint64_t *message_seq,
+    std::vector<uint8_t> *payload
+) {
     uint8_t length_bytes[4]{};
     if (!read_full(fd, length_bytes, sizeof(length_bytes))) return false;
     const uint32_t length = (static_cast<uint32_t>(length_bytes[0]) << 24U) |
@@ -298,7 +329,39 @@ bool read_bridge_frame(int fd, uint16_t *message_type, std::vector<uint8_t> *pay
     const uint16_t protocol = static_cast<uint16_t>(header[0] << 8U | header[1]);
     if (protocol != kBridgeProtocolVersion) return false;
     if (message_type != nullptr) *message_type = static_cast<uint16_t>(header[2] << 8U | header[3]);
+    if (message_seq != nullptr) {
+        *message_seq = 0U;
+        for (size_t index = 0U; index < 8U; ++index) {
+            *message_seq = (*message_seq << 8U) | header[4U + index];
+        }
+    }
     if (payload == nullptr) return false;
+    payload->resize(length);
+    return length == 0U || read_full(fd, payload->data(), payload->size());
+}
+
+bool send_internal_message(int fd, uint32_t magic, const std::vector<uint8_t> &payload) {
+    if (payload.size() > kBridgeHardMessageBytes) return false;
+    std::vector<uint8_t> envelope;
+    envelope.reserve(8U + payload.size());
+    append_u32(&envelope, magic);
+    append_u32(&envelope, static_cast<uint32_t>(payload.size()));
+    envelope.insert(envelope.end(), payload.begin(), payload.end());
+    return write_full(fd, envelope.data(), envelope.size());
+}
+
+bool read_internal_message(int fd, uint32_t expected_magic, std::vector<uint8_t> *payload) {
+    uint8_t header[8]{};
+    if (payload == nullptr || !read_full(fd, header, sizeof(header))) return false;
+    const uint32_t magic = (static_cast<uint32_t>(header[0]) << 24U) |
+        (static_cast<uint32_t>(header[1]) << 16U) |
+        (static_cast<uint32_t>(header[2]) << 8U) |
+        static_cast<uint32_t>(header[3]);
+    const uint32_t length = (static_cast<uint32_t>(header[4]) << 24U) |
+        (static_cast<uint32_t>(header[5]) << 16U) |
+        (static_cast<uint32_t>(header[6]) << 8U) |
+        static_cast<uint32_t>(header[7]);
+    if (magic != expected_magic || length > kBridgeHardMessageBytes) return false;
     payload->resize(length);
     return length == 0U || read_full(fd, payload->data(), payload->size());
 }
@@ -329,6 +392,56 @@ void append_optional_absent(std::vector<uint8_t> *output) {
     output->push_back(0U);
 }
 
+enum class CompanionMessageType {
+    kRuntimeEvent,
+    kRuntimeResult,
+};
+
+bool read_companion_message(
+    int fd,
+    CompanionMessageType *message_type,
+    RuntimeEvent *runtime_event,
+    std::vector<uint8_t> *runtime_result
+) {
+    uint8_t magic_bytes[4]{};
+    if (message_type == nullptr || !read_full(fd, magic_bytes, sizeof(magic_bytes))) return false;
+    const uint32_t magic = (static_cast<uint32_t>(magic_bytes[0]) << 24U) |
+        (static_cast<uint32_t>(magic_bytes[1]) << 16U) |
+        (static_cast<uint32_t>(magic_bytes[2]) << 8U) |
+        static_cast<uint32_t>(magic_bytes[3]);
+    if (magic == kRuntimeEventMagic) {
+        if (runtime_event == nullptr) return false;
+        memset(runtime_event, 0, sizeof(*runtime_event));
+        memcpy(runtime_event, magic_bytes, sizeof(magic_bytes));
+        if (!read_full(
+                fd,
+                reinterpret_cast<uint8_t *>(runtime_event) + sizeof(magic_bytes),
+                sizeof(*runtime_event) - sizeof(magic_bytes)
+            )) return false;
+        *message_type = CompanionMessageType::kRuntimeEvent;
+        return true;
+    }
+    if (magic != kRuntimeResultMagic || runtime_result == nullptr) return false;
+    uint8_t length_bytes[4]{};
+    if (!read_full(fd, length_bytes, sizeof(length_bytes))) return false;
+    const uint32_t length = (static_cast<uint32_t>(length_bytes[0]) << 24U) |
+        (static_cast<uint32_t>(length_bytes[1]) << 16U) |
+        (static_cast<uint32_t>(length_bytes[2]) << 8U) |
+        static_cast<uint32_t>(length_bytes[3]);
+    if (length > kBridgeHardMessageBytes) return false;
+    runtime_result->resize(length);
+    if (length != 0U && !read_full(fd, runtime_result->data(), runtime_result->size())) return false;
+    *message_type = CompanionMessageType::kRuntimeResult;
+    return true;
+}
+
+bool broker_is_current(const char *runtime_session_id) {
+    std::lock_guard<std::mutex> lock(g_broker_mutex);
+    return runtime_session_id != nullptr &&
+        g_broker_running &&
+        g_broker_session_id == runtime_session_id;
+}
+
 bool send_runtime_ready(int fd, BrokerContext &context) {
     const uint64_t message_seq = context.next_message_seq++;
     std::vector<uint8_t> payload;
@@ -350,7 +463,13 @@ bool send_runtime_ready(int fd, BrokerContext &context) {
     return send_bridge_frame(fd, 2U, message_seq, payload);
 }
 
-bool send_command_rejected(int fd, BrokerContext &context, const char *command_id) {
+bool send_command_result(
+    int fd,
+    BrokerContext &context,
+    const char *command_id,
+    const char *error_code,
+    const char *message
+) {
     if (command_id == nullptr || command_id[0] == '\0') return false;
     const uint64_t message_seq = context.next_message_seq++;
     std::vector<uint8_t> payload;
@@ -358,80 +477,167 @@ bool send_command_rejected(int fd, BrokerContext &context, const char *command_i
     append_string(&payload, context.runtime_session_id);
     append_u64(&payload, message_seq);
     append_string(&payload, command_id);
-    append_u32(&payload, 3U);  // CommandPhase.REJECTED
-    append_nullable_string(&payload, "binding_not_implemented");
-    append_nullable_string(&payload, "runtime probe has no client-owned action binding");
+    append_u32(&payload, 4U);  // CommandPhase.REJECTED
+    append_nullable_string(&payload, error_code);
+    append_nullable_string(&payload, message);
     append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
     append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
     return send_bridge_frame(fd, kBridgeCommandResultType, message_seq, payload);
 }
 
-void handle_controller(int fd, BrokerContext &context) {
-    if (!authorized_controller(fd)) return;
-    if (!send_runtime_ready(fd, context)) return;
+bool send_runtime_command(int fd, uint16_t message_type, uint64_t message_seq, const std::vector<uint8_t> &payload) {
+    std::vector<uint8_t> command;
+    command.reserve(12U + payload.size());
+    append_u32(&command, static_cast<uint32_t>(message_type));
+    append_u64(&command, message_seq);
+    command.insert(command.end(), payload.begin(), payload.end());
+    return send_internal_message(fd, kRuntimeCommandMagic, command);
+}
+
+bool parse_runtime_result(
+    const std::vector<uint8_t> &payload,
+    std::string *command_id,
+    std::string *error_code,
+    std::string *message
+) {
+    size_t offset = 0U;
+    uint32_t version = 0U;
+    if (command_id == nullptr || error_code == nullptr || message == nullptr ||
+        !read_be32(payload, &offset, &version) || version != 1U ||
+        !read_string(payload, &offset, command_id) ||
+        !read_string(payload, &offset, error_code) ||
+        !read_string(payload, &offset, message)) return false;
+    return offset == payload.size();
+}
+
+bool handle_controller(int fd, BrokerContext &context) {
+    if (!authorized_controller(fd)) return true;
+    if (!send_runtime_ready(fd, context)) return true;
 
     while (kill(context.pid, 0) == 0) {
-        pollfd descriptor{};
-        descriptor.fd = fd;
-        descriptor.events = POLLIN;
-        if (poll(&descriptor, 1, 1000) <= 0) continue;
-        uint16_t message_type = 0U;
-        std::vector<uint8_t> payload;
-        if (!read_bridge_frame(fd, &message_type, &payload)) return;
-        if (message_type != kBridgeCommandType) continue;
+        if (!broker_is_current(context.runtime_session_id)) return false;
+        pollfd descriptors[2]{};
+        descriptors[0].fd = fd;
+        descriptors[0].events = POLLIN;
+        descriptors[1].fd = context.runtime_fd;
+        descriptors[1].events = POLLIN;
+        if (poll(descriptors, 2, 1000) <= 0) continue;
 
-        size_t offset = 0U;
-        uint32_t payload_version = 0U;
-        std::string session_id;
-        std::string command_id;
-        if (!read_be32(payload, &offset, &payload_version) || payload_version != 1U ||
-            !read_string(payload, &offset, &session_id) ||
-            !read_string(payload, &offset, &command_id)) return;
-        if (session_id != context.runtime_session_id) return;
-        if (!send_command_rejected(fd, context, command_id.c_str())) return;
+        if ((descriptors[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) return false;
+        if ((descriptors[1].revents & POLLIN) != 0) {
+            CompanionMessageType message_type{};
+            RuntimeEvent runtime_event{};
+            std::vector<uint8_t> runtime_result;
+            if (!read_companion_message(context.runtime_fd, &message_type, &runtime_event, &runtime_result)) {
+                return false;
+            }
+            if (message_type == CompanionMessageType::kRuntimeResult) {
+                std::string command_id;
+                std::string error_code;
+                std::string message;
+                if (!parse_runtime_result(runtime_result, &command_id, &error_code, &message) ||
+                    !send_command_result(fd, context, command_id.c_str(), error_code.c_str(), message.c_str())) {
+                    return true;
+                }
+            }
+        }
+
+        if ((descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) return true;
+        if ((descriptors[0].revents & POLLIN) != 0) {
+            uint16_t message_type = 0U;
+            uint64_t message_seq = 0U;
+            std::vector<uint8_t> payload;
+            if (!read_bridge_frame(fd, &message_type, &message_seq, &payload)) return true;
+            if (message_type != kBridgeCommandType) continue;
+
+            size_t offset = 0U;
+            uint32_t payload_version = 0U;
+            std::string session_id;
+            std::string command_id;
+            if (!read_be32(payload, &offset, &payload_version) || payload_version != 1U ||
+                !read_string(payload, &offset, &session_id) ||
+                !read_string(payload, &offset, &command_id) ||
+                session_id != context.runtime_session_id) return true;
+            if (!send_runtime_command(context.runtime_fd, message_type, message_seq, payload)) return false;
+        }
     }
+    return false;
+}
+
+bool finish_runtime_bridge_broker(const char *runtime_session_id) {
+    std::lock_guard<std::mutex> lock(g_broker_mutex);
+    if (runtime_session_id != nullptr && g_broker_session_id == runtime_session_id) {
+        g_broker_running = false;
+        g_broker_session_id.clear();
+        unlink(kBridgeSocketPath);
+        return true;
+    }
+    return false;
 }
 
 void *runtime_bridge_broker_thread(void *opaque_context) {
     auto *context = static_cast<BrokerContext *>(opaque_context);
     if (context == nullptr) {
-        g_broker_running.store(false);
         return nullptr;
     }
 
-    const int server = make_bridge_server();
+    int server = -1;
+    {
+        // Serialize socket replacement with a newer session starting. A stale
+        // broker may still be unwinding, but it must never remove the current
+        // session's socket during cleanup.
+        std::lock_guard<std::mutex> lock(g_broker_mutex);
+        if (g_broker_session_id != context->runtime_session_id) {
+            close(context->runtime_fd);
+            delete context;
+            return nullptr;
+        }
+        server = make_bridge_server();
+    }
     if (server < 0) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "cannot create runtime bridge socket");
-        g_broker_running.store(false);
+        close(context->runtime_fd);
+        finish_runtime_bridge_broker(context->runtime_session_id);
         delete context;
         return nullptr;
     }
 
-    while (kill(context->pid, 0) == 0) {
+    while (kill(context->pid, 0) == 0 && broker_is_current(context->runtime_session_id)) {
         pollfd descriptor{};
         descriptor.fd = server;
         descriptor.events = POLLIN;
         const int polled = poll(&descriptor, 1, 1000);
         if (polled <= 0) continue;
+        if (!broker_is_current(context->runtime_session_id)) break;
         const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
         if (client < 0) continue;
-        handle_controller(client, *context);
+        const bool runtime_alive = handle_controller(client, *context);
         close(client);
+        if (!runtime_alive) break;
     }
 
     close(server);
-    unlink(kBridgeSocketPath);
-    g_broker_running.store(false);
+    close(context->runtime_fd);
+    finish_runtime_bridge_broker(context->runtime_session_id);
     delete context;
     return nullptr;
 }
 
-void start_runtime_bridge_broker(const RuntimeState &state) {
-    bool expected = false;
-    if (!g_broker_running.compare_exchange_strong(expected, true)) return;
+void start_runtime_bridge_broker(const RuntimeState &state, int runtime_fd) {
+    if (runtime_fd < 0) return;
+    {
+        std::lock_guard<std::mutex> lock(g_broker_mutex);
+        if (g_broker_running && g_broker_session_id == state.runtime_session_id) {
+            close(runtime_fd);
+            return;
+        }
+        g_broker_running = true;
+        g_broker_session_id = state.runtime_session_id;
+    }
 
     auto *context = new BrokerContext{};
     context->pid = state.pid;
+    context->runtime_fd = runtime_fd;
     copy_string(context->process_name, sizeof(context->process_name), state.process_name);
     copy_string(
         context->runtime_session_id,
@@ -440,8 +646,9 @@ void start_runtime_bridge_broker(const RuntimeState &state) {
     );
     pthread_t thread{};
     if (pthread_create(&thread, nullptr, runtime_bridge_broker_thread, context) != 0) {
+        close(runtime_fd);
         delete context;
-        g_broker_running.store(false);
+        finish_runtime_bridge_broker(state.runtime_session_id);
         return;
     }
     pthread_detach(thread);
@@ -758,9 +965,45 @@ void companion_handler(int fd) {
             copy_string(state.candidate_classes, sizeof(state.candidate_classes), event.candidate_classes);
             persist_runtime_state(state);
             if ((event.probe_flags & kProbeComplete) != 0U) {
-                start_runtime_bridge_broker(state);
+                const int broker_fd = dup(fd);
+                if (broker_fd >= 0) start_runtime_bridge_broker(state, broker_fd);
+                close(fd);
+                return;
             }
         }
+    }
+}
+
+bool send_runtime_rejected(int fd, const char *command_id) {
+    if (command_id == nullptr || command_id[0] == '\0') return false;
+    std::vector<uint8_t> result;
+    append_u32(&result, 1U);
+    append_string(&result, command_id);
+    append_string(&result, "binding_not_implemented");
+    append_string(&result, "runtime probe has no client-owned action binding");
+    return send_internal_message(fd, kRuntimeResultMagic, result);
+}
+
+void runtime_command_channel_loop(const ProbeContext &context) {
+    while (kill(getpid(), 0) == 0) {
+        std::vector<uint8_t> command;
+        if (!read_internal_message(context.fd, kRuntimeCommandMagic, &command)) return;
+
+        size_t offset = 0U;
+        uint32_t message_type = 0U;
+        uint64_t message_seq = 0U;
+        uint32_t payload_version = 0U;
+        std::string session_id;
+        std::string command_id;
+        if (!read_be32(command, &offset, &message_type) ||
+            !read_be64(command, &offset, &message_seq) ||
+            !read_be32(command, &offset, &payload_version) ||
+            !read_string(command, &offset, &session_id) ||
+            !read_string(command, &offset, &command_id) ||
+            message_type != kBridgeCommandType || payload_version != 1U ||
+            message_seq == 0U || session_id.empty() || command_id.empty() ||
+            offset != command.size()) return;
+        if (!send_runtime_rejected(context.fd, command_id.c_str())) return;
     }
 }
 
@@ -813,6 +1056,7 @@ void *binding_probe_thread(void *opaque_context) {
             event.translation_layer
         );
     }
+    runtime_command_channel_loop(*context);
     close(context->fd);
     delete context;
     return nullptr;

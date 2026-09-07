@@ -70,7 +70,7 @@ object BridgePayloadCodec {
     private fun writeRuntimeStatus(output: DataOutputStream, value: BridgeEvent.RuntimeStatus) {
         writeString(output, value.processName)
         writeNullableString(output, value.gameVersion)
-        output.writeInt(value.lifecycleState.ordinal)
+        output.writeInt(value.lifecycleState.wireValue())
         writeNullableString(output, value.runtimeSessionId)
         writeNullableLong(output, value.messageSeq)
     }
@@ -92,7 +92,7 @@ object BridgePayloadCodec {
     private fun writeObservation(output: DataOutputStream, value: BridgeEvent.ObservationEvent) {
         writeString(output, value.runtimeSessionId)
         output.writeLong(value.messageSeq)
-        output.writeInt(value.observationType.ordinal)
+        output.writeInt(value.observationType.wireValue)
         output.writeInt(value.payloadVersion)
         writeBytes(output, value.payload)
         output.writeLong(value.observedAtEpochMs)
@@ -103,7 +103,7 @@ object BridgePayloadCodec {
         writeString(output, value.buildFingerprint)
         writeNullableDouble(output, value.playerLatitude)
         writeNullableDouble(output, value.playerLongitude)
-        writeNullableEnum(output, value.lifecycleState)
+        writeNullableLifecycle(output, value.lifecycleState)
     }
 
     private fun writeCommand(output: DataOutputStream, value: BridgeEvent.AutomationCommand) {
@@ -111,7 +111,7 @@ object BridgePayloadCodec {
         writeString(output, value.commandId)
         writeAction(output, value.action)
         output.writeLong(value.basedOnObservationSeq)
-        writeNullableEnum(output, value.expectedLifecycle)
+        writeNullableLifecycle(output, value.expectedLifecycle)
         output.writeLong(value.expiresAtElapsedNs)
         output.writeInt(value.pid)
         writeString(output, value.processName)
@@ -123,7 +123,7 @@ object BridgePayloadCodec {
         writeString(output, value.runtimeSessionId)
         output.writeLong(value.messageSeq)
         writeString(output, value.commandId)
-        output.writeInt(value.phase.ordinal)
+        output.writeInt(value.phase.wireValue)
         writeNullableString(output, value.errorCode)
         writeNullableString(output, value.message)
         output.writeLong(value.observedAtEpochMs)
@@ -164,7 +164,7 @@ object BridgePayloadCodec {
             output.writeDouble(spawn.position.longitude)
             output.writeLong(spawn.firstSeenAtEpochMs)
             writeNullableLong(output, spawn.expiresAtEpochMs)
-            output.writeInt(spawn.expiryConfidence.ordinal)
+            output.writeInt(spawn.expiryConfidence.wireValue())
         }
     }
 
@@ -185,7 +185,7 @@ object BridgePayloadCodec {
     private fun readObservation(input: DataInputStream): BridgeEvent.ObservationEvent = BridgeEvent.ObservationEvent(
         runtimeSessionId = readString(input),
         messageSeq = input.readLong(),
-        observationType = readEnum(input, ObservationType.entries),
+        observationType = readEnum(input, ObservationType.entries) { it.wireValue },
         payloadVersion = input.readInt(),
         payload = readBytes(input),
         observedAtEpochMs = input.readLong(),
@@ -196,7 +196,7 @@ object BridgePayloadCodec {
         buildFingerprint = readString(input),
         playerLatitude = readNullableDouble(input),
         playerLongitude = readNullableDouble(input),
-        lifecycleState = readNullableEnum(input, GameLifecycleState.entries),
+        lifecycleState = readNullableLifecycle(input),
     )
 
     private fun readCommand(input: DataInputStream): BridgeEvent.AutomationCommand = BridgeEvent.AutomationCommand(
@@ -204,7 +204,7 @@ object BridgePayloadCodec {
         commandId = readString(input),
         action = readAction(input),
         basedOnObservationSeq = input.readLong(),
-        expectedLifecycle = readNullableEnum(input, GameLifecycleState.entries),
+        expectedLifecycle = readNullableLifecycle(input),
         expiresAtElapsedNs = input.readLong(),
         pid = input.readInt(),
         processName = readString(input),
@@ -216,7 +216,7 @@ object BridgePayloadCodec {
         runtimeSessionId = readString(input),
         messageSeq = input.readLong(),
         commandId = readString(input),
-        phase = readEnum(input, CommandPhase.entries),
+        phase = readEnum(input, CommandPhase.entries) { it.wireValue },
         errorCode = readNullableString(input),
         message = readNullableString(input),
         observedAtEpochMs = input.readLong(),
@@ -247,7 +247,7 @@ object BridgePayloadCodec {
                 output.writeInt(1)
                 output.writeDouble(action.target.latitude)
                 output.writeDouble(action.target.longitude)
-                output.writeInt(action.mode.ordinal)
+                output.writeInt(action.mode.wireValue())
             }
             is AutomationAction.OpenEncounter -> {
                 output.writeInt(2)
@@ -256,7 +256,7 @@ object BridgePayloadCodec {
             is AutomationAction.Catch -> {
                 output.writeInt(3)
                 writeString(output, action.encounterId)
-                output.writeInt(action.reason.ordinal)
+                output.writeInt(action.reason.wireValue())
             }
             is AutomationAction.Spin -> {
                 output.writeInt(4)
@@ -273,13 +273,13 @@ object BridgePayloadCodec {
             }
             is AutomationAction.Alert -> {
                 output.writeInt(7)
-                output.writeInt(action.kind.ordinal)
+                output.writeInt(action.kind.wireValue())
                 writeString(output, action.message)
             }
             is AutomationAction.UseBerry -> {
                 output.writeInt(8)
                 writeString(output, action.encounterId)
-                output.writeInt(action.berryType.ordinal)
+                output.writeInt(action.berryType.wireValue())
             }
         }
     }
@@ -287,23 +287,23 @@ object BridgePayloadCodec {
     private fun readAction(input: DataInputStream): AutomationAction = when (input.readInt()) {
         1 -> AutomationAction.MoveTo(
             target = GeoPoint(input.readDouble(), input.readDouble()),
-            mode = readEnum(input, MovementMode.entries),
+            mode = readEnum(input, MovementMode.entries) { it.wireValue() },
         )
         2 -> AutomationAction.OpenEncounter(readString(input))
         3 -> AutomationAction.Catch(
             encounterId = readString(input),
-            reason = readEnum(input, CatchReason.entries),
+            reason = readEnum(input, CatchReason.entries) { it.wireValue() },
         )
         4 -> AutomationAction.Spin(readString(input))
         5 -> AutomationAction.DiscardItem(input.readInt(), input.readInt())
         6 -> AutomationAction.TransferPokemon(readString(input))
         7 -> AutomationAction.Alert(
-            kind = readEnum(input, AlertKind.entries),
+            kind = readEnum(input, AlertKind.entries) { it.wireValue() },
             message = readString(input),
         )
         8 -> AutomationAction.UseBerry(
             encounterId = readString(input),
-            berryType = readEnum(input, BerryType.entries),
+            berryType = readEnum(input, BerryType.entries) { it.wireValue() },
         )
         else -> error("unknown automation action tag")
     }
@@ -311,7 +311,7 @@ object BridgePayloadCodec {
     private fun readRuntimeStatus(input: DataInputStream): BridgeEvent.RuntimeStatus = BridgeEvent.RuntimeStatus(
         processName = readString(input),
         gameVersion = readNullableString(input),
-        lifecycleState = readEnum(input, GameLifecycleState.entries),
+        lifecycleState = readEnum(input, GameLifecycleState.entries) { it.wireValue() },
         runtimeSessionId = readNullableString(input),
         messageSeq = readNullableLong(input),
     )
@@ -331,7 +331,7 @@ object BridgePayloadCodec {
                 position = GeoPoint(input.readDouble(), input.readDouble()),
                 firstSeenAtEpochMs = input.readLong(),
                 expiresAtEpochMs = readNullableLong(input),
-                expiryConfidence = readEnum(input, SpawnExpiryConfidence.entries),
+                expiryConfidence = readEnum(input, SpawnExpiryConfidence.entries) { it.wireValue() },
             )
         }
         return BridgeEvent.NearbyUpdated(
@@ -423,19 +423,61 @@ object BridgePayloadCodec {
     private fun readNullablePoint(input: DataInputStream): GeoPoint? =
         if (input.readBoolean()) GeoPoint(input.readDouble(), input.readDouble()) else null
 
-    private fun <T : Enum<T>> writeNullableEnum(output: DataOutputStream, value: T?) {
+    private fun writeNullableLifecycle(output: DataOutputStream, value: GameLifecycleState?) {
         output.writeBoolean(value != null)
-        if (value != null) output.writeInt(value.ordinal)
+        if (value != null) output.writeInt(value.wireValue())
     }
 
-    private inline fun <reified T : Enum<T>> readNullableEnum(
-        input: DataInputStream,
-        values: List<T> = enumValues<T>().toList(),
-    ): T? = if (input.readBoolean()) readEnum(input, values) else null
+    private fun readNullableLifecycle(input: DataInputStream): GameLifecycleState? =
+        if (input.readBoolean()) readEnum(input, GameLifecycleState.entries) { it.wireValue() } else null
 
-    private fun <T : Enum<T>> readEnum(input: DataInputStream, values: List<T>): T {
-        val ordinal = input.readInt()
-        require(ordinal in values.indices) { "invalid enum ordinal: $ordinal" }
-        return values[ordinal]
+    private fun <T : Enum<T>> readEnum(
+        input: DataInputStream,
+        values: List<T>,
+        wireValue: (T) -> Int,
+    ): T {
+        val value = input.readInt()
+        return values.firstOrNull { wireValue(it) == value }
+            ?: error("invalid wire enum value: $value")
+    }
+
+    private fun GameLifecycleState.wireValue(): Int = when (this) {
+        GameLifecycleState.DISCONNECTED -> 1
+        GameLifecycleState.STARTING -> 2
+        GameLifecycleState.LOADING -> 3
+        GameLifecycleState.OVERWORLD -> 4
+        GameLifecycleState.ENCOUNTER -> 5
+        GameLifecycleState.ERROR -> 6
+    }
+
+    private fun MovementMode.wireValue(): Int = when (this) {
+        MovementMode.WALK -> 1
+        MovementMode.TELEPORT -> 2
+    }
+
+    private fun CatchReason.wireValue(): Int = when (this) {
+        CatchReason.SHUNDO -> 1
+        CatchReason.SHINY -> 2
+        CatchReason.HUNDO -> 3
+        CatchReason.IV_THRESHOLD -> 4
+        CatchReason.CATCH_ALL -> 5
+    }
+
+    private fun AlertKind.wireValue(): Int = when (this) {
+        AlertKind.SHUNDO -> 1
+    }
+
+    private fun BerryType.wireValue(): Int = when (this) {
+        BerryType.RAZZ -> 1
+        BerryType.NANAB -> 2
+        BerryType.PINAP -> 3
+        BerryType.GOLDEN_RAZZ -> 4
+        BerryType.SILVER_PINAP -> 5
+    }
+
+    private fun SpawnExpiryConfidence.wireValue(): Int = when (this) {
+        SpawnExpiryConfidence.EXACT -> 1
+        SpawnExpiryConfidence.ESTIMATED -> 2
+        SpawnExpiryConfidence.UNKNOWN -> 3
     }
 }

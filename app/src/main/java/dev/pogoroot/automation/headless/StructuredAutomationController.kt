@@ -35,7 +35,9 @@ class StructuredAutomationController(
     private val bridge: RuntimeBridge,
     private val eventSink: AutomationEventSink = AutomationEventSink { },
     allowedBuildFingerprints: Set<String> = emptySet(),
+    private val allowedBuildFingerprintsProvider: (() -> Set<String>)? = null,
 ) {
+    private val configuredAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private val source = BridgePogoRuntimeSource(bridge)
     private val sessionManager = RuntimeSessionManager(
         expectedPackageNames = setOf(
@@ -59,62 +61,74 @@ class StructuredAutomationController(
     private var lastError: String? = null
 
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
+        syncSafetyConfig()
         ensureConnected()
         source.refresh().getOrThrow()
         source.runtimeMetadata ?: error("runtime session disappeared")
 
-        val results = source.drainCommandResults().getOrThrow()
-        results.forEach(::consumeResult)
+        var submitted = false
+        var observationSeq: Long? = null
+        val events = source.drainEvents().getOrThrow()
+        for (event in events) {
+            when (event) {
+                is BridgeEvent.AutomationCommandResult -> consumeResult(event)
+                is BridgeEvent.ObservationEvent -> {
+                    if (event.messageSeq <= processedObservationSeq) continue
+                    source.selectObservation(event.messageSeq).getOrThrow()
+                    try {
+                        val current = source.runtimeMetadata ?: error("runtime session disappeared")
+                        val automationObservation = AutomationObservation(
+                            identity = current.identity(),
+                            messageSeq = event.messageSeq,
+                            observedAtEpochMs = event.observedAtEpochMs,
+                            observedAtElapsedNs = event.observedAtElapsedNs,
+                            snapshot = readSnapshot(),
+                        )
+                        val resyncing = runner.snapshot().needsResync
+                        if (resyncing) {
+                            runner.acceptResync(automationObservation).getOrThrow()
+                            runner.resumeAfterResync().getOrThrow()
+                        } else {
+                            val dispatch = runner.onObservation(
+                                automationObservation,
+                                config.toCorePolicy(),
+                            ).getOrThrow()
+                            dispatch.alerts.forEach { alert ->
+                                eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
+                            }
+                            dispatch.reason?.let {
+                                lastError = it
+                                eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
+                            }
+                            dispatch.request?.let {
+                                submitted = true
+                                lastAction = it.action::class.simpleName
+                            }
+                        }
+                        processedObservationSeq = event.messageSeq
+                        observationSeq = event.messageSeq
+                    } finally {
+                        source.clearObservationSelection()
+                    }
+                }
+                is BridgeEvent.BindingLost -> {
+                    val reason = event.reason.ifBlank { "runtime binding lost" }
+                    runner.disconnect(reason)
+                    connected = false
+                    lastError = reason
+                    break
+                }
+                is BridgeEvent.RuntimeError -> {
+                    lastError = "${event.code}: ${event.message}"
+                    eventSink.publish(AutomationEvent(AutomationEventType.ERROR, lastError!!))
+                }
+                else -> Unit
+            }
+        }
         runner.checkTimeout()
 
-        val current = source.runtimeMetadata ?: error("runtime session disappeared")
-        if (source.lifecycleState() == GameLifecycleState.DISCONNECTED) {
-            val reason = "runtime binding lost"
-            runner.disconnect(reason)
-            connected = false
-            lastError = reason
-            return@runCatching tickStatus()
-        }
-
-        var submitted = false
-        val observationSeq = current.lastObservationSeq
-        val observationEpochMs = current.lastObservationEpochMs
-        if (observationSeq > processedObservationSeq && observationEpochMs != null) {
-            val snapshot = readSnapshot()
-            val observation = AutomationObservation(
-                identity = current.identity(),
-                messageSeq = observationSeq,
-                observedAtEpochMs = observationEpochMs,
-                observedAtElapsedNs = current.lastObservationElapsedNs ?: System.nanoTime(),
-                snapshot = snapshot,
-            )
-            val resyncing = runner.snapshot().needsResync
-            if (resyncing) {
-                runner.acceptResync(observation).getOrThrow()
-                runner.resumeAfterResync().getOrThrow()
-                processedObservationSeq = observationSeq
-                return@runCatching tickStatus(
-                    observationSeq = observationSeq,
-                    submitted = false,
-                )
-            }
-            val dispatch = runner.onObservation(observation, config.toCorePolicy()).getOrThrow()
-            processedObservationSeq = observationSeq
-            dispatch.alerts.forEach { alert ->
-                eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
-            }
-            dispatch.reason?.let {
-                lastError = it
-                eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
-            }
-            dispatch.request?.let {
-                submitted = true
-                lastAction = it.action::class.simpleName
-            }
-        }
-
         tickStatus(
-            observationSeq = observationSeq.takeIf { it > 0L },
+            observationSeq = observationSeq ?: source.runtimeMetadata?.lastObservationSeq?.takeIf { it > 0L },
             submitted = submitted,
         )
     }.onFailure { error ->
@@ -144,6 +158,16 @@ class StructuredAutomationController(
         connected = true
         lastError = null
     }
+
+    private fun syncSafetyConfig() {
+        val allowlist = currentAllowedBuildFingerprints()
+        sessionManager.updateAllowedBuildFingerprints(allowlist)
+        actionExecutor.updateAllowedBuildFingerprints(allowlist)
+        runner.updateMutationPermission(sessionManager.mutationsAllowed)
+    }
+
+    private fun currentAllowedBuildFingerprints(): Set<String> =
+        allowedBuildFingerprintsProvider?.invoke()?.toSet() ?: configuredAllowedBuildFingerprints
 
     private fun readSnapshot(): AutomationSnapshot {
         val lifecycle = adapter.lifecycleState()

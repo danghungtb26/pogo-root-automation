@@ -110,8 +110,7 @@ class RuntimeBridgeClient(
     private fun registerControllerUid(): Boolean {
         val uid = Process.myUid()
         val command = "mkdir -p $BROKER_DIRECTORY && chmod 0711 $BROKER_DIRECTORY && " +
-            "touch $CONTROLLER_UID_FILE && " +
-            "(grep -qx '$uid' $CONTROLLER_UID_FILE || echo '$uid' >> $CONTROLLER_UID_FILE) && " +
+            "printf '%s\\n' '$uid' > $CONTROLLER_UID_FILE && " +
             "chmod 0600 $CONTROLLER_UID_FILE"
         return rootShell.execute(command, timeoutMillis = 3_000L).isSuccess
     }

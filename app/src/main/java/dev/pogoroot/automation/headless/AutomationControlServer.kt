@@ -117,6 +117,7 @@ class AutomationControlServer(
             ?.filter(String::isNotBlank)
             ?.toSet()
             ?: config.structuredAllowedBuildFingerprints,
+        runtimeMode = params["runtimeMode"]?.let(::parseRuntimeMode) ?: config.runtimeMode,
         berryMode = params["berry"]?.let(::parseBerry) ?: config.berryMode,
         showActionToasts = params.boolean("toasts") ?: config.showActionToasts,
         loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
@@ -131,6 +132,10 @@ class AutomationControlServer(
     private fun parseBerry(raw: String): BerryMode = runCatching {
         BerryMode.valueOf(raw.trim().uppercase().replace('-', '_').replace(' ', '_'))
     }.getOrDefault(BerryMode.NONE)
+
+    private fun parseRuntimeMode(raw: String): AutomationRuntimeMode = runCatching {
+        AutomationRuntimeMode.valueOf(raw.trim().uppercase())
+    }.getOrDefault(AutomationRuntimeMode.SCREEN)
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
@@ -168,11 +173,11 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"structuredRuntime":${status.structuredRuntime},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeMode":"${config.runtimeMode.name}","structuredRuntime":${status.structuredRuntime},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.joinToString(",").jsonStringOrNull()},"toasts":${config.showActionToasts}}
+        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","runtimeMode":"${config.runtimeMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.joinToString(",").jsonStringOrNull()},"toasts":${config.showActionToasts}}
     """.trimIndent()
 
     private fun String?.jsonStringOrNull(): String = this?.let {

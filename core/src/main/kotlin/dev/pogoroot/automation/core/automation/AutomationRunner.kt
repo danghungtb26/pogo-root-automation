@@ -52,6 +52,11 @@ class AutomationRunner(
     }
 
     @Synchronized
+    fun updateMutationPermission(allowed: Boolean) {
+        identity = identity?.copy(mutationsAllowed = allowed)
+    }
+
+    @Synchronized
     fun onObservation(
         observation: AutomationObservation,
         policy: AutomationPolicy,

@@ -78,4 +78,11 @@ class BridgeFrameCodecTest {
 
         assertEquals(command, decoded)
     }
+
+    @Test
+    fun `wire enum values are explicit and stable`() {
+        assertEquals(1, ObservationType.LIFECYCLE.wireValue)
+        assertEquals(4, CommandPhase.REJECTED.wireValue)
+        assertEquals(7, CommandPhase.INDETERMINATE.wireValue)
+    }
 }

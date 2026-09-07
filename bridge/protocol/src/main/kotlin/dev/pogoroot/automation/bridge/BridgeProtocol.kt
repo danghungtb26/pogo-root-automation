@@ -38,23 +38,23 @@ enum class BridgeMessageType(val wireValue: Int) {
     }
 }
 
-enum class ObservationType {
-    LIFECYCLE,
-    NEARBY,
-    ENCOUNTER,
-    FORTS,
-    INVENTORY,
-    POKEMON_STORAGE,
+enum class ObservationType(val wireValue: Int) {
+    LIFECYCLE(1),
+    NEARBY(2),
+    ENCOUNTER(3),
+    FORTS(4),
+    INVENTORY(5),
+    POKEMON_STORAGE(6),
 }
 
-enum class CommandPhase {
-    ACCEPTED,
-    STARTED,
-    COMPLETED,
-    REJECTED,
-    FAILED,
-    SAFE_TIMEOUT,
-    INDETERMINATE,
+enum class CommandPhase(val wireValue: Int) {
+    ACCEPTED(1),
+    STARTED(2),
+    COMPLETED(3),
+    REJECTED(4),
+    FAILED(5),
+    SAFE_TIMEOUT(6),
+    INDETERMINATE(7),
     ;
 
     val isTerminal: Boolean

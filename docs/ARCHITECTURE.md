@@ -50,8 +50,9 @@ and size limits are transport contracts; game payload decoding remains in the
 POGO adapter.
 
 ### `app`
-Controller APK. The headless service runs the structured runtime controller;
-the old screen analyzer/input driver remains only as a legacy calibration path.
+Controller APK. The headless service defaults to the existing screen
+analyzer/input driver. An explicit `runtimeMode=structured` configuration opts
+into the structured runtime controller; the two policy paths are not mixed.
 
 ### `zygisk`
 Native/root boundary. It owns process/binding discovery and the companion

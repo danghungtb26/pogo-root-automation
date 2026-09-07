@@ -7,10 +7,11 @@ package dev.pogoroot.automation.bridge
 class RuntimeSessionManager(
     private val expectedPackageName: String? = null,
     private val expectedPackageNames: Set<String> = emptySet(),
-    private val allowedBuildFingerprints: Set<String> = emptySet(),
+    allowedBuildFingerprints: Set<String> = emptySet(),
     private val requiredCapabilities: Set<String> = emptySet(),
 ) {
     private var active: BridgeEvent.RuntimeReady? = null
+    private var allowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private var lastMessageSeq = 0L
     private var invalidReason: String? = null
 
@@ -22,6 +23,11 @@ class RuntimeSessionManager(
 
     val lastError: String?
         get() = invalidReason
+
+    @Synchronized
+    fun updateAllowedBuildFingerprints(fingerprints: Set<String>) {
+        allowedBuildFingerprints = fingerprints.toSet()
+    }
 
     fun accept(ready: BridgeEvent.RuntimeReady): Result<Unit> = runCatching {
         require(ready.protocolVersion == BridgeProtocol.VERSION) { "bridge protocol mismatch" }
