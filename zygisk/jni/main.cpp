@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "zygisk.hpp"
+#include "maintenance_runtime.h"
 
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
@@ -562,6 +563,7 @@ public:
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
         if (!target_process_ || companion_fd_ < 0) return;
+        start_maintenance_runtime(process_name_);
         auto *context = new ProbeContext{};
         context->fd = companion_fd_;
         context->pid = process_pid_;
