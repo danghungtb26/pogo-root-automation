@@ -1,18 +1,24 @@
 package dev.pogoroot.automation
 
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Typeface
+import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.view.Gravity
+import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import android.widget.Toast
 import dev.pogoroot.automation.bridge.BindingProbeState
 import dev.pogoroot.automation.bridge.RuntimeConnectionState
 import dev.pogoroot.automation.bridge.RuntimeSnapshot
 import dev.pogoroot.automation.core.time.CountdownService
 import dev.pogoroot.automation.fake.FakeGameAdapter
+import dev.pogoroot.automation.overlay.JoystickOverlayService
 import dev.pogoroot.automation.root.RuntimeStatusRepository
 import java.util.concurrent.Executors
 
@@ -26,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var runtimeView: TextView
     private lateinit var adapterView: TextView
     private lateinit var nearbyView: TextView
+    private var startJoystickAfterOverlayGrant = false
 
     private val renderTick: Runnable = object : Runnable {
         override fun run() {
@@ -63,6 +70,14 @@ class MainActivity : Activity() {
         handler.post(runtimeTick)
     }
 
+    override fun onResume() {
+        super.onResume()
+        if (startJoystickAfterOverlayGrant && Settings.canDrawOverlays(this)) {
+            startJoystickAfterOverlayGrant = false
+            startBuiltInJoystick()
+        }
+    }
+
     override fun onDestroy() {
         handler.removeCallbacks(renderTick)
         handler.removeCallbacks(runtimeTick)
@@ -94,14 +109,39 @@ class MainActivity : Activity() {
 
             adapterView = TextView(context).apply {
                 textSize = 16f
-                setPadding(0, 0, 0, padding)
+                setPadding(0, 0, 0, padding / 2)
             }
             addView(adapterView)
+
+            addView(TextView(context).apply {
+                text = "Location"
+                textSize = 20f
+                setTypeface(typeface, Typeface.BOLD)
+            })
+
+            addView(TextView(context).apply {
+                text = "Built-in root joystick is available; external GPS Joystick remains an optional fallback."
+                textSize = 14f
+                setPadding(0, padding / 4, 0, padding / 4)
+            })
+
+            addView(Button(context).apply {
+                text = "Start built-in joystick"
+                setOnClickListener { requestOverlayAndStartJoystick() }
+            })
+
+            addView(Button(context).apply {
+                text = "Stop joystick"
+                setOnClickListener {
+                    stopService(Intent(context, JoystickOverlayService::class.java))
+                }
+            })
 
             addView(TextView(context).apply {
                 text = "Nearby"
                 textSize = 20f
                 setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, padding / 2, 0, 0)
             })
 
             nearbyView = TextView(context).apply {
@@ -111,6 +151,34 @@ class MainActivity : Activity() {
             }
             addView(nearbyView)
         }
+    }
+
+    private fun requestOverlayAndStartJoystick() {
+        if (Settings.canDrawOverlays(this)) {
+            startBuiltInJoystick()
+            return
+        }
+
+        startJoystickAfterOverlayGrant = true
+        Toast.makeText(
+            this,
+            "Allow display over other apps, then return to PoGo Root Automation.",
+            Toast.LENGTH_LONG,
+        ).show()
+        startActivity(
+            Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName"),
+            ),
+        )
+    }
+
+    private fun startBuiltInJoystick() {
+        startForegroundService(
+            Intent(this, JoystickOverlayService::class.java)
+                .setAction(JoystickOverlayService.ACTION_START),
+        )
+        Toast.makeText(this, "Built-in joystick started", Toast.LENGTH_SHORT).show()
     }
 
     private fun renderRuntime(snapshot: RuntimeSnapshot) {
