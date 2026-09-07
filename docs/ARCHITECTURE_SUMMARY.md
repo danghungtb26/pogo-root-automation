@@ -6,7 +6,7 @@
 > Unix-domain-socket bridge nhưng là chế độ opt-in. Mặc định service giữ screen
 > automation hiện có; native side hiện vẫn chỉ probe/forward và công bố zero
 > capabilities, nên mutation structured giữ nguyên trạng thái read-only cho tới khi
-> có fingerprint và binding client-owned đã verify.
+> có fingerprint, `strongIdentityVerified` và binding client-owned đã verify.
 
 ## 1. Project đang làm gì?
 

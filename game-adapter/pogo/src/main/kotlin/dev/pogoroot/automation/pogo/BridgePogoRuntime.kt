@@ -297,6 +297,9 @@ class BridgeBackedPogoActionExecutor(
         require(request.buildFingerprint == null || request.buildFingerprint == ready.buildFingerprint) {
             "action build fingerprint does not match runtime"
         }
+        require(ready.strongIdentityVerified) {
+            "mutation blocked: runtime identity is not strongly verified"
+        }
         require(currentAllowedBuildFingerprints.contains(ready.buildFingerprint)) {
             "mutation blocked: build fingerprint is not allowlisted"
         }

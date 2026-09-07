@@ -87,6 +87,7 @@ object BridgePayloadCodec {
         writeNullableLong(output, value.gameVersionCode)
         output.writeLong(value.observedAtEpochMs)
         output.writeLong(value.observedAtElapsedNs)
+        output.writeBoolean(value.strongIdentityVerified)
     }
 
     private fun writeObservation(output: DataOutputStream, value: BridgeEvent.ObservationEvent) {
@@ -180,6 +181,8 @@ object BridgePayloadCodec {
         gameVersionCode = readNullableLong(input),
         observedAtEpochMs = input.readLong(),
         observedAtElapsedNs = input.readLong(),
+        // Optional tail keeps older probe-only peers readable; absence is fail-closed.
+        strongIdentityVerified = if (input.available() > 0) input.readBoolean() else false,
     )
 
     private fun readObservation(input: DataInputStream): BridgeEvent.ObservationEvent = BridgeEvent.ObservationEvent(

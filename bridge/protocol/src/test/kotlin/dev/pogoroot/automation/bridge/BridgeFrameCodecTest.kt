@@ -18,6 +18,7 @@ class BridgeFrameCodecTest {
             processName = "com.nianticlabs.pokemongo",
             packageName = "com.nianticlabs.pokemongo",
             buildFingerprint = "pogo|123|il2cpp|binding|arm64-v8a|aarch64|native|il2cpp=abc",
+            strongIdentityVerified = true,
             capabilities = setOf(GameCapability.READ_LIFECYCLE.name, GameCapability.SPIN.name),
             gameVersionName = "1.0",
             gameVersionCode = 123L,

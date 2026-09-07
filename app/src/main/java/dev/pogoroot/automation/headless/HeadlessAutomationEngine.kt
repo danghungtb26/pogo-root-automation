@@ -22,6 +22,7 @@ data class HeadlessAutomationStatus(
     val screenHeight: Int? = null,
     val structuredRuntime: Boolean = false,
     val runtimeSessionId: String? = null,
+    val runtimeStrongIdentityVerified: Boolean = false,
     val runtimeLifecycle: String? = null,
     val runtimeSuspended: Boolean = false,
     val observationSeq: Long? = null,
@@ -72,187 +73,235 @@ class HeadlessAutomationEngine(
     )
 
     fun manualCatch(): Result<Unit> {
-        if (structuredController != null) {
-            return Result.failure(UnsupportedOperationException("manual screen actions are disabled for structured runtime"))
-        }
         return withCurrentScreen { bitmap, config ->
-        if (!performCatch(bitmap, config)) error("root catch swipe failed")
-        publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
+            if (!performCatch(bitmap, config)) error("root catch swipe failed")
+            publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
         }
     }
 
     fun manualSpin(): Result<Unit> {
-        if (structuredController != null) {
-            return Result.failure(UnsupportedOperationException("manual screen actions are disabled for structured runtime"))
-        }
         return withCurrentScreen { bitmap, config ->
-        if (!performSpin(bitmap, config)) error("root spin swipe failed")
-        publish(AutomationEventType.SPUN, "PokéStop spun")
+            if (!performSpin(bitmap, config)) error("root spin swipe failed")
+            publish(AutomationEventType.SPUN, "PokéStop spun")
         }
     }
 
     private fun runLoop() {
-        if (structuredController != null) {
-            runStructuredLoop()
-            return
-        }
+        var activeMode: AutomationRuntimeMode? = null
         while (loopActive.get()) {
             val config = configRepository.read()
-            if (!config.enabled) {
-                status.updateAndGet {
-                    it.copy(running = true, enabled = false, lastAction = "idle", updatedAtEpochMs = System.currentTimeMillis())
+            if (activeMode != config.runtimeMode) {
+                // Disconnect structured state before switching to screen mode;
+                // the next structured tick will establish a fresh session.
+                structuredController?.stop()
+                if (config.runtimeMode == AutomationRuntimeMode.SCREEN) {
+                    clearStructuredStatus()
+                } else {
+                    clearScreenStatus()
                 }
-                sleepInterruptibly(700L)
-                continue
+                activeMode = config.runtimeMode
             }
 
-            val foreground = runCatching { uiDriver.isPokemonGoForeground() }.getOrDefault(false)
-            if (!foreground) {
-                berryAppliedForCurrentEncounter = false
-                status.updateAndGet {
-                    it.copy(
-                        running = true,
-                        enabled = true,
-                        pokemonGoForeground = false,
-                        screenState = GameScreenState.UNKNOWN,
-                        lastAction = "waiting-for-pokemon-go",
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                    )
-                }
-                sleepInterruptibly(1_000L)
-                continue
+            when (config.runtimeMode) {
+                AutomationRuntimeMode.SCREEN -> runScreenIteration(config)
+                AutomationRuntimeMode.STRUCTURED -> runStructuredIteration(config)
             }
-
-            val captureResult = screenCapture.capture()
-            if (captureResult.isFailure) {
-                val error = captureResult.exceptionOrNull()
-                recordError("screencap: ${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}")
-                sleepInterruptibly(config.loopIntervalMs)
-                continue
-            }
-            val bitmap = captureResult.getOrThrow()
-
-            try {
-                frames.incrementAndGet()
-                val analysis = analyzer.analyze(bitmap)
-                if (analysis.state != GameScreenState.ENCOUNTER) {
-                    berryAppliedForCurrentEncounter = false
-                }
-                status.updateAndGet {
-                    it.copy(
-                        running = true,
-                        enabled = true,
-                        pokemonGoForeground = true,
-                        screenState = analysis.state,
-                        screenWidth = bitmap.width,
-                        screenHeight = bitmap.height,
-                        lastError = null,
-                        updatedAtEpochMs = System.currentTimeMillis(),
-                    )
-                }
-
-                when {
-                    config.autoCatch && analysis.state == GameScreenState.ENCOUNTER -> {
-                        if (config.berryMode != BerryMode.NONE && !berryAppliedForCurrentEncounter) {
-                            if (performBerry(bitmap, config.berryMode)) {
-                                berryAppliedForCurrentEncounter = true
-                                markAction("berry-${config.berryMode.name.lowercase()}")
-                                publish(AutomationEventType.BERRY_USED, "${berryLabel(config.berryMode)} used")
-                                sleepInterruptibly(550L)
-                            }
-                        }
-                        if (actionReady(config) && performCatch(bitmap, config)) {
-                            catches.incrementAndGet()
-                            markAction("catch-throw")
-                            publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
-                            sleepInterruptibly(config.catchResultDelayMs)
-                        }
-                    }
-
-                    config.autoSpin && analysis.state == GameScreenState.POKESTOP_DETAIL -> {
-                        if (actionReady(config) && performSpin(bitmap, config)) {
-                            spins.incrementAndGet()
-                            markAction("spin-pokestop")
-                            publish(AutomationEventType.SPUN, "PokéStop spun")
-                            sleepInterruptibly(config.spinResultDelayMs)
-                        }
-                    }
-
-                    config.autoSpin && analysis.pokestopCandidate != null -> {
-                        if (actionReady(config) && uiDriver.tap(analysis.pokestopCandidate)) {
-                            markAction("open-pokestop")
-                            sleepInterruptibly(config.spinOpenDelayMs)
-                            spinIfDetail(config)
-                        }
-                    }
-
-                    config.autoCatch && config.encounterSweep -> {
-                        if (actionReady(config) && tapEncounterSweep(bitmap)) {
-                            sweeps.incrementAndGet()
-                            markAction("encounter-sweep")
-                            sleepInterruptibly(650L)
-                            catchIfEncounter(config)
-                        }
-                    }
-                }
-            } catch (error: Throwable) {
-                recordError(error.message ?: error::class.java.simpleName)
-            } finally {
-                bitmap.recycle()
-            }
-
-            sleepInterruptibly(config.loopIntervalMs)
         }
+        structuredController?.stop()
         status.updateAndGet { it.copy(running = false, updatedAtEpochMs = System.currentTimeMillis()) }
     }
 
-    private fun runStructuredLoop() {
-        val controller = structuredController ?: return
-        while (loopActive.get()) {
-            val config = configRepository.read()
-            if (!config.enabled) {
-                controller.stop()
+    private fun runScreenIteration(config: HeadlessAutomationConfig) {
+        if (!config.enabled) {
+            status.updateAndGet {
+                it.copy(running = true, enabled = false, lastAction = "idle", updatedAtEpochMs = System.currentTimeMillis())
+            }
+            sleepInterruptibly(700L)
+            return
+        }
+
+        val foreground = runCatching { uiDriver.isPokemonGoForeground() }.getOrDefault(false)
+        if (!foreground) {
+            berryAppliedForCurrentEncounter = false
+            status.updateAndGet {
+                it.copy(
+                    running = true,
+                    enabled = true,
+                    pokemonGoForeground = false,
+                    screenState = GameScreenState.UNKNOWN,
+                    lastAction = "waiting-for-pokemon-go",
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            }
+            sleepInterruptibly(1_000L)
+            return
+        }
+
+        val captureResult = screenCapture.capture()
+        if (captureResult.isFailure) {
+            val error = captureResult.exceptionOrNull()
+            recordError("screencap: ${error?.message ?: error?.javaClass?.simpleName ?: "unknown"}")
+            sleepInterruptibly(config.loopIntervalMs)
+            return
+        }
+        val bitmap = captureResult.getOrThrow()
+
+        try {
+            frames.incrementAndGet()
+            val analysis = analyzer.analyze(bitmap)
+            if (analysis.state != GameScreenState.ENCOUNTER) {
+                berryAppliedForCurrentEncounter = false
+            }
+            status.updateAndGet {
+                it.copy(
+                    running = true,
+                    enabled = true,
+                    pokemonGoForeground = true,
+                    screenState = analysis.state,
+                    screenWidth = bitmap.width,
+                    screenHeight = bitmap.height,
+                    lastError = null,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            }
+
+            when {
+                config.autoCatch && analysis.state == GameScreenState.ENCOUNTER -> {
+                    if (config.berryMode != BerryMode.NONE && !berryAppliedForCurrentEncounter) {
+                        if (performBerry(bitmap, config.berryMode)) {
+                            berryAppliedForCurrentEncounter = true
+                            markAction("berry-${config.berryMode.name.lowercase()}")
+                            publish(AutomationEventType.BERRY_USED, "${berryLabel(config.berryMode)} used")
+                            sleepInterruptibly(550L)
+                        }
+                    }
+                    if (actionReady(config) && performCatch(bitmap, config)) {
+                        catches.incrementAndGet()
+                        markAction("catch-throw")
+                        publish(AutomationEventType.CATCH_THROWN, "Catch throw sent")
+                        sleepInterruptibly(config.catchResultDelayMs)
+                    }
+                }
+
+                config.autoSpin && analysis.state == GameScreenState.POKESTOP_DETAIL -> {
+                    if (actionReady(config) && performSpin(bitmap, config)) {
+                        spins.incrementAndGet()
+                        markAction("spin-pokestop")
+                        publish(AutomationEventType.SPUN, "PokéStop spun")
+                        sleepInterruptibly(config.spinResultDelayMs)
+                    }
+                }
+
+                config.autoSpin && analysis.pokestopCandidate != null -> {
+                    if (actionReady(config) && uiDriver.tap(analysis.pokestopCandidate)) {
+                        markAction("open-pokestop")
+                        sleepInterruptibly(config.spinOpenDelayMs)
+                        spinIfDetail(config)
+                    }
+                }
+
+                config.autoCatch && config.encounterSweep -> {
+                    if (actionReady(config) && tapEncounterSweep(bitmap)) {
+                        sweeps.incrementAndGet()
+                        markAction("encounter-sweep")
+                        sleepInterruptibly(650L)
+                        catchIfEncounter(config)
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            recordError(error.message ?: error::class.java.simpleName)
+        } finally {
+            bitmap.recycle()
+        }
+
+        sleepInterruptibly(config.loopIntervalMs)
+    }
+
+    private fun runStructuredIteration(config: HeadlessAutomationConfig) {
+        status.updateAndGet {
+            it.copy(
+                structuredRuntime = true,
+                enabled = config.enabled,
+                updatedAtEpochMs = System.currentTimeMillis(),
+            )
+        }
+        val controller = structuredController
+        if (controller == null) {
+            recordError("structured runtime controller is unavailable")
+            sleepInterruptibly(config.loopIntervalMs)
+            return
+        }
+        if (!config.enabled) {
+            controller.stop()
+            status.updateAndGet {
+                it.copy(
+                    running = true,
+                    enabled = false,
+                    structuredRuntime = true,
+                    lastAction = "idle",
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            }
+            sleepInterruptibly(700L)
+            return
+        }
+
+        controller.tick(config)
+            .onSuccess { tick ->
                 status.updateAndGet {
                     it.copy(
                         running = true,
-                        enabled = false,
+                        enabled = true,
                         structuredRuntime = true,
-                        lastAction = "idle",
+                        pokemonGoForeground = tick.runtimeSessionId != null,
+                        screenState = tick.lifecycleState.toScreenState(),
+                        runtimeSessionId = tick.runtimeSessionId,
+                        runtimeStrongIdentityVerified = tick.strongIdentityVerified,
+                        runtimeLifecycle = tick.lifecycleState.name,
+                        runtimeSuspended = tick.suspended,
+                        observationSeq = tick.observationSeq,
+                        lastAction = tick.lastAction,
+                        lastError = tick.lastError,
                         updatedAtEpochMs = System.currentTimeMillis(),
                     )
                 }
-                sleepInterruptibly(700L)
-                continue
             }
+            .onFailure { error ->
+                recordError(
+                    "runtime bridge: ${error.message ?: error::class.java.simpleName}",
+                )
+            }
+        sleepInterruptibly(config.loopIntervalMs)
+    }
 
-            controller.tick(config)
-                .onSuccess { tick ->
-                    status.updateAndGet {
-                        it.copy(
-                            running = true,
-                            enabled = true,
-                            structuredRuntime = true,
-                            pokemonGoForeground = tick.runtimeSessionId != null,
-                            screenState = tick.lifecycleState.toScreenState(),
-                            runtimeSessionId = tick.runtimeSessionId,
-                            runtimeLifecycle = tick.lifecycleState.name,
-                            runtimeSuspended = tick.suspended,
-                            observationSeq = tick.observationSeq,
-                            lastAction = tick.lastAction,
-                            lastError = tick.lastError,
-                            updatedAtEpochMs = System.currentTimeMillis(),
-                        )
-                    }
-                }
-                .onFailure { error ->
-                    recordError(
-                        "runtime bridge: ${error.message ?: error::class.java.simpleName}",
-                    )
-                }
-            sleepInterruptibly(config.loopIntervalMs)
+    private fun clearStructuredStatus() {
+        status.updateAndGet {
+            it.copy(
+                structuredRuntime = false,
+                runtimeSessionId = null,
+                runtimeStrongIdentityVerified = false,
+                runtimeLifecycle = null,
+                runtimeSuspended = false,
+                observationSeq = null,
+            )
         }
-        controller.stop()
-        status.updateAndGet { it.copy(running = false, updatedAtEpochMs = System.currentTimeMillis()) }
+    }
+
+    private fun clearScreenStatus() {
+        status.updateAndGet {
+            it.copy(
+                pokemonGoForeground = false,
+                screenState = GameScreenState.UNKNOWN,
+                screenWidth = null,
+                screenHeight = null,
+                runtimeSessionId = null,
+                runtimeStrongIdentityVerified = false,
+                runtimeLifecycle = null,
+                runtimeSuspended = false,
+                observationSeq = null,
+            )
+        }
     }
 
     private fun catchIfEncounter(config: HeadlessAutomationConfig) {
@@ -384,10 +433,14 @@ class HeadlessAutomationEngine(
     }
 
     private fun withCurrentScreen(block: (Bitmap, HeadlessAutomationConfig) -> Unit): Result<Unit> = runCatching {
+        val config = configRepository.read()
+        check(config.runtimeMode == AutomationRuntimeMode.SCREEN) {
+            "manual screen actions are disabled for structured runtime"
+        }
         check(uiDriver.isPokemonGoForeground()) { "Pokemon GO is not foreground" }
         val bitmap = screenCapture.capture().getOrThrow()
         try {
-            block(bitmap, configRepository.read())
+            block(bitmap, config)
         } finally {
             bitmap.recycle()
         }

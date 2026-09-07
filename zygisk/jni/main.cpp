@@ -19,6 +19,7 @@
 #include <string>
 
 #include "zygisk.hpp"
+#include "runtime_command_protocol.h"
 
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
@@ -32,7 +33,7 @@ constexpr const char *kControllerUidPath = "/data/adb/pogo_root_automation/contr
 constexpr uint32_t kRuntimeEventMagic = 0x504F474FU;
 constexpr uint32_t kRuntimeProtocolVersion = 4U;
 constexpr uint16_t kBridgeProtocolVersion = 2U;
-constexpr uint32_t kBridgeCommandType = 4U;
+constexpr uint32_t kBridgeCommandType = pogo_runtime::kBridgeCommandType;
 constexpr uint32_t kBridgeCommandResultType = 5U;
 constexpr uint32_t kBridgeHardMessageBytes = 4U * 1024U * 1024U;
 constexpr uint32_t kRuntimeCommandMagic = 0x504F4743U;
@@ -245,16 +246,6 @@ bool read_be32(const std::vector<uint8_t> &input, size_t *offset, uint32_t *valu
     return true;
 }
 
-bool read_be64(const std::vector<uint8_t> &input, size_t *offset, uint64_t *value) {
-    if (offset == nullptr || value == nullptr || *offset + 8U > input.size()) return false;
-    *value = 0U;
-    for (size_t index = 0U; index < 8U; ++index) {
-        *value = (*value << 8U) | input[*offset + index];
-    }
-    *offset += 8U;
-    return true;
-}
-
 bool read_string(const std::vector<uint8_t> &input, size_t *offset, std::string *value) {
     uint32_t length = 0U;
     if (value == nullptr || !read_be32(input, offset, &length) || length > 65536U ||
@@ -460,6 +451,7 @@ bool send_runtime_ready(int fd, BrokerContext &context) {
     append_optional_absent(&payload);  // version code
     append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
     append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
+    payload.push_back(0U);  // strongIdentityVerified=false; probe has no verified build binding.
     return send_bridge_frame(fd, 2U, message_seq, payload);
 }
 
@@ -989,21 +981,11 @@ void runtime_command_channel_loop(const ProbeContext &context) {
         std::vector<uint8_t> command;
         if (!read_internal_message(context.fd, kRuntimeCommandMagic, &command)) return;
 
-        size_t offset = 0U;
-        uint32_t message_type = 0U;
-        uint64_t message_seq = 0U;
-        uint32_t payload_version = 0U;
-        std::string session_id;
-        std::string command_id;
-        if (!read_be32(command, &offset, &message_type) ||
-            !read_be64(command, &offset, &message_seq) ||
-            !read_be32(command, &offset, &payload_version) ||
-            !read_string(command, &offset, &session_id) ||
-            !read_string(command, &offset, &command_id) ||
-            message_type != kBridgeCommandType || payload_version != 1U ||
-            message_seq == 0U || session_id.empty() || command_id.empty() ||
-            offset != command.size()) return;
-        if (!send_runtime_rejected(context.fd, command_id.c_str())) return;
+        pogo_runtime::RuntimeCommandPrefix prefix;
+        if (!pogo_runtime::parse_runtime_command_prefix(command, &prefix)) return;
+        // Probe-only mode keeps the versioned action payload opaque. A real
+        // binding will parse and validate the remaining fields before invoke.
+        if (!send_runtime_rejected(context.fd, prefix.command_id.c_str())) return;
     }
 }
 

@@ -19,7 +19,9 @@ class RuntimeSessionManager(
         get() = active
 
     val mutationsAllowed: Boolean
-        get() = active != null && active!!.buildFingerprint in allowedBuildFingerprints
+        get() = active?.let { ready ->
+            ready.strongIdentityVerified && ready.buildFingerprint in allowedBuildFingerprints
+        } == true
 
     val lastError: String?
         get() = invalidReason

@@ -91,6 +91,8 @@ sealed interface BridgeEvent {
         val processName: String,
         val packageName: String,
         val buildFingerprint: String,
+        /** True only when the runtime proved a strong, version-scoped identity. */
+        val strongIdentityVerified: Boolean = false,
         val capabilities: Set<String>,
         val gameVersionName: String? = null,
         val gameVersionCode: Long? = null,

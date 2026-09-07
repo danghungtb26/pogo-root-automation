@@ -936,9 +936,11 @@ CommandResult:
 ### 15.1. Không disable automation screen hiện có
 
 `AutomationRuntimeMode.SCREEN` được thêm làm giá trị mặc định. `HeadlessAutomationService`
-chỉ khởi tạo `RuntimeBridgeClient`/`StructuredAutomationController` khi cấu hình là
-`STRUCTURED`; vì vậy engine screen hiện có tiếp tục là đường chạy mặc định. Structured
-runtime chỉ được bật explicit sau khi live observations và bindings đã verify.
+có thể tạo sẵn controller structured, nhưng engine chỉ route vào nó khi mode là
+`STRUCTURED`; controller chỉ connect bridge trong tick structured. Vì vậy engine screen
+hiện có tiếp tục là đường chạy mặc định và mode có thể hot-switch an toàn qua API.
+Structured runtime chỉ nên được bật explicit sau khi live observations và bindings đã
+verify.
 
 ### 15.2. Companion fd được giữ sống cho command path
 
@@ -973,3 +975,34 @@ wire dùng giá trị explicit, không còn phụ thuộc `ordinal`; broker/runt
 Các race lifecycle nhỏ hơn cũng được xử lý: broker cleanup chỉ unlink socket nếu còn là
 session owner hiện tại, và file `controller.uids` được overwrite bằng UID hiện hành để
 không giữ authorization stale.
+
+## Section 16 — Review update: P0 parser, hot-switch mode và strong identity gate
+
+### 16.1. Probe-only command parser không yêu cầu EOF
+
+Native parser tách `RuntimeCommandPrefix` gồm `messageType`, `messageSeq`,
+`payloadVersion`, `sessionId` và `commandId`. Phần còn lại của full `AutomationCommand`
+được giữ opaque trong probe-only phase, nên command hợp lệ vẫn trả `REJECTED` mà không
+đóng persistent companion channel. Khi có `ActionInvoker` thật, binding sẽ parse và
+validate phần body trước khi invoke.
+
+### 16.2. Engine sở hữu mode routing
+
+`HeadlessAutomationEngine` đọc `runtimeMode` mỗi iteration và route sang screen hoặc
+structured iteration. Chuyển sang screen sẽ stop structured controller; chuyển lại
+structured sẽ tạo session mới ở tick kế tiếp. API vì vậy không còn trạng thái config một
+đằng nhưng engine chạy mode khác.
+
+### 16.3. Strong identity là điều kiện riêng trên mutation
+
+`RuntimeReady` có cờ `strongIdentityVerified`, mặc định fail-closed khi field vắng.
+Native probe hiện gửi `false` cùng fingerprint `unverified|...`. Session manager và
+bridge-backed executor chỉ cho mutation khi đồng thời có cờ strong identity, fingerprint
+được allowlist và capability phù hợp.
+
+### 16.4. Boundary tests
+
+Native host test xác nhận full command payload có phần body sau prefix vẫn parse được;
+POGO source test xác nhận sequence `9 → 10 → 11` được sắp đúng và selected snapshot
+không đọc state của observation mới hơn. Đây là hai regression tests trước khi lắp
+live executor.

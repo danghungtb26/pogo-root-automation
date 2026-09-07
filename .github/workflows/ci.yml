@@ -40,6 +40,14 @@ jobs:
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
 
+      - name: Native command protocol test
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror \
+            -Izygisk/jni \
+            zygisk/jni/runtime_command_protocol_test.cpp \
+            -o "$RUNNER_TEMP/runtime_command_protocol_test"
+          "$RUNNER_TEMP/runtime_command_protocol_test"
+
       - name: Verify vendored PogoEnhancer libraries
         run: |
           test "$(git hash-object app/libs/POGOProtos-2.60.8.jar)" = "e183c559262427fef17a9c82af585e67dab4e753"

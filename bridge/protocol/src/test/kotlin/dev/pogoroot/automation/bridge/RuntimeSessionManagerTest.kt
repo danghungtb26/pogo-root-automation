@@ -12,6 +12,7 @@ class RuntimeSessionManagerTest {
         processName = "com.nianticlabs.pokemongo",
         packageName = "com.nianticlabs.pokemongo",
         buildFingerprint = "verified-build",
+        strongIdentityVerified = true,
         capabilities = setOf("CATCH"),
     )
 
@@ -49,5 +50,16 @@ class RuntimeSessionManagerTest {
         manager.updateAllowedBuildFingerprints(setOf(ready.buildFingerprint))
 
         assertTrue(manager.mutationsAllowed)
+    }
+
+    @Test
+    fun `allowlisted but weak identity remains read only`() {
+        val manager = RuntimeSessionManager(
+            expectedPackageName = ready.packageName,
+            allowedBuildFingerprints = setOf(ready.buildFingerprint),
+        )
+        assertTrue(manager.accept(ready.copy(strongIdentityVerified = false)).isSuccess)
+
+        assertFalse(manager.mutationsAllowed)
     }
 }

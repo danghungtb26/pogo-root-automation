@@ -21,19 +21,16 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        val initialConfig = configRepository.read()
-        if (initialConfig.runtimeMode == AutomationRuntimeMode.STRUCTURED) {
-            runtimeBridge = RuntimeBridgeClient()
-            structuredController = StructuredAutomationController(
-                bridge = runtimeBridge!!,
-                eventSink = ToastAutomationEventSink(this, configRepository),
-                // A verified fingerprint must be explicitly provisioned per device/build.
-                // Empty means structured observation is available but mutations stay disabled.
-                allowedBuildFingerprintsProvider = {
-                    configRepository.read().structuredAllowedBuildFingerprints
-                },
-            )
-        }
+        runtimeBridge = RuntimeBridgeClient()
+        structuredController = StructuredAutomationController(
+            bridge = runtimeBridge!!,
+            eventSink = ToastAutomationEventSink(this, configRepository),
+            // A verified fingerprint must be explicitly provisioned per device/build.
+            // Empty means structured observation is available but mutations stay disabled.
+            allowedBuildFingerprintsProvider = {
+                configRepository.read().structuredAllowedBuildFingerprints
+            },
+        )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
             eventSink = ToastAutomationEventSink(this, configRepository),

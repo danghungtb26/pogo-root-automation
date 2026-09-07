@@ -71,3 +71,5 @@ source. Mutation remains disabled until an exact, strong build fingerprint is
 added to the local allowlist. The native probe currently publishes diagnostics
 and a read-only `RuntimeReady`; its persistent companion command channel safely
 rejects commands until a verified runtime binding/capability is installed.
+Mutation also requires the explicit `strongIdentityVerified` readiness flag,
+the exact allowlist entry, and the capability required by the action.

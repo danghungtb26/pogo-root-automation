@@ -107,7 +107,7 @@ Supported parameters:
 - `spinSwipeDurationMs`
 - `spinResultDelayMs`
 - `actionCooldownMs`
-- `runtimeMode=screen|structured` (takes effect when the service is next created)
+- `runtimeMode=screen|structured` (hot-switches the running engine; structured bridge connects only while selected)
 - `buildFingerprints=<comma-separated exact fingerprints>` for structured mutation allowlisting
 
 Example:
@@ -132,4 +132,6 @@ The structured path still needs live observation hooks in the injected runtime a
 version-scoped client-owned invokers. Until those are verified, the native broker
 announces no mutation capabilities and the controller remains read-only. Its
 command channel is persistent end-to-end, but currently returns a safe rejection
-for unimplemented bindings. The screen path remains the service default.
+for unimplemented bindings. Mutation additionally requires `strongIdentityVerified`
+from the runtime, an exact allowlisted fingerprint, and the action capability.
+The screen path remains the service default.

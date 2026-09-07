@@ -19,6 +19,7 @@ import dev.pogoroot.automation.pogo.PogoGameAdapter
 
 data class StructuredAutomationTick(
     val runtimeSessionId: String?,
+    val strongIdentityVerified: Boolean = false,
     val lifecycleState: GameLifecycleState,
     val observationSeq: Long? = null,
     val lastAction: String? = null,
@@ -237,6 +238,7 @@ class StructuredAutomationController(
         val metadata = source.runtimeMetadata
         return StructuredAutomationTick(
             runtimeSessionId = metadata?.ready?.runtimeSessionId,
+            strongIdentityVerified = metadata?.ready?.strongIdentityVerified == true,
             lifecycleState = source.lifecycleState(),
             observationSeq = observationSeq,
             lastAction = lastAction,
