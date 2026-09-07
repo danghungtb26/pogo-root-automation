@@ -1006,3 +1006,250 @@ Native host test xác nhận full command payload có phần body sau prefix v�
 POGO source test xác nhận sequence `9 → 10 → 11` được sắp đúng và selected snapshot
 không đọc state của observation mới hơn. Đây là hai regression tests trước khi lắp
 live executor.
+
+## Section 17 — Loại bỏ hoàn toàn `SCREEN`, chuyển structured thành runtime duy nhất
+
+### 17.1. Vì sao refactor này cần làm bây giờ?
+
+`SCREEN` không còn là fallback phù hợp với hướng kiến trúc đã chốt. Nó tạo một policy
+path thứ hai, khiến `HeadlessAutomationEngine`, config, status API và tài liệu phải
+duy trì hai nguồn state/action khác nhau. Các heuristic pixel trong
+`GameScreenAnalyzer` cũng có thể báo state sai nhưng vẫn gửi mutation qua root input;
+đây là boundary trái với các guard identity, freshness, capability và outcome đang
+được xây cho structured runtime.
+
+Refactor này nên được thực hiện như một hard cut: service chỉ còn một structured
+runtime path, không còn hot-switch hoặc fallback sang screenshot. Hệ quả đã biết là
+cho tới khi live observation hook và client-owned executor được cài, service chỉ có
+thể attach/readiness/read-only và phải fail closed khi được bật.
+
+### 17.2. Cái gì thay đổi và cái gì giữ nguyên?
+
+#### Thay đổi
+
+- Xóa `AutomationRuntimeMode`, `SCREEN`, `STRUCTURED` và toàn bộ mode routing.
+- `HeadlessAutomationEngine` chỉ gọi structured controller; bỏ `runScreenIteration`,
+  screenshot, analyzer, normalized coordinate và root `input tap/swipe`.
+- Xóa `ScreenAutomation.kt`, gồm `ScreenPoint`, `GameScreenState`, `ScreenAnalysis`,
+  `RootScreenCapture`, `GameScreenAnalyzer` và `RootUiDriver`.
+- Xóa `RootBinaryShell.kt`/`RootBinaryShell` vì sau khi bỏ screen không còn caller.
+- Xóa các config chỉ phục vụ thao tác pixel: `encounterSweep`,
+  `catchThrowDurationMs`, `catchResultDelayMs`, `spinOpenDelayMs`,
+  `spinSwipeDurationMs`, `spinResultDelayMs`. `loopIntervalMs` chỉ giữ nếu vẫn dùng
+  làm chu kỳ poll bridge; command timeout thuộc `AutomationRunner`.
+- Đổi `encounterSweep` thành policy có nghĩa structured, tốt nhất là
+  `autoEncounter`, để tạo `OpenEncounter(spawnId)` từ nearby thay vì thử các tọa độ
+  màn hình.
+- Bỏ các status field không còn có nghĩa: `screenState`, `screenWidth`,
+  `screenHeight`, `framesAnalyzed`, `encounterSweepTaps`, `structuredRuntime` và
+  `runtimeMode`. `runtimeLifecycle`, `runtimeSessionId`, `observationSeq`,
+  `runtimeSuspended` và identity fields là nguồn status canonical.
+- Bỏ `POST /v1/actions/catch` và `/v1/actions/spin` ở dạng hiện tại vì chúng là
+  direct screen-input endpoints. Nếu cần manual action, API mới phải nhận identity
+  (`encounterId`/`fortId`) và đi qua `AutomationRunner`, không được bypass bridge.
+- Cập nhật `scripts/headless-control.sh`, `MainActivity`, manifest description,
+  settings copy và toàn bộ docs để không còn mô tả screen fallback.
+
+#### Giữ nguyên
+
+- `HeadlessAutomationService`, loopback control plane (`health`, `status`, `start`,
+  `stop`, `config`) và persistence của config.
+- `RuntimeBridgeClient`, `RuntimeSessionManager`, `BridgePogoRuntimeSource`,
+  `PogoGameAdapter`, `AutomationCoordinator` và `AutomationRunner`.
+- Structured domain models, `PogoProtoDecoder`, mapper, capability/build gate,
+  strong identity gate và command lifecycle.
+- `RootShell` và `ProcessRootShell`: chúng vẫn được dùng bởi
+  `RuntimeBridgeClient`, `RuntimeStatusRepository` và `RootMockLocationProvider`;
+  không được xóa nhầm toàn bộ root abstraction.
+- `BerryMode`/`UseBerry`, discard/transfer policy và built-in joystick vì joystick
+  là location control độc lập, không phải screen automation.
+
+### 17.3. Dependency map và scope file
+
+| Khu vực | Caller/consumer hiện tại | Thay đổi đề xuất |
+|---|---|---|
+| `app/.../headless/ScreenAutomation.kt` | Chỉ `HeadlessAutomationEngine` | Xóa toàn bộ file và các symbol screen |
+| `app/.../headless/HeadlessAutomationEngine.kt` | `HeadlessAutomationService`, `AutomationControlServer` | Giữ tên class để giảm churn, nhưng biến thành structured-only loop |
+| `app/.../headless/AutomationConfig.kt` | Service, API, policy bridge, overlay | Bỏ enum/mode và screen delays; thêm/migrate `autoEncounter` nếu cần |
+| `app/.../headless/AutomationControlServer.kt` | Host scripts/operator | Bỏ parser `runtimeMode`, status screen fields và manual screen routes |
+| `app/.../headless/AutomationPolicyBridge.kt` | Structured controller | Map policy từ structured config, không còn `encounterSweep` |
+| `app/.../headless/HeadlessAutomationService.kt` | Android lifecycle | Structured controller là dependency bắt buộc, không còn optional mode path |
+| `app/.../overlay/AutomationSettingsDialog.kt` | Người dùng | Đổi “encounter screen confirmed” thành structured lifecycle/encounter confirmed |
+| `app/src/main/AndroidManifest.xml` | Android package metadata | Đổi `root screen worker` thành runtime bridge/controller wording |
+| `app/.../root/RootBinaryShell.kt` | Chỉ screen capture | Xóa; giữ `RootShell.kt` |
+| `scripts/headless-control.sh` | Host automation | Bỏ `catch`, `spin`, `encounterSweep`; giữ control/status/game |
+| `README.md`, `docs/*.md` | Tài liệu vận hành/kiến trúc | Viết lại thành một structured path duy nhất |
+| `core`, `bridge`, `game-adapter:pogo`, `zygisk` | Structured pipeline | Giữ, bổ sung test contract nếu status/API thay đổi |
+
+Các file structured hiện không có dependency ngược vào `GameScreenState` hay
+`RootUiDriver`. `RootBinaryShell` có thể xóa an toàn sau khi xác nhận bằng `rg` rằng
+không còn import nào ngoài cụm screen.
+
+### 17.4. Contract và migration
+
+#### Config persistence
+
+SharedPreferences cũ có thể còn `runtime_mode=SCREEN`, `encounter_sweep` và delay
+keys. Bản đọc config mới phải bỏ qua các key này hoặc thực hiện một lần migration;
+không được dùng giá trị `SCREEN` cũ để quyết định behavior. Nếu thay
+`encounterSweep` bằng `autoEncounter`, nên map giá trị cũ một lần để không vô tình
+đổi policy của người dùng.
+
+#### HTTP API
+
+`runtimeMode` không còn là query parameter hay status field. `runtimeMode=structured`
+từ client cũ có thể bị bỏ qua như một unknown parameter trong giai đoạn chuyển tiếp,
+nhưng `runtimeMode=screen` không được âm thầm kích hoạt behavior nào. API status nên
+chỉ trả runtime/session/lifecycle/observation/action fields của structured path.
+
+`POST /v1/actions/catch` và `/v1/actions/spin` không thể giữ nguyên semantics vì
+screen path hiện tự suy ra tọa độ từ bitmap, trong khi structured command cần
+`encounterId`/`fortId`, lifecycle và `basedOnObservationSeq`. Khuyến nghị xóa hai
+endpoint trong hard cut và đưa “manual structured action” thành một task riêng có
+contract explicit; nếu bắt buộc tương thích API, phải reimplement qua runner chứ
+không giữ wrapper root input.
+
+#### Policy semantics
+
+`autoCatch` không nên tiếp tục ngầm mang nghĩa “sweep các tọa độ”. Structured policy
+nên tách rõ:
+
+```text
+autoEncounter → OpenEncounter từ nearby
+autoCatch     → Catch trong encounter
+berryType     → UseBerry trước Catch
+```
+
+Điều này khớp với `AutomationCoordinator` và tránh mang tên screen (`sweep`) vào
+domain structured.
+
+### 17.5. Migration strategy
+
+Không cần giai đoạn coexistence ở runtime: mục tiêu là một lần cắt policy path.
+Thứ tự triển khai an toàn trong cùng change set:
+
+1. Chốt HTTP/status/config contract mới và thêm test cho policy mapping.
+2. Simplify engine/service thành structured-only; xóa screen classes và root binary
+   shell không còn dùng.
+3. Cập nhật manual API/scripts/docs/manifest/UI copy.
+4. Chạy JVM tests, Android compile và native tests; sau đó device smoke test theo
+   structured read-only flow.
+5. Chỉ sau khi observation/capability live được verify mới mở mutation allowlist.
+
+Không cần giữ screen fallback để rollback. Rollback của mutation dùng
+`strongIdentityVerified`, fingerprint allowlist và capability gate; rollback code
+phải là revert bản build, không phải quay lại một policy path pixel heuristic.
+
+### 17.6. Test hiện có và khoảng trống
+
+Core, bridge và `game-adapter:pogo` đã có test cho planner, snapshot, sequence,
+adapter, decoder và action executor. Cụm screen gần như không có test riêng, nên
+xóa nó ít rủi ro regression nội bộ hơn việc thay đổi structured contracts.
+
+Cần bổ sung hoặc cập nhật:
+
+- test config migration: config cũ có `runtime_mode=SCREEN` vẫn đọc thành
+  structured-only config;
+- test `toCorePolicy`: `autoEncounter` tạo `OpenEncounter`, không còn phụ thuộc
+  `encounterSweep`;
+- test status JSON không còn `runtimeMode`, `screenState`, dimensions hoặc frame
+  counters;
+- test control API: status/start/stop/config vẫn hoạt động; screen manual endpoints
+  không còn được expose nếu chọn hướng xóa;
+- source/build guard không còn `screencap`, `GameScreenAnalyzer`, `RootUiDriver`,
+  `input tap`, `input swipe` trong app headless;
+- structured device smoke test xác nhận runtime attach/readiness và khi capability
+  chưa có thì command bị reject an toàn, không có root input fallback.
+
+### 17.7. Rủi ro
+
+- **Mất chức năng tạm thời:** native probe hiện chưa phát live observation và đang
+  công bố zero mutation capabilities. Sau hard cut, auto-catch/auto-spin sẽ không
+  thực thi cho tới khi structured runtime hoàn tất; đây là behavior expected, phải
+  hiển thị rõ trong status/log.
+- **Breaking API/config:** client cũ có thể đọc `runtimeMode`/`screenState` hoặc gọi
+  manual endpoints. Cần coi đây là contract migration, không để field cũ tồn tại
+  dưới dạng giá trị giả.
+- **Sai semantics encounter:** xóa `encounterSweep` mà không thêm `autoEncounter`
+  sẽ làm structured path không bao giờ phát `OpenEncounter`; cần test policy trước
+  khi xóa key cũ.
+- **Xóa nhầm root capability dùng chung:** chỉ xóa `RootBinaryShell`; `RootShell`
+  vẫn cần cho bridge/status/location.
+
+### 17.8. Expected improvement
+
+Sau refactor, headless automation có một nguồn state duy nhất và một execution
+boundary duy nhất. Engine không còn cấp phát `Bitmap`/PNG mỗi vòng, không còn phụ
+thuộc độ phân giải hoặc calibration tọa độ, không còn nguy cơ quyết định từ pixel
+nhưng gửi mutation bằng shell. Status/API cũng phản ánh đúng structured lifecycle
+thay vì giữ các field “screen” được map giả từ runtime lifecycle.
+
+### 17.9. Acceptance criteria bổ sung
+
+> Source: không có formal feature spec; các tiêu chí dưới đây là **inferred — needs BA confirm** và bổ sung cho AC-01…AC-29.
+
+| ID | Rule / Requirement | Formula / Expected | Acceptance note |
+|---|---|---|---|
+| AC-30 | Single runtime path | Không còn `AutomationRuntimeMode`, `SCREEN`, `STRUCTURED` hoặc mode routing trong app | Headless service luôn chạy structured controller |
+| AC-31 | Screen code removal | Không còn `ScreenAutomation.kt`, `RootBinaryShell.kt`, `GameScreenAnalyzer`, `RootScreenCapture`, `RootUiDriver`, `screencap`, `input tap`, `input swipe` trong headless path | Không có screenshot/root-input fallback |
+| AC-32 | Structured status contract | Status chỉ dùng `runtimeSessionId`, `runtimeLifecycle`, `observationSeq`, identity, suspension, action/error fields | Bỏ screen state/dimensions/frame counters và field mode |
+| AC-33 | Structured policy naming | `autoEncounter` điều khiển `OpenEncounter`; `autoCatch` điều khiển `Catch`; berry là `UseBerry` riêng | Không còn `encounterSweep` trong policy/API mới |
+| AC-34 | Config migration | Config cũ có `runtime_mode=SCREEN` không làm service chạy screen; key cũ bị ignore/migrate | Không để persisted state kích hoạt behavior đã xóa |
+| AC-35 | API boundary | `health/status/start/stop/config` vẫn hoạt động; manual catch/spin chỉ tồn tại nếu đi qua structured runner với explicit identity | Không có endpoint direct screen input |
+| AC-36 | Read-only safety after cutover | Runtime chưa có observation/capability/strong identity thì service báo trạng thái lỗi/read-only và không gửi mutation | Không tự fallback sang screen |
+| AC-37 | Shared root boundary | `RootShell` vẫn compile và phục vụ bridge/status/location; chỉ binary screen shell bị loại bỏ | Không làm hỏng runtime bridge hoặc joystick |
+| AC-38 | Verification | JVM tests, Android compile, native tests và structured device smoke test pass | Source guard chứng minh không còn screen implementation |
+
+- Bỏ toàn bộ mode screen → **AC-30, AC-31, AC-32, AC-34, AC-36**; done khi không còn
+  branch/fallback nào có thể chạy screen.
+- Giữ structured automation an toàn → **AC-01…AC-10, AC-30, AC-36**; done khi
+  structured chưa ready thì chỉ read-only/fail closed.
+- Không phá control plane cần thiết → **AC-11, AC-35**; các manual endpoint cũ là
+  breaking change có chủ đích hoặc phải được reimplement bằng structured runner.
+
+### 17.10. Câu hỏi mở
+
+- ~~Có cần giữ screen fallback sau khi structured chưa live không?~~ → Resolved trong
+  Section 17: không giữ; chấp nhận structured-only read-only cho tới khi binding live.
+- API manual catch/spin nên bị xóa hay chuyển sang contract structured mới? Khuyến
+  nghị xóa trong hard cut và thiết kế lại sau với `encounterId`/`fortId`.
+- Có cần đổi tên `HeadlessAutomationEngine` thành `StructuredAutomationEngine`?
+  Không phải blocker; giữ tên hiện tại giảm churn và “headless” vẫn mô tả service.
+- `autoEncounter` có cần xuất hiện trong overlay settings hay chỉ host API? Cần quyết
+  định UX; về domain nên có field riêng, không tái sử dụng tên `encounterSweep`.
+
+### 17.11. Synthesis
+
+#### Key Insight
+
+Đây là một hard cut có phạm vi lớn hơn xóa `AutomationRuntimeMode`: phải xóa toàn bộ
+screen implementation, screen-shaped config/status/API và các tài liệu/scripts mô tả
+fallback. Structured pipeline đã đủ để làm runtime duy nhất ở controller boundary,
+nhưng live native observation/executor chưa hoàn thiện nên sau refactor hệ thống sẽ
+an toàn ở trạng thái read-only, không còn gameplay automation hoạt động tạm thời.
+
+#### Recommended Approach
+
+Giữ `HeadlessAutomationEngine`/service và control plane, giản lược engine thành
+structured-only, xóa `ScreenAutomation.kt` cùng `RootBinaryShell.kt`, đổi
+`encounterSweep` thành `autoEncounter`, và loại bỏ manual screen endpoints. Giữ toàn
+bộ bridge/session/runner/build gate; manual actions sẽ được đưa lại sau bằng một API
+structured có identity và đi qua runner. Thực hiện migration config/status/docs đồng
+bộ rồi verify bằng build/test/source guard/device read-only smoke test.
+
+#### Risks to Watch
+
+- Structured runtime hiện read-only nên phải chấp nhận mất mutation tạm thời.
+- API/status và persisted config có breaking changes nếu client cũ phụ thuộc field
+  screen.
+- Xóa `encounterSweep` không đúng cách có thể làm mất `OpenEncounter` structured.
+
+#### Open Questions
+
+- Manual catch/spin có cần giữ compatibility bằng structured contract ngay trong change
+  này không?
+- Có muốn expose `autoEncounter` trong UI overlay không?
+
+> Phần triển khai xoá screen đã được tách thành task độc lập tại
+> `docs/issues/2026-09-07/remove-screen-runtime-mode/task.md`. Issue này tiếp tục
+> tập trung vào structured observation, bridge, binding và client-owned executor.
