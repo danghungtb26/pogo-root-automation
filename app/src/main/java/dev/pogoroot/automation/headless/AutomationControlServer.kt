@@ -107,6 +107,11 @@ class AutomationControlServer(
             ApiResponse(200, "{\"ok\":true,\"action\":\"spin\"}")
         }
 
+        method == "POST" && path == "/v1/actions/berry" -> {
+            engine.manualBerry().getOrThrow()
+            ApiResponse(200, "{\"ok\":true,\"action\":\"berry\"}")
+        }
+
         else -> ApiResponse(404, jsonError("not found"))
     }
 
@@ -117,6 +122,18 @@ class AutomationControlServer(
         autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
         autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
         encounterSweep = params.boolean("encounterSweep") ?: config.encounterSweep,
+        autoBerry = params.boolean("autoBerry") ?: params.boolean("berry") ?: config.autoBerry,
+        autoDiscard = params.boolean("autoDiscard") ?: config.autoDiscard,
+        discardLimits = params["discardLimits"]?.let(::parseLimits) ?: config.discardLimits,
+        autoTransfer = params.boolean("autoTransfer") ?: config.autoTransfer,
+        transferBelowIvPercent = params["transferBelowIvPercent"]?.toDoubleOrNull()
+            ?.coerceIn(0.0, 100.0) ?: config.transferBelowIvPercent,
+        keepHundo = params.boolean("keepHundo") ?: config.keepHundo,
+        keepShiny = params.boolean("keepShiny") ?: config.keepShiny,
+        keepSpecialBackground = params.boolean("keepSpecialBackground") ?: params.boolean("keepBg")
+            ?: config.keepSpecialBackground,
+        keepFavorite = params.boolean("keepFavorite") ?: config.keepFavorite,
+        showToasts = params.boolean("showToasts") ?: config.showToasts,
         loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
         catchThrowDurationMs = params["catchThrowDurationMs"]?.toIntOrNull() ?: config.catchThrowDurationMs,
         catchResultDelayMs = params["catchResultDelayMs"]?.toLongOrNull() ?: config.catchResultDelayMs,
@@ -125,6 +142,16 @@ class AutomationControlServer(
         spinResultDelayMs = params["spinResultDelayMs"]?.toLongOrNull() ?: config.spinResultDelayMs,
         actionCooldownMs = params["actionCooldownMs"]?.toLongOrNull() ?: config.actionCooldownMs,
     )
+
+    private fun parseLimits(raw: String): Map<Int, Int> = raw
+        .split(',', ';')
+        .mapNotNull { token ->
+            val itemId = token.substringBefore(':').toIntOrNull() ?: return@mapNotNull null
+            val maxCount = token.substringAfter(':', "").toIntOrNull() ?: return@mapNotNull null
+            if (itemId <= 0 || maxCount < 0) return@mapNotNull null
+            itemId to maxCount
+        }
+        .toMap()
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
@@ -164,12 +191,15 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"encounterSweepTaps":${status.encounterSweepTaps},"screenWidth":${status.screenWidth ?: "null"},"screenHeight":${status.screenHeight ?: "null"},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoBerry":${config.autoBerry},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"showToasts":${config.showToasts},"encounterSweep":${config.encounterSweep},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"berryAttempts":${status.berryAttempts},"encounterSweepTaps":${status.encounterSweepTaps},"screenWidth":${status.screenWidth ?: "null"},"screenHeight":${status.screenHeight ?: "null"},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"encounterSweep":${config.encounterSweep},"loopIntervalMs":${config.loopIntervalMs},"catchThrowDurationMs":${config.catchThrowDurationMs},"catchResultDelayMs":${config.catchResultDelayMs},"spinOpenDelayMs":${config.spinOpenDelayMs},"spinSwipeDurationMs":${config.spinSwipeDurationMs},"spinResultDelayMs":${config.spinResultDelayMs},"actionCooldownMs":${config.actionCooldownMs}}
+        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoBerry":${config.autoBerry},"autoDiscard":${config.autoDiscard},"discardLimits":${limitsJson(config.discardLimits)},"autoTransfer":${config.autoTransfer},"transferBelowIvPercent":${config.transferBelowIvPercent},"keepHundo":${config.keepHundo},"keepShiny":${config.keepShiny},"keepSpecialBackground":${config.keepSpecialBackground},"keepFavorite":${config.keepFavorite},"showToasts":${config.showToasts},"encounterSweep":${config.encounterSweep},"loopIntervalMs":${config.loopIntervalMs},"catchThrowDurationMs":${config.catchThrowDurationMs},"catchResultDelayMs":${config.catchResultDelayMs},"spinOpenDelayMs":${config.spinOpenDelayMs},"spinSwipeDurationMs":${config.spinSwipeDurationMs},"spinResultDelayMs":${config.spinResultDelayMs},"actionCooldownMs":${config.actionCooldownMs}}
     """.trimIndent()
+
+    private fun limitsJson(limits: Map<Int, Int>): String = limits.toSortedMap().entries
+        .joinToString(prefix = "{", postfix = "}") { (itemId, maxCount) -> "\"$itemId\":$maxCount" }
 
     private fun String?.jsonStringOrNull(): String =
         this?.let { "\"${it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\"" } ?: "null"

@@ -39,6 +39,7 @@ data class TransferPolicy(
     val keepUnknownIv: Boolean = true,
     val keepShiny: Boolean = true,
     val keepHundo: Boolean = true,
+    val keepSpecialBackground: Boolean = true,
     val keepFavorite: Boolean = true,
     val keepLegendary: Boolean = true,
     val keepMythical: Boolean = true,

@@ -17,6 +17,7 @@ data class HeadlessAutomationStatus(
     val framesAnalyzed: Long = 0,
     val catchAttempts: Long = 0,
     val spinAttempts: Long = 0,
+    val berryAttempts: Long = 0,
     val encounterSweepTaps: Long = 0,
     val screenWidth: Int? = null,
     val screenHeight: Int? = null,
@@ -28,6 +29,7 @@ class HeadlessAutomationEngine(
     private val screenCapture: RootScreenCapture = RootScreenCapture(),
     private val analyzer: GameScreenAnalyzer = GameScreenAnalyzer(),
     private val uiDriver: RootUiDriver = RootUiDriver(ProcessRootShell()),
+    private val notifier: AutomationEventNotifier? = null,
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val loopActive = AtomicBoolean(false)
@@ -35,9 +37,11 @@ class HeadlessAutomationEngine(
     private val frames = AtomicLong(0)
     private val catches = AtomicLong(0)
     private val spins = AtomicLong(0)
+    private val berries = AtomicLong(0)
     private val sweeps = AtomicLong(0)
     private var sweepIndex = 0
     private var lastActionAt = 0L
+    private var berryAppliedForCurrentEncounter = false
 
     fun start() {
         if (!loopActive.compareAndSet(false, true)) return
@@ -59,22 +63,34 @@ class HeadlessAutomationEngine(
         framesAnalyzed = frames.get(),
         catchAttempts = catches.get(),
         spinAttempts = spins.get(),
+        berryAttempts = berries.get(),
         encounterSweepTaps = sweeps.get(),
         updatedAtEpochMs = System.currentTimeMillis(),
     )
 
     fun manualCatch(): Result<Unit> = withCurrentScreen { bitmap, config ->
         if (!performCatch(bitmap, config)) error("root catch swipe failed")
+        notifier?.show(AutomationEvent.CATCH_THROW)
     }
 
     fun manualSpin(): Result<Unit> = withCurrentScreen { bitmap, config ->
         if (!performSpin(bitmap, config)) error("root spin swipe failed")
+        notifier?.show(AutomationEvent.POKESTOP_SPUN)
+    }
+
+    fun manualBerry(): Result<Unit> = withCurrentScreen { bitmap, _ ->
+        val analysis = analyzer.analyze(bitmap)
+        check(analysis.state == GameScreenState.ENCOUNTER) { "Berry can only be used during an encounter" }
+        if (!performBerry(bitmap)) error("root berry input failed")
+        berries.incrementAndGet()
+        notifier?.show(AutomationEvent.BERRY_USED)
     }
 
     private fun runLoop() {
         while (loopActive.get()) {
             val config = configRepository.read()
             if (!config.enabled) {
+                berryAppliedForCurrentEncounter = false
                 status.updateAndGet {
                     it.copy(
                         running = true,
@@ -89,6 +105,7 @@ class HeadlessAutomationEngine(
 
             val foreground = runCatching { uiDriver.isPokemonGoForeground() }.getOrDefault(false)
             if (!foreground) {
+                berryAppliedForCurrentEncounter = false
                 status.updateAndGet {
                     it.copy(
                         running = true,
@@ -115,6 +132,9 @@ class HeadlessAutomationEngine(
             try {
                 frames.incrementAndGet()
                 val analysis = analyzer.analyze(bitmap)
+                if (analysis.state != GameScreenState.ENCOUNTER) {
+                    berryAppliedForCurrentEncounter = false
+                }
                 status.updateAndGet {
                     it.copy(
                         running = true,
@@ -129,11 +149,23 @@ class HeadlessAutomationEngine(
                 }
 
                 when {
+                    analysis.state == GameScreenState.ENCOUNTER && config.autoBerry && !berryAppliedForCurrentEncounter -> {
+                        if (actionReady(config) && performBerry(bitmap)) {
+                            berryAppliedForCurrentEncounter = true
+                            berries.incrementAndGet()
+                            markAction("berry")
+                            notifier?.show(AutomationEvent.BERRY_USED)
+                            sleepInterruptibly(650L)
+                        }
+                    }
+
                     config.autoCatch && analysis.state == GameScreenState.ENCOUNTER -> {
                         if (actionReady(config) && performCatch(bitmap, config)) {
                             catches.incrementAndGet()
                             markAction("catch-throw")
+                            notifier?.show(AutomationEvent.CATCH_THROW)
                             sleepInterruptibly(config.catchResultDelayMs)
+                            inspectCatchResult()
                         }
                     }
 
@@ -141,6 +173,7 @@ class HeadlessAutomationEngine(
                         if (actionReady(config) && performSpin(bitmap, config)) {
                             spins.incrementAndGet()
                             markAction("spin-pokestop")
+                            notifier?.show(AutomationEvent.POKESTOP_SPUN)
                             sleepInterruptibly(config.spinResultDelayMs)
                         }
                     }
@@ -177,10 +210,44 @@ class HeadlessAutomationEngine(
         val next = screenCapture.capture().getOrNull() ?: return
         try {
             val analysis = analyzer.analyze(next)
-            if (analysis.state == GameScreenState.ENCOUNTER && performCatch(next, config)) {
+            if (analysis.state != GameScreenState.ENCOUNTER) return
+
+            if (config.autoBerry && !berryAppliedForCurrentEncounter && performBerry(next)) {
+                berryAppliedForCurrentEncounter = true
+                berries.incrementAndGet()
+                notifier?.show(AutomationEvent.BERRY_USED)
+                sleepInterruptibly(650L)
+            }
+
+            if (performCatch(next, config)) {
                 catches.incrementAndGet()
                 markAction("catch-throw")
+                notifier?.show(AutomationEvent.CATCH_THROW)
                 sleepInterruptibly(config.catchResultDelayMs)
+                inspectCatchResult()
+            }
+        } finally {
+            next.recycle()
+        }
+    }
+
+    private fun inspectCatchResult() {
+        val next = screenCapture.capture().getOrNull() ?: return
+        try {
+            when (analyzer.analyze(next).state) {
+                GameScreenState.ENCOUNTER -> {
+                    berryAppliedForCurrentEncounter = false
+                    notifier?.show(AutomationEvent.BROKE_FREE)
+                }
+                GameScreenState.OVERWORLD -> {
+                    berryAppliedForCurrentEncounter = false
+                    notifier?.show(AutomationEvent.RUN_AWAY)
+                }
+                GameScreenState.UNKNOWN -> {
+                    berryAppliedForCurrentEncounter = false
+                    notifier?.show(AutomationEvent.CAUGHT)
+                }
+                GameScreenState.POKESTOP_DETAIL -> berryAppliedForCurrentEncounter = false
             }
         } finally {
             next.recycle()
@@ -194,11 +261,26 @@ class HeadlessAutomationEngine(
             if (analysis.state == GameScreenState.POKESTOP_DETAIL && performSpin(next, config)) {
                 spins.incrementAndGet()
                 markAction("spin-pokestop")
+                notifier?.show(AutomationEvent.POKESTOP_SPUN)
                 sleepInterruptibly(config.spinResultDelayMs)
             }
         } finally {
             next.recycle()
         }
+    }
+
+    private fun performBerry(bitmap: Bitmap): Boolean {
+        val opened = uiDriver.tapNormalized(bitmap.width, bitmap.height, 0.17, 0.86)
+        if (!opened) return false
+        sleepInterruptibly(350L)
+
+        // The current screen executor uses the first visible berry slot. Runtime mode can
+        // replace this with an exact berry item id without changing the settings contract.
+        val selected = uiDriver.tapNormalized(bitmap.width, bitmap.height, 0.22, 0.79)
+        if (!selected) return false
+        sleepInterruptibly(250L)
+
+        return uiDriver.tapNormalized(bitmap.width, bitmap.height, 0.50, 0.44)
     }
 
     private fun performCatch(bitmap: Bitmap, config: HeadlessAutomationConfig): Boolean {

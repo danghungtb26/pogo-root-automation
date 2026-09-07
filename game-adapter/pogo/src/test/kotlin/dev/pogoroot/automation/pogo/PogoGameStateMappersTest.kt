@@ -44,6 +44,7 @@ class PogoGameStateMappersTest {
                         individualDefense = 15,
                         individualStamina = 15,
                         shiny = true,
+                        hasSpecialBackground = true,
                     ),
                 ),
             ),
@@ -53,6 +54,7 @@ class PogoGameStateMappersTest {
         assertEquals(250, inventory.freeSlots)
         assertTrue(storage.pokemon.single().iv!!.isHundo)
         assertTrue(storage.pokemon.single().shiny)
+        assertTrue(storage.pokemon.single().hasSpecialBackground)
     }
 
     @Test

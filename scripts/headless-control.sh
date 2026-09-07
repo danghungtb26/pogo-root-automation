@@ -16,7 +16,9 @@ Usage:
   bash scripts/headless-control.sh stop
   bash scripts/headless-control.sh catch
   bash scripts/headless-control.sh spin
-  bash scripts/headless-control.sh config 'autoCatch=true&autoSpin=true&encounterSweep=true&loopIntervalMs=900'
+  bash scripts/headless-control.sh berry
+  bash scripts/headless-control.sh config 'autoCatch=true&autoSpin=true&autoBerry=true&autoDiscard=false&autoTransfer=false'
+  bash scripts/headless-control.sh config 'discardLimits=1:100,2:100,3:200&transferBelowIvPercent=100&keepHundo=true&keepShiny=true&keepBg=true'
   bash scripts/headless-control.sh game
 
 Environment:
@@ -90,6 +92,10 @@ case "$command" in
   spin)
     ensure_api
     request POST /v1/actions/spin
+    ;;
+  berry)
+    ensure_api
+    request POST /v1/actions/berry
     ;;
   config)
     ensure_api
