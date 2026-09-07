@@ -235,7 +235,10 @@ class HeadlessAutomationEngine(
         val next = screenCapture.capture().getOrNull() ?: return
         try {
             when (analyzer.analyze(next).state) {
-                GameScreenState.ENCOUNTER -> notifier?.show(AutomationEvent.BROKE_FREE)
+                GameScreenState.ENCOUNTER -> {
+                    berryAppliedForCurrentEncounter = false
+                    notifier?.show(AutomationEvent.BROKE_FREE)
+                }
                 GameScreenState.OVERWORLD -> {
                     berryAppliedForCurrentEncounter = false
                     notifier?.show(AutomationEvent.RUN_AWAY)
