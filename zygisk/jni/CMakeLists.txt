@@ -5,7 +5,12 @@ if(NOT DEFINED ZYGISK_API_DIR)
     message(FATAL_ERROR "Set -DZYGISK_API_DIR to the directory containing zygisk.hpp")
 endif()
 
-add_library(pogo_root_automation SHARED main.cpp)
+add_library(
+    pogo_root_automation
+    SHARED
+    main.cpp
+    maintenance_runtime.cpp
+)
 
 target_include_directories(
     pogo_root_automation
