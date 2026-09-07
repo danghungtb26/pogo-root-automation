@@ -16,10 +16,12 @@ import android.widget.TextView
 import android.widget.Toast
 import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.headless.HeadlessAutomationConfig
+import dev.pogoroot.automation.headless.HeadlessAutomationService
 
 class AutomationSettingsOverlay(
     private val context: Context,
     private val repository: AutomationConfigRepository,
+    private val onSaved: (HeadlessAutomationConfig) -> Unit = {},
 ) {
     fun show() {
         val config = repository.read()
@@ -118,7 +120,7 @@ class AutomationSettingsOverlay(
                     limits[item.id] = value
                 }
 
-                repository.update { current ->
+                val saved = repository.update { current ->
                     current.copy(
                         enabled = enabledSwitch.isChecked,
                         autoCatch = catchSwitch.isChecked,
@@ -136,6 +138,8 @@ class AutomationSettingsOverlay(
                     )
                 }
 
+                HeadlessAutomationService.start(context)
+                onSaved(saved)
                 Toast.makeText(context, "Automation settings saved", Toast.LENGTH_SHORT).show()
                 dialog.dismiss()
             }
