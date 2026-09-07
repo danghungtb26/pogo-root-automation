@@ -9,6 +9,7 @@ data class StoredPokemon(
     val favorite: Boolean = false,
     val legendary: Boolean = false,
     val mythical: Boolean = false,
+    val hasSpecialBackground: Boolean = false,
 )
 
 data class PokemonStorageSnapshot(
