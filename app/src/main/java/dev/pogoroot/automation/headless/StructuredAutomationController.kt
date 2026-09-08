@@ -13,6 +13,7 @@ import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
+import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
@@ -40,6 +41,7 @@ class StructuredAutomationController(
     allowedBuildFingerprints: Set<String> = emptySet(),
     private val allowedBuildFingerprintsProvider: (() -> Set<String>)? = null,
     private val onGameAction: (LastActiveGameAction) -> Unit = {},
+    private val onEncounterSnapshot: (EncounterSnapshot) -> Unit = {},
 ) {
     private val configuredAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private val source = BridgePogoRuntimeSource(bridge)
@@ -84,6 +86,7 @@ class StructuredAutomationController(
                     try {
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
                         val snapshot = readSnapshot()
+                        snapshot.encounter?.let(onEncounterSnapshot)
                         (snapshot.nearby?.playerPosition ?: snapshot.encounter?.position)
                             ?.let { latestPlayerPosition = it }
                         val automationObservation = AutomationObservation(

@@ -23,6 +23,10 @@ internal class OverlayPositionStore(context: Context) {
         private const val PREF_OVERLAY_Y = "overlay_y"
         private const val PREF_COOLDOWN_X = "cooldown_overlay_x"
         private const val PREF_COOLDOWN_Y = "cooldown_overlay_y"
+        private const val PREF_HUNDO_X = "hundo_results_overlay_x"
+        private const val PREF_HUNDO_Y = "hundo_results_overlay_y"
+        private const val PREF_SHINY_X = "shiny_results_overlay_x"
+        private const val PREF_SHINY_Y = "shiny_results_overlay_y"
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -98,6 +102,30 @@ internal class OverlayPositionStore(context: Context) {
         prefs.edit()
             .putInt(PREF_COOLDOWN_X, position.x)
             .putInt(PREF_COOLDOWN_Y, position.y)
+            .apply()
+    }
+
+    fun loadHundoPosition(default: OverlayPosition): OverlayPosition = OverlayPosition(
+        x = prefs.getInt(PREF_HUNDO_X, default.x),
+        y = prefs.getInt(PREF_HUNDO_Y, default.y),
+    )
+
+    fun persistHundoPosition(position: OverlayPosition) {
+        prefs.edit()
+            .putInt(PREF_HUNDO_X, position.x)
+            .putInt(PREF_HUNDO_Y, position.y)
+            .apply()
+    }
+
+    fun loadShinyPosition(default: OverlayPosition): OverlayPosition = OverlayPosition(
+        x = prefs.getInt(PREF_SHINY_X, default.x),
+        y = prefs.getInt(PREF_SHINY_Y, default.y),
+    )
+
+    fun persistShinyPosition(position: OverlayPosition) {
+        prefs.edit()
+            .putInt(PREF_SHINY_X, position.x)
+            .putInt(PREF_SHINY_Y, position.y)
             .apply()
     }
 }

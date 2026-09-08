@@ -24,6 +24,7 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.core.scan.ScanMatchType
 import dev.pogoroot.automation.core.time.TeleportCooldown
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.core.time.TeleportCooldownService
@@ -33,6 +34,7 @@ import dev.pogoroot.automation.headless.LastActiveLocationRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
+import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.Locale
 import kotlin.math.max
 
@@ -46,6 +48,9 @@ class JoystickOverlayService : Service() {
         private const val COOLDOWN_REFRESH_MS = 1_000L
         private const val DEFAULT_EDGE_MARGIN_DP = 16
         private const val DEFAULT_BOTTOM_MARGIN_DP = 24
+        private const val SCAN_WIDGET_WIDTH_DP = 50
+        private const val SCAN_WIDGET_INITIAL_HEIGHT_DP = 72
+        private const val SCAN_WIDGET_GAP_DP = 8
     }
 
     private enum class MainOverlayMode {
@@ -61,6 +66,7 @@ class JoystickOverlayService : Service() {
     private lateinit var controller: JoystickLocationController
     private lateinit var automationConfigRepository: AutomationConfigRepository
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private lateinit var scanResultRepository: ScanResultRepository
     private lateinit var positionStore: OverlayPositionStore
     private lateinit var shortcutMenu: ShortcutMenuView
     private lateinit var joystickPad: JoystickPadView
@@ -69,6 +75,10 @@ class JoystickOverlayService : Service() {
     private lateinit var floatButton: TextView
     private lateinit var cooldownView: TextView
     private lateinit var cooldownWindowParams: WindowManager.LayoutParams
+    private lateinit var hundoResultsView: ScanResultOverlayView
+    private lateinit var shinyResultsView: ScanResultOverlayView
+    private lateinit var hundoResultsWindowParams: WindowManager.LayoutParams
+    private lateinit var shinyResultsWindowParams: WindowManager.LayoutParams
 
     private val cooldownService = TeleportCooldownService()
     private var controllerStarted = false
@@ -82,6 +92,7 @@ class JoystickOverlayService : Service() {
     private var iconSizePx = 0
     private var cooldownWidthPx = 0
     private var cooldownHeightPx = 0
+    private var scanWidgetWidthPx = 0
     private var edgeMarginPx = 0
     private var bottomMarginPx = 0
 
@@ -89,6 +100,7 @@ class JoystickOverlayService : Service() {
         override fun run() {
             renderShortcutStates()
             renderCooldown()
+            renderScanResults()
             mainHandler.postDelayed(this, COOLDOWN_REFRESH_MS)
         }
     }
@@ -98,6 +110,7 @@ class JoystickOverlayService : Service() {
         windowManager = getSystemService(WindowManager::class.java)
         automationConfigRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
+        scanResultRepository = ScanResultRepository(this)
         positionStore = OverlayPositionStore(this)
         latestTeleportCooldown = positionStore.loadCooldown()
         cooldownMode = positionStore.loadCooldownMode()
@@ -119,6 +132,7 @@ class JoystickOverlayService : Service() {
         ensureOverlay()
         renderShortcutStates()
         renderCooldown()
+        renderScanResults()
         mainHandler.removeCallbacks(cooldownTick)
         mainHandler.post(cooldownTick)
         if (!controllerStarted) {
@@ -143,6 +157,16 @@ class JoystickOverlayService : Service() {
                 persistCooldownPosition()
                 runCatching { windowManager.updateViewLayout(cooldownView, cooldownWindowParams) }
             }
+            if (::hundoResultsView.isInitialized && ::shinyResultsView.isInitialized) {
+                clampScanWidget(hundoResultsWindowParams, hundoResultsView)
+                clampScanWidget(shinyResultsWindowParams, shinyResultsView)
+                persistHundoResultsPosition()
+                persistShinyResultsPosition()
+                runCatching {
+                    windowManager.updateViewLayout(hundoResultsView, hundoResultsWindowParams)
+                    windowManager.updateViewLayout(shinyResultsView, shinyResultsWindowParams)
+                }
+            }
         }
     }
 
@@ -155,6 +179,12 @@ class JoystickOverlayService : Service() {
         }
         if (::cooldownView.isInitialized) {
             runCatching { windowManager.removeView(cooldownView) }
+        }
+        if (::hundoResultsView.isInitialized) {
+            runCatching { windowManager.removeView(hundoResultsView) }
+        }
+        if (::shinyResultsView.isInitialized) {
+            runCatching { windowManager.removeView(shinyResultsView) }
         }
         if (::rootView.isInitialized) {
             runCatching { windowManager.removeView(rootView) }
@@ -170,6 +200,7 @@ class JoystickOverlayService : Service() {
         bottomMarginPx = dp(DEFAULT_BOTTOM_MARGIN_DP)
         cooldownWidthPx = dp(82)
         cooldownHeightPx = dp(44)
+        scanWidgetWidthPx = dp(SCAN_WIDGET_WIDTH_DP)
 
         floatButton = TextView(this).apply {
             gravity = Gravity.CENTER
@@ -262,6 +293,7 @@ class JoystickOverlayService : Service() {
         windowManager.addView(rootView, windowParams)
         setMainMode(MainOverlayMode.COLLAPSED)
         ensureCooldownOverlay()
+        ensureScanResultOverlays()
     }
 
     private fun setMainMode(mode: MainOverlayMode) {
@@ -357,6 +389,119 @@ class JoystickOverlayService : Service() {
             },
             onDrop = ::persistCooldownPosition,
         ).attachTo(cooldownView)
+    }
+
+    private fun ensureScanResultOverlays() {
+        if (::hundoResultsView.isInitialized || ::shinyResultsView.isInitialized) return
+
+        hundoResultsView = ScanResultOverlayView(this, ScanMatchType.HUNDO) {
+            openScanResults(ScanMatchType.HUNDO)
+        }
+        shinyResultsView = ScanResultOverlayView(this, ScanMatchType.SHINY) {
+            openScanResults(ScanMatchType.SHINY)
+        }
+
+        val defaultY = dp(120)
+        val hundoDefault = positionStore.loadHundoPosition(
+            OverlayPosition(edgeMarginPx, defaultY),
+        )
+        val shinyDefault = positionStore.loadShinyPosition(
+            OverlayPosition(edgeMarginPx + scanWidgetWidthPx + dp(SCAN_WIDGET_GAP_DP), defaultY),
+        )
+        hundoResultsWindowParams = newOverlayParams(
+            scanWidgetWidthPx,
+            dp(SCAN_WIDGET_INITIAL_HEIGHT_DP),
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = hundoDefault.x
+            y = hundoDefault.y
+        }
+        shinyResultsWindowParams = newOverlayParams(
+            scanWidgetWidthPx,
+            dp(SCAN_WIDGET_INITIAL_HEIGHT_DP),
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = shinyDefault.x
+            y = shinyDefault.y
+        }
+        clampScanWidget(hundoResultsWindowParams, hundoResultsView)
+        clampScanWidget(shinyResultsWindowParams, shinyResultsView)
+        windowManager.addView(hundoResultsView, hundoResultsWindowParams)
+        windowManager.addView(shinyResultsView, shinyResultsWindowParams)
+
+        val dragHandler = ScanWidgetDragHandler(this)
+        dragHandler.attachTo(hundoResultsView, object : ScanWidgetDragHandler.Callbacks {
+            override fun readPosition(): OverlayPosition = OverlayPosition(
+                hundoResultsWindowParams.x,
+                hundoResultsWindowParams.y,
+            )
+
+            override fun writePosition(position: OverlayPosition) {
+                hundoResultsWindowParams.x = position.x
+                hundoResultsWindowParams.y = position.y
+                clampScanWidget(hundoResultsWindowParams, hundoResultsView)
+            }
+
+            override fun onMove() {
+                runCatching { windowManager.updateViewLayout(hundoResultsView, hundoResultsWindowParams) }
+            }
+
+            override fun onDrop() = persistHundoResultsPosition()
+        })
+        dragHandler.attachTo(shinyResultsView, object : ScanWidgetDragHandler.Callbacks {
+            override fun readPosition(): OverlayPosition = OverlayPosition(
+                shinyResultsWindowParams.x,
+                shinyResultsWindowParams.y,
+            )
+
+            override fun writePosition(position: OverlayPosition) {
+                shinyResultsWindowParams.x = position.x
+                shinyResultsWindowParams.y = position.y
+                clampScanWidget(shinyResultsWindowParams, shinyResultsView)
+            }
+
+            override fun onMove() {
+                runCatching { windowManager.updateViewLayout(shinyResultsView, shinyResultsWindowParams) }
+            }
+
+            override fun onDrop() = persistShinyResultsPosition()
+        })
+    }
+
+    private fun renderScanResults() {
+        if (!::hundoResultsView.isInitialized || !::shinyResultsView.isInitialized) return
+        hundoResultsView.render(scanResultRepository.read(ScanMatchType.HUNDO))
+        shinyResultsView.render(scanResultRepository.read(ScanMatchType.SHINY))
+        resizeScanWidget(hundoResultsView, hundoResultsWindowParams)
+        resizeScanWidget(shinyResultsView, shinyResultsWindowParams)
+    }
+
+    private fun resizeScanWidget(
+        view: ScanResultOverlayView,
+        params: WindowManager.LayoutParams,
+    ) {
+        params.width = scanWidgetWidthPx
+        params.height = view.desiredHeightPx().coerceAtLeast(dp(SCAN_WIDGET_INITIAL_HEIGHT_DP))
+        clampScanWidget(params, view)
+        runCatching { windowManager.updateViewLayout(view, params) }
+    }
+
+    private fun clampScanWidget(
+        params: WindowManager.LayoutParams,
+        view: ScanResultOverlayView,
+    ) {
+        params.width = scanWidgetWidthPx
+        params.height = view.desiredHeightPx().coerceAtLeast(dp(SCAN_WIDGET_INITIAL_HEIGHT_DP))
+        params.x = clamp(params.x, displayWidth() - params.width)
+        params.y = clamp(params.y, displayHeight() - params.height)
+    }
+
+    private fun openScanResults(matchType: ScanMatchType) {
+        startActivity(
+            Intent(this, ScanResultsActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(ScanResultsActivity.EXTRA_SECTION, matchType.name),
+        )
     }
 
     private fun renderShortcutStates() {
@@ -545,6 +690,18 @@ class JoystickOverlayService : Service() {
     private fun persistCooldownPosition() {
         positionStore.persistCooldownPosition(
             OverlayPosition(cooldownWindowParams.x, cooldownWindowParams.y),
+        )
+    }
+
+    private fun persistHundoResultsPosition() {
+        positionStore.persistHundoPosition(
+            OverlayPosition(hundoResultsWindowParams.x, hundoResultsWindowParams.y),
+        )
+    }
+
+    private fun persistShinyResultsPosition() {
+        positionStore.persistShinyPosition(
+            OverlayPosition(shinyResultsWindowParams.x, shinyResultsWindowParams.y),
         )
     }
 

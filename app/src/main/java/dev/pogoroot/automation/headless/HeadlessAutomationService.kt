@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.IBinder
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.root.RuntimeBridgeClient
+import dev.pogoroot.automation.scan.ScanResultRepository
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
@@ -18,11 +19,14 @@ class HeadlessAutomationService : Service() {
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var structuredController: StructuredAutomationController
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private lateinit var scanResultRepository: ScanResultRepository
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
+        scanResultRepository = ScanResultRepository(this)
+        scanResultRepository.clear()
         runtimeBridge = RuntimeBridgeClient()
         structuredController = StructuredAutomationController(
             bridge = runtimeBridge!!,
@@ -33,6 +37,7 @@ class HeadlessAutomationService : Service() {
                 configRepository.read().structuredAllowedBuildFingerprints
             },
             onGameAction = lastActiveLocationRepository::record,
+            onEncounterSnapshot = scanResultRepository::recordEncounter,
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,

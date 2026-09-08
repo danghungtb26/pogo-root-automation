@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="scan_drag_down_x" type="id" />
+    <item name="scan_drag_down_y" type="id" />
+    <item name="scan_drag_initial_position" type="id" />
+    <item name="scan_dragging" type="id" />
+</resources>
