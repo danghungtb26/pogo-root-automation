@@ -2,7 +2,10 @@ package dev.pogoroot.automation.headless
 
 import android.content.Context
 import dev.pogoroot.automation.core.automation.CurvePreference
+import dev.pogoroot.automation.core.automation.DEFAULT_CATCH_SETTLE_DELAY_MS
+import dev.pogoroot.automation.core.automation.DEFAULT_SPIN_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.EncounterMode
+import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 
 enum class BerryMode {
@@ -39,6 +42,8 @@ data class HeadlessAutomationConfig(
     val berryMode: BerryMode = BerryMode.NONE,
     val showActionToasts: Boolean = true,
     val loopIntervalMs: Long = 900L,
+    val spinSettleDelayMs: Long = DEFAULT_SPIN_SETTLE_DELAY_MS,
+    val catchSettleDelayMs: Long = DEFAULT_CATCH_SETTLE_DELAY_MS,
     /** Exact strong fingerprints verified for client-owned mutation. */
     val structuredAllowedBuildFingerprints: Set<String> = emptySet(),
 ) {
@@ -89,6 +94,10 @@ class AutomationConfigRepository(context: Context) {
         }.getOrDefault(BerryMode.NONE),
         showActionToasts = prefs.getBoolean(KEY_SHOW_ACTION_TOASTS, true),
         loopIntervalMs = prefs.getLong(KEY_LOOP_INTERVAL, 900L).coerceIn(300L, 5_000L),
+        spinSettleDelayMs = prefs.getLong(KEY_SPIN_SETTLE_DELAY, DEFAULT_SPIN_SETTLE_DELAY_MS)
+            .coerceIn(0L, MAX_SETTLE_DELAY_MS),
+        catchSettleDelayMs = prefs.getLong(KEY_CATCH_SETTLE_DELAY, DEFAULT_CATCH_SETTLE_DELAY_MS)
+            .coerceIn(0L, MAX_SETTLE_DELAY_MS),
         structuredAllowedBuildFingerprints = prefs.getString(KEY_STRUCTURED_ALLOWLIST, null)
             .orEmpty()
             .split(',')
@@ -122,6 +131,8 @@ class AutomationConfigRepository(context: Context) {
             .putString(KEY_BERRY_MODE, next.berryMode.name)
             .putBoolean(KEY_SHOW_ACTION_TOASTS, next.showActionToasts)
             .putLong(KEY_LOOP_INTERVAL, next.loopIntervalMs.coerceIn(300L, 5_000L))
+            .putLong(KEY_SPIN_SETTLE_DELAY, next.spinSettleDelayMs.coerceIn(0L, MAX_SETTLE_DELAY_MS))
+            .putLong(KEY_CATCH_SETTLE_DELAY, next.catchSettleDelayMs.coerceIn(0L, MAX_SETTLE_DELAY_MS))
             .putString(KEY_STRUCTURED_ALLOWLIST, next.structuredAllowedBuildFingerprints
                 .filter(String::isNotBlank)
                 .sorted()
@@ -196,6 +207,8 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_BERRY_MODE = "berry_mode"
         private const val KEY_SHOW_ACTION_TOASTS = "show_action_toasts"
         private const val KEY_LOOP_INTERVAL = "loop_interval_ms"
+        private const val KEY_SPIN_SETTLE_DELAY = "spin_settle_delay_ms"
+        private const val KEY_CATCH_SETTLE_DELAY = "catch_settle_delay_ms"
         private const val KEY_STRUCTURED_ALLOWLIST = "structured_allowed_build_fingerprints"
         private const val KEY_LEGACY_ENCOUNTER_SWEEP = "encounter_sweep"
         private const val KEY_LEGACY_RUNTIME_MODE = "runtime_mode"

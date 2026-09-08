@@ -17,6 +17,8 @@ data class ActionRequest(
     val createdAtEpochMs: Long,
     val createdAtElapsedNs: Long,
     val expiresAtElapsedNs: Long,
+    /** Controller-side delay before the next mutation may be planned. */
+    val settleDelayNs: Long = 0L,
     val pid: Int? = null,
     val processName: String? = null,
     val packageName: String? = null,
@@ -29,6 +31,7 @@ data class ActionRequest(
         require(expiresAtElapsedNs >= createdAtElapsedNs) {
             "expiresAtElapsedNs must not precede createdAtElapsedNs"
         }
+        require(settleDelayNs >= 0L) { "settleDelayNs must not be negative" }
         require(pid == null || pid > 0) { "pid must be positive when present" }
     }
 
@@ -41,6 +44,7 @@ data class ActionRequest(
             createdAtEpochMs: Long,
             createdAtElapsedNs: Long,
             timeoutNs: Long,
+            settleDelayNs: Long = 0L,
             pid: Int? = null,
             processName: String? = null,
             packageName: String? = null,
@@ -57,6 +61,7 @@ data class ActionRequest(
                 createdAtEpochMs = createdAtEpochMs,
                 createdAtElapsedNs = createdAtElapsedNs,
                 expiresAtElapsedNs = createdAtElapsedNs + timeoutNs,
+                settleDelayNs = settleDelayNs,
                 pid = pid,
                 processName = processName,
                 packageName = packageName,

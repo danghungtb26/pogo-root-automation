@@ -14,7 +14,7 @@ Usage:
   bash scripts/headless-control.sh status
   bash scripts/headless-control.sh start
   bash scripts/headless-control.sh stop
-  bash scripts/headless-control.sh config 'autoEncounter=true&autoCatch=true&autoSpin=true&loopIntervalMs=900'
+  bash scripts/headless-control.sh config 'autoEncounter=true&autoCatch=true&autoSpin=true&spinSettleDelayMs=1000&catchSettleDelayMs=3500&loopIntervalMs=900'
   bash scripts/headless-control.sh game
 
 Environment:

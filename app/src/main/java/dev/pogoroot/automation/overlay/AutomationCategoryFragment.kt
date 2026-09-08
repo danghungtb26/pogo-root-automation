@@ -14,6 +14,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
+import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.headless.BerryMode
 
@@ -66,6 +67,8 @@ class AutomationCategoryFragment : Fragment() {
         val autoCloseCatchPreview = switch(host, "Close catch preview after caught", config.autoCloseCatchPreview)
         val autoSpin = switch(host, "Auto spin", config.autoSpin)
         val autoEncounter = switch(host, "Auto encounter", config.autoEncounter)
+        val spinSettleDelay = numberInput(host, config.spinSettleDelayMs.toInt())
+        val catchSettleDelay = numberInput(host, config.catchSettleDelayMs.toInt())
         val content = editorContent(host).apply {
             addView(description(host, "These switches control the structured headless automation service."))
             addView(enabled)
@@ -76,6 +79,9 @@ class AutomationCategoryFragment : Fragment() {
             addView(autoCloseCatchPreview)
             addView(autoSpin)
             addView(autoEncounter)
+            addView(description(host, "Wait after a completed action before planning the next mutation. Values are milliseconds; 0 disables the wait."))
+            addLimitRow("Spin settle delay (ms)", spinSettleDelay)
+            addLimitRow("Catch settle delay (ms)", catchSettleDelay)
         }
         return content to {
             host.repository.update { current ->
@@ -86,6 +92,10 @@ class AutomationCategoryFragment : Fragment() {
                     autoCloseCatchPreview = autoCloseCatchPreview.isChecked,
                     autoSpin = autoSpin.isChecked,
                     autoEncounter = autoEncounter.isChecked,
+                    spinSettleDelayMs = spinSettleDelay.intValue(config.spinSettleDelayMs.toInt())
+                        .toLong().coerceIn(0L, MAX_SETTLE_DELAY_MS),
+                    catchSettleDelayMs = catchSettleDelay.intValue(config.catchSettleDelayMs.toInt())
+                        .toLong().coerceIn(0L, MAX_SETTLE_DELAY_MS),
                 )
             }
         }

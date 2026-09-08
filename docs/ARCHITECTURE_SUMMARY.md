@@ -48,8 +48,8 @@ kiểm tra ở boundary.
 - `JoystickOverlayService` là service độc lập cho location control.
 
 Config lưu trong SharedPreferences namespace `headless_automation`. Các policy
-chính là `autoEncounter`, `autoCatch`, `autoCloseCatchPreview`, `autoSpin`, berry, discard/transfer và
-chu kỳ polling. Preference cũ `encounter_sweep` được migrate một lần sang
+chính là `autoEncounter`, `autoCatch`, `autoCloseCatchPreview`, `autoSpin`, berry, discard/transfer,
+`spinSettleDelayMs`/`catchSettleDelayMs` và chu kỳ polling. Preference cũ `encounter_sweep` được migrate một lần sang
 `auto_encounter`; preference lựa chọn runtime cũ và các delay thao tác cũ bị
 loại bỏ, không thể kích hoạt behavior đã xóa.
 

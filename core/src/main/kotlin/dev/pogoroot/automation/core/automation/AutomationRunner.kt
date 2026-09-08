@@ -1,12 +1,15 @@
 package dev.pogoroot.automation.core.automation
 
+import java.util.concurrent.TimeUnit
+
 /**
  * Controller-side execution state machine.
  *
  * It accepts observations from one runtime session, plans from the pure
  * coordinator, and submits at most one mutation. A new observation is required
  * after every definitive result, so actions are never bulk-queued from a stale
- * snapshot.
+ * snapshot. Catch and spin may also hold a controller-side settle gate before
+ * the next mutation is eligible.
  */
 class AutomationRunner(
     private val executor: ActionRequestExecutor,
@@ -27,6 +30,7 @@ class AutomationRunner(
     private var blockedActionAfterIndeterminate: AutomationAction? = null
     private var lastError: String? = null
     private var lastMessageSeq = 0L
+    private var nextMutationAllowedAtElapsedNs = 0L
 
     @Synchronized
     fun attach(runtime: RuntimeIdentity): Result<Unit> {
@@ -42,6 +46,7 @@ class AutomationRunner(
         lastPlannedSnapshot = null
         terminalActionsForSnapshot.clear()
         lastMessageSeq = 0L
+        nextMutationAllowedAtElapsedNs = 0L
         suspended = preserveRecovery
         needsResync = preserveRecovery
         if (!preserveRecovery) {
@@ -73,6 +78,10 @@ class AutomationRunner(
                     reason = if (suspended) "runner suspended; resync required" else "mutation active",
                 ),
             )
+        }
+
+        if (nowElapsedNs() < nextMutationAllowedAtElapsedNs) {
+            return Result.success(RunnerDispatch())
         }
 
         val actions = coordinator.plan(observation.snapshot, policy)
@@ -116,6 +125,9 @@ class AutomationRunner(
         // still proceed on a later observation (UseBerry -> Catch is one case).
 
         val createdAtElapsedNs = nowElapsedNs()
+        val settleDelayNs = TimeUnit.MILLISECONDS.toNanos(
+            policy.timing.settleDelayMsFor(mutation),
+        )
         val request = ActionRequest(
             commandId = commandIdFactory(),
             runtimeSessionId = runtime.runtimeSessionId,
@@ -125,6 +137,7 @@ class AutomationRunner(
             createdAtEpochMs = nowEpochMs(),
             createdAtElapsedNs = createdAtElapsedNs,
             expiresAtElapsedNs = createdAtElapsedNs + commandTimeoutNs,
+            settleDelayNs = settleDelayNs,
             pid = runtime.pid,
             processName = runtime.processName,
             packageName = runtime.packageName,
@@ -185,6 +198,7 @@ class AutomationRunner(
             terminalActionsForSnapshot += execution.request.action
             active = null
             lastError = execution.message.takeUnless { execution.phase == ActionExecutionPhase.COMPLETED }
+            scheduleSettle(execution.request.settleDelayNs)
         }
         return Result.success(snapshot())
     }
@@ -208,6 +222,7 @@ class AutomationRunner(
         identity = null
         suspended = true
         needsResync = true
+        nextMutationAllowedAtElapsedNs = 0L
         return active
     }
 
@@ -239,6 +254,7 @@ class AutomationRunner(
         active = null
         suspended = false
         needsResync = false
+        nextMutationAllowedAtElapsedNs = 0L
         lastError = null
         terminalActionsForSnapshot.clear()
         // Do not automatically retry the mutation whose outcome was unknown.
@@ -263,6 +279,7 @@ class AutomationRunner(
         active = null
         terminalActionsForSnapshot += current.request.action
         lastError = message
+        scheduleSettle(current.request.settleDelayNs)
         return Result.success(snapshot())
     }
 
@@ -295,6 +312,19 @@ class AutomationRunner(
         lastObservationSeq = lastObservation?.messageSeq,
         lastError = lastError,
     )
+
+    private fun scheduleSettle(delayNs: Long) {
+        if (delayNs <= 0L) {
+            nextMutationAllowedAtElapsedNs = 0L
+            return
+        }
+        val now = nowElapsedNs()
+        nextMutationAllowedAtElapsedNs = if (Long.MAX_VALUE - now < delayNs) {
+            Long.MAX_VALUE
+        } else {
+            now + delayNs
+        }
+    }
 
     private fun validateObservation(
         observation: AutomationObservation,

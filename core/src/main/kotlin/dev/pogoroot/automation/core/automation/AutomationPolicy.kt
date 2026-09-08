@@ -1,5 +1,9 @@
 package dev.pogoroot.automation.core.automation
 
+const val DEFAULT_SPIN_SETTLE_DELAY_MS = 1_000L
+const val DEFAULT_CATCH_SETTLE_DELAY_MS = 3_500L
+const val MAX_SETTLE_DELAY_MS = 60_000L
+
 data class AutomationPolicy(
     val autoEncounter: Boolean = false,
     val autoCatch: Boolean = false,
@@ -18,7 +22,28 @@ data class AutomationPolicy(
      * the combined catch/close capability.
      */
     val autoCloseCatchPreview: Boolean = false,
+    val timing: AutomationTimingPolicy = AutomationTimingPolicy(),
 )
+
+data class AutomationTimingPolicy(
+    val spinSettleDelayMs: Long = DEFAULT_SPIN_SETTLE_DELAY_MS,
+    val catchSettleDelayMs: Long = DEFAULT_CATCH_SETTLE_DELAY_MS,
+) {
+    init {
+        require(spinSettleDelayMs in 0L..MAX_SETTLE_DELAY_MS) {
+            "spinSettleDelayMs must be between 0 and $MAX_SETTLE_DELAY_MS"
+        }
+        require(catchSettleDelayMs in 0L..MAX_SETTLE_DELAY_MS) {
+            "catchSettleDelayMs must be between 0 and $MAX_SETTLE_DELAY_MS"
+        }
+    }
+
+    fun settleDelayMsFor(action: AutomationAction): Long = when (action) {
+        is AutomationAction.Spin -> spinSettleDelayMs
+        is AutomationAction.Catch -> catchSettleDelayMs
+        else -> 0L
+    }
+}
 
 data class CatchPolicy(
     val catchAll: Boolean = true,

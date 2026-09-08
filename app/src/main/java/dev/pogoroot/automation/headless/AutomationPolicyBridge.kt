@@ -1,6 +1,7 @@
 package dev.pogoroot.automation.headless
 
 import dev.pogoroot.automation.core.automation.AutomationPolicy
+import dev.pogoroot.automation.core.automation.AutomationTimingPolicy
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.ThrowProfile
 import dev.pogoroot.automation.core.automation.InventoryPolicy
@@ -12,6 +13,10 @@ fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy
     autoSnapshotDuringEncounter = autoSnapshotDuringEncounter,
     snapshotEncounterMode = snapshotEncounterMode,
     autoCloseCatchPreview = autoCloseCatchPreview,
+    timing = AutomationTimingPolicy(
+        spinSettleDelayMs = spinSettleDelayMs,
+        catchSettleDelayMs = catchSettleDelayMs,
+    ),
     catchPolicy = dev.pogoroot.automation.core.automation.CatchPolicy(
         throwProfile = ThrowProfile(
             qualityTarget = catchThrowQuality,

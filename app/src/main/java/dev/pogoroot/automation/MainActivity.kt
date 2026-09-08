@@ -145,6 +145,8 @@ class MainActivity : Activity() {
             append("\nautoCatch: ${config.autoCatch}")
             append("\nautoCloseCatchPreview: ${config.autoCloseCatchPreview}")
             append("\nautoSpin: ${config.autoSpin}")
+            append("\nspinSettleDelayMs: ${config.spinSettleDelayMs}")
+            append("\ncatchSettleDelayMs: ${config.catchSettleDelayMs}")
             append("\nautoEncounter: ${config.autoEncounter}")
             append("\nAPI: localhost:${AutomationControlServer.DEFAULT_PORT}")
         }

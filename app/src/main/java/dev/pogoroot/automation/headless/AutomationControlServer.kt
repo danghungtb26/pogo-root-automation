@@ -10,6 +10,8 @@ import java.nio.charset.StandardCharsets
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
+import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
+
 class AutomationControlServer(
     private val configRepository: AutomationConfigRepository,
     private val engine: HeadlessAutomationEngine,
@@ -122,6 +124,10 @@ class AutomationControlServer(
         berryMode = params["berry"]?.let(::parseBerry) ?: config.berryMode,
         showActionToasts = params.boolean("toasts") ?: config.showActionToasts,
         loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
+        spinSettleDelayMs = params["spinSettleDelayMs"]?.toLongOrNull()
+            ?.coerceIn(0L, MAX_SETTLE_DELAY_MS) ?: config.spinSettleDelayMs,
+        catchSettleDelayMs = params["catchSettleDelayMs"]?.toLongOrNull()
+            ?.coerceIn(0L, MAX_SETTLE_DELAY_MS) ?: config.catchSettleDelayMs,
     )
 
     private fun parseBerry(raw: String): BerryMode = runCatching {
@@ -176,11 +182,11 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"spinSettleDelayMs":${config.spinSettleDelayMs},"catchSettleDelayMs":${config.catchSettleDelayMs},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
+        {"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"spinSettleDelayMs":${config.spinSettleDelayMs},"catchSettleDelayMs":${config.catchSettleDelayMs},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
     """.trimIndent()
 
     private fun String?.jsonStringOrNull(): String = this?.let {

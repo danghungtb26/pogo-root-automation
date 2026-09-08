@@ -1,6 +1,9 @@
 package dev.pogoroot.automation.core.automation
 
 import dev.pogoroot.automation.core.model.GameLifecycleState
+import dev.pogoroot.automation.core.model.Fort
+import dev.pogoroot.automation.core.model.FortSnapshot
+import dev.pogoroot.automation.core.model.FortType
 import dev.pogoroot.automation.core.model.NearbySnapshot
 import dev.pogoroot.automation.core.model.NearbySpawn
 import dev.pogoroot.automation.core.model.GeoPoint
@@ -78,6 +81,129 @@ class AutomationRunnerTest {
         assertNull(duplicate.request)
         assertTrue(duplicate.reason!!.contains("duplicate"))
         assertEquals(1, submitted.size)
+    }
+
+    @Test
+    fun `spin settle delay blocks the next mutation until it expires`() {
+        var nowElapsedNs = 1_000_000L
+        val submitted = mutableListOf<ActionRequest>()
+        val identity = RuntimeIdentity(
+            runtimeSessionId = "session-spin",
+            pid = 99,
+            processName = "pogo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified",
+            capabilities = setOf("SPIN"),
+            mutationsAllowed = true,
+        )
+        val runner = AutomationRunner(
+            executor = ActionRequestExecutor { request -> submitted += request; Result.success(Unit) },
+            nowEpochMs = { 1_000L },
+            nowElapsedNs = { nowElapsedNs },
+            commandIdFactory = { "spin-command-${submitted.size + 1}" },
+        )
+        runner.attach(identity).getOrThrow()
+        val policy = AutomationPolicy(
+            autoSpin = true,
+            timing = AutomationTimingPolicy(
+                spinSettleDelayMs = 1_000L,
+                catchSettleDelayMs = 3_500L,
+            ),
+        )
+        fun observation(seq: Long, observedAtEpochMs: Long) = AutomationObservation(
+            identity = identity,
+            messageSeq = seq,
+            observedAtEpochMs = observedAtEpochMs,
+            observedAtElapsedNs = nowElapsedNs,
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.OVERWORLD,
+                forts = FortSnapshot(
+                    observedAtEpochMs = observedAtEpochMs,
+                    forts = listOf(
+                        Fort(
+                            fortId = "fort-1",
+                            type = FortType.POKESTOP,
+                            position = GeoPoint(1.0, 2.0),
+                            spinAvailable = true,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val first = runner.onObservation(observation(1L, 1_000L), policy).getOrThrow()
+        val request = first.request!!
+        assertEquals(1_000_000_000L, request.settleDelayNs)
+        runner.onResult(
+            ActionExecution(request, ActionExecutionPhase.COMPLETED, runtimeMessageSeq = 2L),
+        ).getOrThrow()
+
+        nowElapsedNs += 999_000_000L
+        assertNull(runner.onObservation(observation(3L, 1_001L), policy).getOrThrow().request)
+        assertEquals(1, submitted.size)
+
+        nowElapsedNs += 1_000_000L
+        assertNotNull(runner.onObservation(observation(4L, 1_002L), policy).getOrThrow().request)
+        assertEquals(2, submitted.size)
+    }
+
+    @Test
+    fun `catch uses its longer configurable settle delay`() {
+        var nowElapsedNs = 1_000_000L
+        val submitted = mutableListOf<ActionRequest>()
+        val identity = RuntimeIdentity(
+            runtimeSessionId = "session-catch",
+            pid = 99,
+            processName = "pogo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified",
+            capabilities = setOf("CATCH"),
+            mutationsAllowed = true,
+        )
+        val runner = AutomationRunner(
+            executor = ActionRequestExecutor { request -> submitted += request; Result.success(Unit) },
+            nowEpochMs = { 1_000L },
+            nowElapsedNs = { nowElapsedNs },
+            commandIdFactory = { "catch-command-${submitted.size + 1}" },
+        )
+        runner.attach(identity).getOrThrow()
+        val policy = AutomationPolicy(
+            autoCatch = true,
+            timing = AutomationTimingPolicy(
+                spinSettleDelayMs = 1_000L,
+                catchSettleDelayMs = 3_500L,
+            ),
+        )
+        fun observation(seq: Long, observedAtEpochMs: Long) = AutomationObservation(
+            identity = identity,
+            messageSeq = seq,
+            observedAtEpochMs = observedAtEpochMs,
+            observedAtElapsedNs = nowElapsedNs,
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.ENCOUNTER,
+                encounter = dev.pogoroot.automation.core.model.EncounterSnapshot(
+                    encounterId = "encounter-1",
+                    speciesId = 25,
+                    speciesName = "Pikachu",
+                    observedAtEpochMs = observedAtEpochMs,
+                ),
+            ),
+        )
+
+        val first = runner.onObservation(observation(1L, 1_000L), policy).getOrThrow()
+        val request = first.request!!
+        assertEquals(3_500_000_000L, request.settleDelayNs)
+        runner.onResult(
+            ActionExecution(request, ActionExecutionPhase.COMPLETED, runtimeMessageSeq = 2L),
+        ).getOrThrow()
+
+        nowElapsedNs += 3_499_000_000L
+        assertNull(runner.onObservation(observation(3L, 1_001L), policy).getOrThrow().request)
+        assertEquals(1, submitted.size)
+
+        nowElapsedNs += 1_000_000L
+        assertNotNull(runner.onObservation(observation(4L, 1_002L), policy).getOrThrow().request)
+        assertEquals(2, submitted.size)
     }
 
     @Test

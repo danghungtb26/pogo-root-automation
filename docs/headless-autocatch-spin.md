@@ -74,6 +74,7 @@ Supported parameters include `autoEncounter`, `autoCatch`, `autoSpin`,
 `autoCloseCatchPreview`,
 `autoDiscard`, `autoTransfer`, `keepHundo`, `keepShiny`, `keepBackground`,
 `keepFavorite`, `transferMinIv`, `berry`, `loopIntervalMs`,
+`spinSettleDelayMs`, `catchSettleDelayMs`,
 `buildFingerprints`, `throwQuality`, `curve`, `arPlus`, `autoSnapshot`,
 `snapshotArPlus`, and `toasts`.
 
@@ -85,6 +86,13 @@ requests that snapshot in AR+ mode. These settings are persisted and serialized
 through the bridge, but the current probe-only runtime advertises none of the
 required mutation capabilities, so it remains read-only and rejects them until
 an exact build-scoped binding is installed.
+
+`spinSettleDelayMs` and `catchSettleDelayMs` are controller-side waits after a
+definitive `Spin`/`Catch` result and before planning another mutation. They are
+independent from the command timeout and default to `1000` and `3500`
+milliseconds. Values are clamped to `0..60000`; `0` disables that action's
+settle wait. The runner still requires a fresh observation after the wait and
+does not use the delay to recover an indeterminate command.
 
 Legacy mode, visual-driver, and `encounterSweep` parameters are ignored. A
 persisted `encounter_sweep` preference is migrated once to `auto_encounter`;
