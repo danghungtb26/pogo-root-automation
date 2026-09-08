@@ -17,6 +17,7 @@ internal class ShortcutMenuView(
     private val onToggle: (String) -> Unit,
     private val onJoystick: () -> Unit,
     private val onTeleport: () -> Unit,
+    private val onFavorites: () -> Unit,
     private val onSpeed: () -> Unit,
     private val onSettings: () -> Unit,
     private val onClose: () -> Unit,
@@ -50,6 +51,7 @@ internal class ShortcutMenuView(
         addShortcut(grid, "transfer", "⇆", "Transfer") { onToggle("transfer") }
         addShortcut(grid, "joystick", "✣", "Joystick", onJoystick)
         addShortcut(grid, "teleport", "⌖", "Teleport", onTeleport)
+        addShortcut(grid, "favorites", "★", "Favorites", onFavorites)
         addShortcut(grid, "speed", "⚡", "Speed", onSpeed)
         addShortcut(grid, "settings", "⚙", "Settings", onSettings)
         addShortcut(grid, "close", "×", "Close", onClose)
