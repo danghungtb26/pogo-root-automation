@@ -17,10 +17,12 @@ class HeadlessAutomationService : Service() {
     private lateinit var apiServer: AutomationControlServer
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var structuredController: StructuredAutomationController
+    private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
+        lastActiveLocationRepository = LastActiveLocationRepository(this)
         runtimeBridge = RuntimeBridgeClient()
         structuredController = StructuredAutomationController(
             bridge = runtimeBridge!!,
@@ -30,6 +32,7 @@ class HeadlessAutomationService : Service() {
             allowedBuildFingerprintsProvider = {
                 configRepository.read().structuredAllowedBuildFingerprints
             },
+            onGameAction = lastActiveLocationRepository::record,
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,

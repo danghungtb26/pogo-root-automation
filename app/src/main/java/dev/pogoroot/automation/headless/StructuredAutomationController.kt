@@ -8,11 +8,13 @@ import dev.pogoroot.automation.adapter.GameCapability
 import dev.pogoroot.automation.core.automation.ActionExecution
 import dev.pogoroot.automation.core.automation.ActionExecutionPhase
 import dev.pogoroot.automation.core.automation.ActionRequestExecutor
+import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
+import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
@@ -37,6 +39,7 @@ class StructuredAutomationController(
     private val eventSink: AutomationEventSink = AutomationEventSink { },
     allowedBuildFingerprints: Set<String> = emptySet(),
     private val allowedBuildFingerprintsProvider: (() -> Set<String>)? = null,
+    private val onGameAction: (LastActiveGameAction) -> Unit = {},
 ) {
     private val configuredAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private val source = BridgePogoRuntimeSource(bridge)
@@ -60,6 +63,8 @@ class StructuredAutomationController(
     private var processedObservationSeq = 0L
     private var lastAction: String? = null
     private var lastError: String? = null
+    private var latestPlayerPosition: GeoPoint? = null
+    private val recordedGameActionCommands = mutableSetOf<String>()
 
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
         syncSafetyConfig()
@@ -78,12 +83,15 @@ class StructuredAutomationController(
                     source.selectObservation(event.messageSeq).getOrThrow()
                     try {
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
+                        val snapshot = readSnapshot()
+                        (snapshot.nearby?.playerPosition ?: snapshot.encounter?.position)
+                            ?.let { latestPlayerPosition = it }
                         val automationObservation = AutomationObservation(
                             identity = current.identity(),
                             messageSeq = event.messageSeq,
                             observedAtEpochMs = event.observedAtEpochMs,
                             observedAtElapsedNs = event.observedAtElapsedNs,
-                            snapshot = readSnapshot(),
+                            snapshot = snapshot,
                         )
                         val resyncing = runner.snapshot().needsResync
                         if (resyncing) {
@@ -156,6 +164,8 @@ class StructuredAutomationController(
         val identity = ready.toRuntimeIdentity(sessionManager.mutationsAllowed)
         runner.attach(identity).getOrThrow()
         processedObservationSeq = 0L
+        latestPlayerPosition = null
+        recordedGameActionCommands.clear()
         connected = true
         lastError = null
     }
@@ -226,9 +236,33 @@ class StructuredAutomationController(
                 observedAtElapsedNs = result.observedAtElapsedNs,
             ),
         ).onFailure { lastError = it.message }
+        if (phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
+            recordGameActionIfNeeded(request, result)
+        }
         if (phase.isTerminal) {
             lastAction = request.action::class.simpleName
         }
+    }
+
+    private fun recordGameActionIfNeeded(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        result: BridgeEvent.AutomationCommandResult,
+    ) {
+        val actionName = when (request.action) {
+            is AutomationAction.Catch -> "catch"
+            is AutomationAction.Spin -> "spin"
+            is AutomationAction.UseBerry -> "berry"
+            else -> return
+        }
+        val point = latestPlayerPosition ?: return
+        if (!recordedGameActionCommands.add(request.commandId)) return
+        onGameAction(
+            LastActiveGameAction(
+                point = point,
+                action = actionName,
+                activeAtEpochMs = result.observedAtEpochMs,
+            ),
+        )
     }
 
     private fun tickStatus(

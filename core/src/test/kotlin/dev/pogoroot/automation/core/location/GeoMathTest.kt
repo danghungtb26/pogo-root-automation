@@ -26,4 +26,24 @@ class GeoMathTest {
         assertTrue(moved.latitude < 0.0011)
         assertEquals(0.0, moved.longitude, 0.00001)
     }
+
+    @Test
+    fun `distance uses great circle meters`() {
+        val distance = GeoMath.distanceMeters(
+            GeoPoint(0.0, 0.0),
+            GeoPoint(1.0, 0.0),
+        )
+
+        assertEquals(111_195.0, distance, 200.0)
+    }
+
+    @Test
+    fun `distance uses the short path across the date line`() {
+        val distance = GeoMath.distanceMeters(
+            GeoPoint(0.0, 179.0),
+            GeoPoint(0.0, -179.0),
+        )
+
+        assertEquals(222_390.0, distance, 500.0)
+    }
 }

@@ -24,8 +24,13 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.MainActivity
+import dev.pogoroot.automation.core.time.TeleportCooldownMode
+import dev.pogoroot.automation.core.time.TeleportCooldownService
+import dev.pogoroot.automation.core.time.TeleportCooldown
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.headless.AutomationConfigRepository
+import dev.pogoroot.automation.headless.LastActiveGameAction
+import dev.pogoroot.automation.headless.LastActiveLocationRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
@@ -42,6 +47,11 @@ class JoystickOverlayService : Service() {
         private const val PREFS = "built_in_joystick"
         private const val PREF_LAT = "latitude"
         private const val PREF_LON = "longitude"
+        private const val PREF_COOLDOWN_STARTED_AT = "cooldown_started_at"
+        private const val PREF_COOLDOWN_READY_AT = "cooldown_ready_at"
+        private const val PREF_COOLDOWN_DISTANCE = "cooldown_distance"
+        private const val PREF_COOLDOWN_MODE = "cooldown_mode"
+        private const val COOLDOWN_REFRESH_MS = 1_000L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -56,15 +66,30 @@ class JoystickOverlayService : Service() {
     private lateinit var locationView: TextView
     private lateinit var speedButton: Button
     private lateinit var automationSummaryView: TextView
+    private lateinit var cooldownView: TextView
+    private lateinit var cooldownModeButton: Button
 
     private var controllerStarted = false
     private var speedPresetIndex = 2
     private var lastPersistAt = 0L
+    private var latestTeleportCooldown: TeleportCooldown? = null
+    private var cooldownMode = TeleportCooldownMode.CURRENT_POSITION
+    private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private val cooldownService = TeleportCooldownService()
+    private val cooldownTick = object : Runnable {
+        override fun run() {
+            renderCooldown()
+            mainHandler.postDelayed(this, COOLDOWN_REFRESH_MS)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(WindowManager::class.java)
         automationConfigRepository = AutomationConfigRepository(this)
+        lastActiveLocationRepository = LastActiveLocationRepository(this)
+        latestTeleportCooldown = loadSavedCooldown()
+        cooldownMode = loadCooldownMode()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
@@ -82,6 +107,9 @@ class JoystickOverlayService : Service() {
 
         ensureOverlay()
         renderAutomationSummary()
+        renderCooldown()
+        mainHandler.removeCallbacks(cooldownTick)
+        mainHandler.post(cooldownTick)
         if (!controllerStarted) {
             controllerStarted = true
             controller.start(loadSavedPoint())
@@ -92,6 +120,7 @@ class JoystickOverlayService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(cooldownTick)
         if (controllerStarted) {
             persistPoint(controller.snapshot().point)
             controller.stop()
@@ -126,6 +155,25 @@ class JoystickOverlayService : Service() {
             textSize = 11f
             typeface = android.graphics.Typeface.MONOSPACE
             setPadding(0, padding / 2, 0, padding / 2)
+        }
+        cooldownView = TextView(this).apply {
+            setTextColor(0xFFFFE082.toInt())
+            textSize = 11f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(0, padding / 2, 0, padding / 2)
+            text = "Teleport cooldown (estimate): inactive"
+        }
+        cooldownModeButton = Button(this).apply {
+            text = "Cooldown mode: ${cooldownMode.label}"
+            setOnClickListener {
+                cooldownMode = when (cooldownMode) {
+                    TeleportCooldownMode.CURRENT_POSITION -> TeleportCooldownMode.LAST_ACTIVE
+                    TeleportCooldownMode.LAST_ACTIVE -> TeleportCooldownMode.CURRENT_POSITION
+                }
+                persistCooldownMode()
+                updateCooldownModeLabel()
+                renderCooldown()
+            }
         }
 
         val header = TextView(this).apply {
@@ -192,6 +240,8 @@ class JoystickOverlayService : Service() {
             addView(statusView)
             addView(locationView)
             addView(automationSummaryView)
+            addView(cooldownView)
+            addView(cooldownModeButton)
             addView(settingsButton)
             addView(joystick)
             addView(speedButton)
@@ -227,6 +277,104 @@ class JoystickOverlayService : Service() {
             append("Catch=${onOff(config.autoCatch)} Spin=${onOff(config.autoSpin)}")
             append("\nDiscard=${onOff(config.autoDiscard)} Transfer=${onOff(config.autoTransfer)}")
             append("\nBerry=${config.berryMode.name}")
+        }
+    }
+
+    private fun renderCooldown() {
+        if (!::cooldownView.isInitialized) return
+        val lastActive = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
+            lastActiveLocationRepository.read()
+        } else {
+            null
+        }
+        val currentPoint = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
+            controller.snapshot().point ?: loadSavedPoint()
+        } else {
+            null
+        }
+        val cooldown = when (cooldownMode) {
+            TeleportCooldownMode.CURRENT_POSITION -> latestTeleportCooldown
+            TeleportCooldownMode.LAST_ACTIVE -> lastActiveCooldown(lastActive, currentPoint)
+        }
+        if (cooldown == null) {
+            cooldownView.text = when (cooldownMode) {
+                TeleportCooldownMode.CURRENT_POSITION ->
+                    "Current position cooldown: inactive"
+                TeleportCooldownMode.LAST_ACTIVE -> when {
+                    lastActive == null -> "Last active cooldown: inactive (no spin/catch)"
+                    currentPoint == null -> "Last active cooldown: waiting for location"
+                    else -> "Last active cooldown: inactive"
+                }
+            }
+            return
+        }
+
+        val remaining = cooldown.remainingMillis(System.currentTimeMillis())
+        val actionSuffix = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
+            " · ${lastActive?.action}"
+        } else {
+            ""
+        }
+        cooldownView.text = if (remaining == 0L) {
+            "${cooldownMode.label}: Ready (~${cooldown.distanceMeters / 1_000.0} km)$actionSuffix"
+        } else {
+            String.format(
+                Locale.US,
+                "%s: %s (~%.1f km)%s",
+                cooldownMode.label,
+                formatDuration(remaining),
+                cooldown.distanceMeters / 1_000.0,
+                actionSuffix,
+            )
+        }
+    }
+
+    private fun lastActiveCooldown(
+        activity: LastActiveGameAction?,
+        destination: GeoPoint?,
+    ): TeleportCooldown? {
+        activity ?: return null
+        destination ?: return null
+        return cooldownService.forLastActive(
+            lastActivePoint = activity.point,
+            lastActiveAtEpochMs = activity.activeAtEpochMs,
+            destination = destination,
+        )
+    }
+
+    private fun updateCooldownModeLabel() {
+        if (!::cooldownModeButton.isInitialized) return
+        cooldownModeButton.text = "Cooldown mode: ${cooldownMode.label}"
+    }
+
+    private fun persistCooldownMode() {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putString(PREF_COOLDOWN_MODE, cooldownMode.name)
+            .apply()
+    }
+
+    private fun loadCooldownMode(): TeleportCooldownMode =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getString(PREF_COOLDOWN_MODE, null)
+            ?.let { value -> runCatching { TeleportCooldownMode.valueOf(value) }.getOrNull() }
+            ?: TeleportCooldownMode.CURRENT_POSITION
+
+    private val TeleportCooldownMode.label: String
+        get() = when (this) {
+            TeleportCooldownMode.CURRENT_POSITION -> "Current position"
+            TeleportCooldownMode.LAST_ACTIVE -> "Last active"
+        }
+
+    private fun formatDuration(remainingMillis: Long): String {
+        val totalSeconds = (remainingMillis + 999L) / 1_000L
+        val hours = totalSeconds / 3_600L
+        val minutes = (totalSeconds % 3_600L) / 60L
+        val seconds = totalSeconds % 60L
+        return if (hours > 0L) {
+            String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+        } else {
+            String.format(Locale.US, "%02d:%02d", minutes, seconds)
         }
     }
 
@@ -327,6 +475,11 @@ class JoystickOverlayService : Service() {
                     state.bearingDegrees,
                 )
             } ?: "Teleport to a location first"
+            state.teleportCooldown?.let { cooldown ->
+                latestTeleportCooldown = cooldown
+                persistCooldown(cooldown)
+            }
+            renderCooldown()
 
             persistPointOccasionally(state.point)
         }
@@ -353,6 +506,34 @@ class JoystickOverlayService : Service() {
             .edit()
             .putLong(PREF_LAT, point.latitude.toBits())
             .putLong(PREF_LON, point.longitude.toBits())
+            .apply()
+    }
+
+    private fun loadSavedCooldown(): TeleportCooldown? {
+        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        if (!prefs.contains(PREF_COOLDOWN_STARTED_AT) ||
+            !prefs.contains(PREF_COOLDOWN_READY_AT) ||
+            !prefs.contains(PREF_COOLDOWN_DISTANCE)
+        ) {
+            return null
+        }
+
+        val distanceMeters = Double.fromBits(prefs.getLong(PREF_COOLDOWN_DISTANCE, 0L))
+        val startedAtEpochMs = prefs.getLong(PREF_COOLDOWN_STARTED_AT, 0L)
+        val readyAtEpochMs = prefs.getLong(PREF_COOLDOWN_READY_AT, 0L)
+        if (!distanceMeters.isFinite() || distanceMeters < 0.0 || readyAtEpochMs < startedAtEpochMs) {
+            return null
+        }
+
+        return TeleportCooldown(distanceMeters, startedAtEpochMs, readyAtEpochMs)
+    }
+
+    private fun persistCooldown(cooldown: TeleportCooldown) {
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(PREF_COOLDOWN_STARTED_AT, cooldown.startedAtEpochMs)
+            .putLong(PREF_COOLDOWN_READY_AT, cooldown.readyAtEpochMs)
+            .putLong(PREF_COOLDOWN_DISTANCE, cooldown.distanceMeters.toBits())
             .apply()
     }
 

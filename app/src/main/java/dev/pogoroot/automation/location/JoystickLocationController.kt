@@ -2,6 +2,8 @@ package dev.pogoroot.automation.location
 
 import dev.pogoroot.automation.core.location.GeoMath
 import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.core.time.TeleportCooldown
+import dev.pogoroot.automation.core.time.TeleportCooldownService
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -15,12 +17,15 @@ data class JoystickLocationState(
     val currentSpeedKmh: Double = 0.0,
     val bearingDegrees: Double = 0.0,
     val strengthPercent: Int = 0,
+    val teleportCooldown: TeleportCooldown? = null,
     val error: String? = null,
 )
 
 class JoystickLocationController(
     private val sink: MockLocationSink,
     private val onStateChanged: (JoystickLocationState) -> Unit = {},
+    private val cooldownService: TeleportCooldownService = TeleportCooldownService(),
+    private val nowEpochMs: () -> Long = System::currentTimeMillis,
 ) {
     private val lock = Any()
     private val executor = Executors.newSingleThreadScheduledExecutor()
@@ -90,7 +95,9 @@ class JoystickLocationController(
         require(point.longitude in -180.0..180.0) { "invalid longitude" }
 
         val ready: Boolean
+        val previousPoint: GeoPoint?
         synchronized(lock) {
+            previousPoint = state.point
             state = state.copy(
                 point = point,
                 currentSpeedKmh = 0.0,
@@ -107,6 +114,17 @@ class JoystickLocationController(
                 if (result.isFailure) {
                     synchronized(lock) {
                         state = state.copy(error = result.exceptionOrNull()?.message)
+                    }
+                    dispatchState()
+                } else {
+                    synchronized(lock) {
+                        state = state.copy(
+                            teleportCooldown = cooldownService.forTeleport(
+                                previousPoint = previousPoint,
+                                destination = point,
+                                startedAtEpochMs = nowEpochMs(),
+                            ),
+                        )
                     }
                     dispatchState()
                 }
