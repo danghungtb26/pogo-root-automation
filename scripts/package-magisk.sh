@@ -9,7 +9,12 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARM64_SO="$(realpath "$1")"
 X86_64_SO="$(realpath "$2")"
-OUTPUT_ZIP="$(realpath -m "$3")"
+OUTPUT_ZIP_INPUT="$3"
+if [[ -e "$OUTPUT_ZIP_INPUT" ]]; then
+  OUTPUT_ZIP="$(realpath "$OUTPUT_ZIP_INPUT")"
+else
+  OUTPUT_ZIP="$(realpath "$(dirname "$OUTPUT_ZIP_INPUT")")/$(basename "$OUTPUT_ZIP_INPUT")"
+fi
 WORK_DIR="$ROOT_DIR/build/magisk-module"
 
 for input in "$ARM64_SO" "$X86_64_SO"; do
@@ -36,7 +41,7 @@ rm -f "$OUTPUT_ZIP"
   zip -qr "$OUTPUT_ZIP" .
 )
 
-unzip -l "$OUTPUT_ZIP" | grep -q 'zygisk/arm64-v8a.so'
-unzip -l "$OUTPUT_ZIP" | grep -q 'zygisk/x86_64.so'
+unzip -l "$OUTPUT_ZIP" | grep 'zygisk/arm64-v8a.so' >/dev/null
+unzip -l "$OUTPUT_ZIP" | grep 'zygisk/x86_64.so' >/dev/null
 
 echo "$OUTPUT_ZIP"

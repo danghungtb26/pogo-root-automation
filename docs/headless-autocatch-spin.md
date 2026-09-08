@@ -45,8 +45,13 @@ reported by the bridge.
 ### `GET /v1/status`
 
 Returns worker/config state and the canonical structured runtime fields:
-`runtimeSessionId`, `runtimeStrongIdentityVerified`, `runtimeLifecycle`,
-`observationSeq`, `runtimeSuspended`, `lastAction`, and `lastError`.
+`runtimeSessionId`, `runtimeStrongIdentityVerified`, `runtimeCapabilities`,
+`runtimeMutationPermissionGranted`, `runtimeLifecycle`, `observationSeq`,
+`runtimeSuspended`, `lastAction`, and `lastError`. Policy booleans such as
+`autoCatch=true` are requested intents; `runtimeCapabilities` is the source of
+truth for what the target process can actually execute. See
+[`LIVE_AUTOMATION_READINESS.md`](LIVE_AUTOMATION_READINESS.md) for the current
+device result and action matrix.
 
 ### `POST /v1/start`
 

@@ -14,6 +14,7 @@
     <application
         android:allowBackup="false"
         android:label="PoGo Root Automation"
+        android:name=".AutomationApplication"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity

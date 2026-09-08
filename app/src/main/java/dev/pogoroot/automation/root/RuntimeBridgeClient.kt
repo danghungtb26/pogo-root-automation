@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicLong
  * the broker/peer; the app never attaches to the Pokémon GO process itself.
  */
 class RuntimeBridgeClient(
-    private val socketPath: String = DEFAULT_SOCKET_PATH,
+    private val socketName: String = DEFAULT_SOCKET_NAME,
     private val connectTimeoutMs: Long = 3_000L,
     private val rootShell: RootShell = ProcessRootShell(),
 ) : RuntimeBridge {
@@ -41,8 +41,8 @@ class RuntimeBridgeClient(
         val next = LocalSocket()
         next.connect(
             LocalSocketAddress(
-                socketPath,
-                LocalSocketAddress.Namespace.FILESYSTEM,
+                socketName,
+                LocalSocketAddress.Namespace.ABSTRACT,
             ),
         )
         socket = next
@@ -125,6 +125,6 @@ class RuntimeBridgeClient(
     companion object {
         private const val BROKER_DIRECTORY = "/data/adb/pogo_root_automation"
         private const val CONTROLLER_UID_FILE = "$BROKER_DIRECTORY/controller.uids"
-        const val DEFAULT_SOCKET_PATH = "/data/adb/pogo_root_automation/runtime.sock"
+        const val DEFAULT_SOCKET_NAME = "pogo_root_automation_runtime"
     }
 }

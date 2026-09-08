@@ -76,13 +76,32 @@ class RootMockLocationProvider(
     }
 
     override fun stop() {
-        if (!started) return
+        // Android requires the mock-location app-op while removing test
+        // providers. A previous killed process may already have revoked it,
+        // so temporarily restore it for cleanup before denying it again.
+        runCatching {
+            rootShell.execute(
+                "appops set ${appContext.packageName} android:mock_location allow",
+                timeoutMillis = 5_000L,
+            )
+        }
+
         listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER).forEach { provider ->
             runCatching { locationManager.clearTestProviderLocation(provider) }
             runCatching { locationManager.clearTestProviderEnabled(provider) }
             runCatching { locationManager.removeTestProvider(provider) }
         }
         started = false
+
+        // Do not leave the package marked as a mock provider after an
+        // explicit stop. This also makes cleanup safe when provider setup
+        // failed part-way through.
+        runCatching {
+            rootShell.execute(
+                "appops set ${appContext.packageName} android:mock_location deny",
+                timeoutMillis = 5_000L,
+            )
+        }
     }
 
     private fun configureProvider(

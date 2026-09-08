@@ -18,6 +18,14 @@ The repository contains:
 - `scripts/`: device diagnostics, smoke tests and packaging helpers.
 - `docs/`: architecture, binding boundaries and feature design notes.
 
+## Test emulator
+
+The active manual and harness test target is the BlueStacks instance named
+`BlueStacks Air 1`. Use its currently connected ADB serial, normally
+`127.0.0.1:5565`; do not assume the other `BlueStacks Air` instance or the
+Android Studio AVD is the test target. For commands that accept `ANDROID_SERIAL`,
+set it explicitly to `127.0.0.1:5565` after confirming with `adb devices -l`.
+
 ## Gradle usage
 
 The repository includes the Gradle Wrapper. Use it instead of requiring a

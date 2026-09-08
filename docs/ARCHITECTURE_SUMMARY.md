@@ -63,6 +63,8 @@ Status/API dùng các field runtime canonical:
 
 - `runtimeSessionId`
 - `runtimeStrongIdentityVerified`
+- `runtimeCapabilities`
+- `runtimeMutationPermissionGranted`
 - `runtimeLifecycle`
 - `observationSeq`
 - `runtimeSuspended`
@@ -175,3 +177,6 @@ phải xác nhận `CAUGHT` và có capability `CATCH_AND_CLOSE_PREVIEW` trướ
 2. Pin production adapter selection to verified build identity.
 3. Implement version-scoped client-owned invokers and outcome hooks.
 4. Run structured read-only device smoke before enabling mutation allowlists.
+
+The exact current device evidence and the action-by-action readiness gate are
+tracked in [`LIVE_AUTOMATION_READINESS.md`](LIVE_AUTOMATION_READINESS.md).

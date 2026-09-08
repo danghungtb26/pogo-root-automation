@@ -115,18 +115,27 @@ class JoystickOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_START -> Unit
+            else -> {
+                // Never resurrect a mock-location provider after a sticky or
+                // implicit service restart without an explicit user action.
+                stopSelf()
+                return START_NOT_STICKY
+            }
         }
 
         mainHandler.removeCallbacks(cooldownTick)
         mainHandler.post(cooldownTick)
         if (!controllerStarted) {
             controllerStarted = true
-            controller.start(loadSavedPoint())
+            controller.start(positionStore.loadPointOrDefault())
         }
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

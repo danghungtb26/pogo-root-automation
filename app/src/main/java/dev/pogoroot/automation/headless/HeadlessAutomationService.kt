@@ -11,6 +11,9 @@ import android.os.IBinder
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.root.RuntimeBridgeClient
 import dev.pogoroot.automation.scan.ScanResultRepository
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
@@ -21,6 +24,9 @@ class HeadlessAutomationService : Service() {
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var scanResultRepository: ScanResultRepository
+    private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
+    private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
+    private var joystickAutoStartPoll: ScheduledFuture<*>? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -52,11 +58,18 @@ class HeadlessAutomationService : Service() {
             eventSink = ToastAutomationEventSink(this, configRepository),
         )
         apiServer = AutomationControlServer(configRepository, engine)
+        joystickAutoStartCoordinator = JoystickAutoStartCoordinator(this)
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         apiServer.start()
         engine.start()
+        joystickAutoStartPoll = joystickAutoStartExecutor.scheduleWithFixedDelay(
+            ::syncJoystickAutoStart,
+            0L,
+            JOYSTICK_AUTO_START_POLL_MS,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -87,11 +100,20 @@ class HeadlessAutomationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        joystickAutoStartPoll?.cancel(true)
+        joystickAutoStartExecutor.shutdownNow()
+        if (::joystickAutoStartCoordinator.isInitialized) {
+            joystickAutoStartCoordinator.stop()
+        }
         apiServer.stop()
         engine.shutdown()
         structuredController.stop()
         runtimeBridge?.disconnect()
         super.onDestroy()
+    }
+
+    private fun syncJoystickAutoStart() {
+        runCatching { joystickAutoStartCoordinator.sync() }
     }
 
     private fun createNotificationChannel() {
@@ -148,6 +170,7 @@ class HeadlessAutomationService : Service() {
         const val EXTRA_AUTO_CATCH = "autoCatch"
         const val EXTRA_AUTO_SPIN = "autoSpin"
 
+        private const val JOYSTICK_AUTO_START_POLL_MS = 750L
         private const val CHANNEL_ID = "pogo_headless_automation"
         private const val NOTIFICATION_ID = 2102
 

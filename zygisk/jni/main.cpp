@@ -1,5 +1,6 @@
 #include <android/log.h>
 #include <dlfcn.h>
+#include <elf.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -29,7 +30,7 @@ constexpr const char *kGalaxyProcess = "com.nianticlabs.pokemongo.ares";
 constexpr const char *kStateDirectory = "/data/adb/pogo_root_automation";
 constexpr const char *kStatePath = "/data/adb/pogo_root_automation/runtime.status";
 constexpr const char *kTempStatePrefix = "/data/adb/pogo_root_automation/runtime.status.tmp";
-constexpr const char *kBridgeSocketPath = "/data/adb/pogo_root_automation/runtime.sock";
+constexpr const char *kBridgeSocketName = "pogo_root_automation_runtime";
 constexpr const char *kControllerUidPath = "/data/adb/pogo_root_automation/controller.uids";
 constexpr uint32_t kRuntimeEventMagic = 0x504F474FU;
 constexpr uint32_t kRuntimeProtocolVersion = 4U;
@@ -39,8 +40,11 @@ constexpr uint32_t kBridgeCommandResultType = 5U;
 constexpr uint32_t kBridgeHardMessageBytes = 4U * 1024U * 1024U;
 constexpr uint32_t kRuntimeCommandMagic = 0x504F4743U;
 constexpr uint32_t kRuntimeResultMagic = 0x504F4752U;
-constexpr int kProbeAttempts = 60;
-constexpr int kAssemblySurveyAttempts = 20;
+// Pokémon GO can load Unity before the IL2CPP shared object on a cold
+// BlueStacks start. Keep the probe alive long enough to observe the same
+// process after that delayed load instead of publishing a false mapped-only
+// result.
+constexpr int kProbeAttempts = 180;
 constexpr useconds_t kProbeDelayUs = 500000U;
 constexpr uint32_t kRequiredIl2cppCoreSymbolCount = 10U;
 constexpr size_t kMaxAssembliesToInspect = 4096U;
@@ -147,6 +151,7 @@ using Il2CppMethodGetName = const char *(*)(const void *);
 
 struct Il2CppApi {
     void *handle = nullptr;
+    bool owns_handle = false;
     uint32_t symbol_count = 0U;
     Il2CppDomainGet domain_get = nullptr;
     Il2CppThreadAttach thread_attach = nullptr;
@@ -378,20 +383,26 @@ bool read_internal_message(int fd, uint32_t expected_magic, std::vector<uint8_t>
 int make_bridge_server() {
     if (mkdir(kStateDirectory, 0700) != 0 && errno != EEXIST) return -1;
     if (chmod(kStateDirectory, 0711) != 0) return -1;
-    unlink(kBridgeSocketPath);
     const int server = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (server < 0) return -1;
     sockaddr_un address{};
     address.sun_family = AF_UNIX;
-    if (strlen(kBridgeSocketPath) >= sizeof(address.sun_path)) {
+    const size_t name_length = strlen(kBridgeSocketName);
+    if (name_length + 1U >= sizeof(address.sun_path)) {
         close(server);
         return -1;
     }
-    strncpy(address.sun_path, kBridgeSocketPath, sizeof(address.sun_path) - 1U);
-    if (bind(server, reinterpret_cast<const sockaddr *>(&address), sizeof(address)) != 0 ||
-        chmod(kBridgeSocketPath, 0666) != 0 || listen(server, 1) != 0) {
+    // Abstract sockets avoid the /data/adb parent directory's 0700 DAC
+    // boundary. The controller is still authenticated with SO_PEERCRED and
+    // the root-owned controller.uids allowlist in handle_controller().
+    address.sun_path[0] = '\0';
+    memcpy(address.sun_path + 1U, kBridgeSocketName, name_length);
+    const socklen_t address_length = static_cast<socklen_t>(
+        offsetof(sockaddr_un, sun_path) + 1U + name_length
+    );
+    if (bind(server, reinterpret_cast<const sockaddr *>(&address), address_length) != 0 ||
+        listen(server, 1) != 0) {
         close(server);
-        unlink(kBridgeSocketPath);
         return -1;
     }
     return server;
@@ -689,7 +700,6 @@ bool finish_runtime_bridge_broker(const char *runtime_session_id) {
     if (runtime_session_id != nullptr && g_broker_session_id == runtime_session_id) {
         g_broker_running = false;
         g_broker_session_id.clear();
-        unlink(kBridgeSocketPath);
         return true;
     }
     return false;
@@ -800,9 +810,156 @@ bool mapping_contains(const char *needle) {
     return find_mapping_path(needle, ignored, sizeof(ignored));
 }
 
+struct LoadedElfExports {
+    uintptr_t load_bias = 0U;
+    const Elf64_Sym *symbols = nullptr;
+    const char *strings = nullptr;
+    size_t symbol_count = 0U;
+};
+
+uintptr_t dynamic_pointer(uintptr_t load_bias, Elf64_Addr pointer) {
+    const uintptr_t value = static_cast<uintptr_t>(pointer);
+    return value < load_bias ? load_bias + value : value;
+}
+
+bool find_loaded_elf_exports(const char *library_path, LoadedElfExports *exports) {
+    if (library_path == nullptr || library_path[0] == '\0' || exports == nullptr) return false;
+
+    FILE *maps = fopen("/proc/self/maps", "re");
+    if (maps == nullptr) return false;
+
+    uintptr_t mapping_start = 0U;
+    char line[1536]{};
+    char mapped_path[1024]{};
+    while (fgets(line, sizeof(line), maps) != nullptr) {
+        unsigned long start = 0UL;
+        unsigned long offset = 0UL;
+        mapped_path[0] = '\0';
+        const int parsed = sscanf(
+            line,
+            "%lx-%*lx %*s %lx %*s %*s %1023s",
+            &start,
+            &offset,
+            mapped_path
+        );
+        if (parsed == 3 && offset == 0UL && strcmp(mapped_path, library_path) == 0) {
+            mapping_start = static_cast<uintptr_t>(start);
+            break;
+        }
+    }
+    fclose(maps);
+    if (mapping_start == 0U) return false;
+
+    const auto *header = reinterpret_cast<const Elf64_Ehdr *>(mapping_start);
+    if (memcmp(header->e_ident, ELFMAG, SELFMAG) != 0 ||
+        header->e_ident[EI_CLASS] != ELFCLASS64 ||
+        header->e_phentsize != sizeof(Elf64_Phdr)) return false;
+
+    uintptr_t load_bias = mapping_start;
+    const auto *program_headers = reinterpret_cast<const Elf64_Phdr *>(
+        mapping_start + static_cast<uintptr_t>(header->e_phoff)
+    );
+    const Elf64_Phdr *dynamic_header = nullptr;
+    for (uint16_t index = 0U; index < header->e_phnum; ++index) {
+        const Elf64_Phdr &program_header = program_headers[index];
+        if (program_header.p_type == PT_LOAD && program_header.p_offset == 0U) {
+            load_bias = mapping_start - static_cast<uintptr_t>(program_header.p_vaddr);
+        } else if (program_header.p_type == PT_DYNAMIC) {
+            dynamic_header = &program_header;
+        }
+    }
+    if (dynamic_header == nullptr) return false;
+
+    const auto *dynamic = reinterpret_cast<const Elf64_Dyn *>(
+        load_bias + static_cast<uintptr_t>(dynamic_header->p_vaddr)
+    );
+    const Elf64_Sym *symbols = nullptr;
+    const char *strings = nullptr;
+    const uint32_t *sysv_hash = nullptr;
+    const uint32_t *gnu_hash = nullptr;
+    size_t entry_size = sizeof(Elf64_Sym);
+    for (const Elf64_Dyn *entry = dynamic; entry->d_tag != DT_NULL; ++entry) {
+        switch (entry->d_tag) {
+            case DT_SYMTAB:
+                symbols = reinterpret_cast<const Elf64_Sym *>(
+                    dynamic_pointer(load_bias, entry->d_un.d_ptr)
+                );
+                break;
+            case DT_STRTAB:
+                strings = reinterpret_cast<const char *>(
+                    dynamic_pointer(load_bias, entry->d_un.d_ptr)
+                );
+                break;
+            case DT_SYMENT:
+                entry_size = static_cast<size_t>(entry->d_un.d_val);
+                break;
+            case DT_HASH:
+                sysv_hash = reinterpret_cast<const uint32_t *>(
+                    dynamic_pointer(load_bias, entry->d_un.d_ptr)
+                );
+                break;
+            case DT_GNU_HASH:
+                gnu_hash = reinterpret_cast<const uint32_t *>(
+                    dynamic_pointer(load_bias, entry->d_un.d_ptr)
+                );
+                break;
+            default:
+                break;
+        }
+    }
+    if (symbols == nullptr || strings == nullptr || entry_size != sizeof(Elf64_Sym)) return false;
+
+    size_t symbol_count = 0U;
+    if (sysv_hash != nullptr) {
+        symbol_count = static_cast<size_t>(sysv_hash[1]);
+    } else if (gnu_hash != nullptr) {
+        const uint32_t bucket_count = gnu_hash[0];
+        const uint32_t symbol_offset = gnu_hash[1];
+        const uint32_t bloom_size = gnu_hash[2];
+        const size_t word_count = sizeof(Elf64_Addr) / sizeof(uint32_t);
+        const uint32_t *buckets = gnu_hash + 4U +
+            static_cast<size_t>(bloom_size) * word_count;
+        const uint32_t *chains = buckets + bucket_count;
+        uint32_t largest_symbol = symbol_offset;
+        for (uint32_t bucket = 0U; bucket < bucket_count; ++bucket) {
+            uint32_t symbol_index = buckets[bucket];
+            if (symbol_index < symbol_offset) continue;
+            while ((chains[symbol_index - symbol_offset] & 1U) == 0U) ++symbol_index;
+            if (symbol_index >= largest_symbol) largest_symbol = symbol_index + 1U;
+        }
+        symbol_count = largest_symbol;
+    }
+    if (symbol_count == 0U) return false;
+
+    exports->load_bias = load_bias;
+    exports->symbols = symbols;
+    exports->strings = strings;
+    exports->symbol_count = symbol_count;
+    return true;
+}
+
+void *resolve_loaded_elf_symbol(const LoadedElfExports &exports, const char *name) {
+    if (name == nullptr || exports.symbols == nullptr || exports.strings == nullptr) return nullptr;
+    for (size_t index = 0U; index < exports.symbol_count; ++index) {
+        const Elf64_Sym &symbol = exports.symbols[index];
+        if (symbol.st_name == 0U || symbol.st_value == 0U) continue;
+        const char *symbol_name = exports.strings + symbol.st_name;
+        if (strcmp(symbol_name, name) == 0) {
+            return reinterpret_cast<void *>(exports.load_bias + static_cast<uintptr_t>(symbol.st_value));
+        }
+    }
+    return nullptr;
+}
+
 template <typename T>
-T resolve_symbol(void *handle, const char *name, uint32_t *resolved_count) {
+T resolve_symbol_with_fallback(
+    void *handle,
+    const LoadedElfExports *exports,
+    const char *name,
+    uint32_t *resolved_count
+) {
     void *symbol = dlsym(handle, name);
+    if (symbol == nullptr && exports != nullptr) symbol = resolve_loaded_elf_symbol(*exports, name);
     if (symbol != nullptr && resolved_count != nullptr) *resolved_count += 1U;
     return reinterpret_cast<T>(symbol);
 }
@@ -828,9 +985,22 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     if (il2cpp_path == nullptr || il2cpp_path[0] == '\0' || api == nullptr) return false;
     api->handle = dlopen(il2cpp_path, RTLD_NOW | RTLD_NOLOAD);
     if (api->handle == nullptr) api->handle = dlopen("libil2cpp.so", RTLD_NOW | RTLD_NOLOAD);
-    if (api->handle == nullptr) return false;
+    if (api->handle != nullptr) {
+        api->owns_handle = true;
+    } else {
+        // Android linker namespaces may hide an already-loaded library from
+        // an absolute-path RTLD_NOLOAD lookup. The exported IL2CPP API is
+        // still visible through the target process' default lookup scope.
+        // RTLD_DEFAULT is a lookup handle, not an owned dlopen handle.
+        api->handle = RTLD_DEFAULT;
+        api->owns_handle = false;
+    }
+    LoadedElfExports loaded_exports{};
+    const bool has_loaded_exports = find_loaded_elf_exports(il2cpp_path, &loaded_exports);
 
-#define RESOLVE(field, type, name) api->field = resolve_symbol<type>(api->handle, name, &api->symbol_count)
+#define RESOLVE(field, type, name) api->field = resolve_symbol_with_fallback<type>( \
+        api->handle, has_loaded_exports ? &loaded_exports : nullptr, name, &api->symbol_count \
+    )
     RESOLVE(domain_get, Il2CppDomainGet, "il2cpp_domain_get");
     RESOLVE(thread_attach, Il2CppThreadAttach, "il2cpp_thread_attach");
     RESOLVE(thread_detach, Il2CppThreadDetach, "il2cpp_thread_detach");
@@ -849,13 +1019,37 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(method_get_name, Il2CppMethodGetName, "il2cpp_method_get_name");
 #undef RESOLVE
 
-    return has_core_il2cpp_api(*api);
+    const bool available = has_core_il2cpp_api(*api);
+    if (!available) {
+        const char *lookup_error = dlerror();
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "IL2CPP API lookup incomplete path=%s resolved=%u required=%u dlerror=%s",
+            il2cpp_path,
+            api->symbol_count,
+            kRequiredIl2cppCoreSymbolCount,
+            lookup_error == nullptr ? "none" : lookup_error
+        );
+    } else if (has_loaded_exports) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "IL2CPP API resolved through loaded ELF exports path=%s symbols=%u",
+            il2cpp_path,
+            api->symbol_count
+        );
+    }
+    return available;
 }
 
 void close_il2cpp_api(Il2CppApi *api) {
-    if (api != nullptr && api->handle != nullptr) {
+    if (api != nullptr && api->owns_handle && api->handle != nullptr) {
         dlclose(api->handle);
+    }
+    if (api != nullptr) {
         api->handle = nullptr;
+        api->owns_handle = false;
     }
 }
 
@@ -979,7 +1173,11 @@ void survey_candidate_methods(
     }
 }
 
-bool survey_il2cpp_assemblies(Il2CppApi *api, RuntimeEvent *event, const Il2CppImage **csharp_image) {
+[[maybe_unused]] bool survey_il2cpp_assemblies(
+    Il2CppApi *api,
+    RuntimeEvent *event,
+    const Il2CppImage **csharp_image
+) {
     if (api == nullptr || event == nullptr || csharp_image == nullptr ||
         api->domain_get == nullptr || api->thread_attach == nullptr ||
         api->thread_detach == nullptr || api->domain_get_assemblies == nullptr ||
@@ -1019,7 +1217,11 @@ bool survey_il2cpp_assemblies(Il2CppApi *api, RuntimeEvent *event, const Il2CppI
     return true;
 }
 
-void survey_candidate_classes(Il2CppApi *api, const Il2CppImage *image, RuntimeEvent *event) {
+[[maybe_unused]] void survey_candidate_classes(
+    Il2CppApi *api,
+    const Il2CppImage *image,
+    RuntimeEvent *event
+) {
     if (api == nullptr || image == nullptr || event == nullptr || !has_class_survey_api(*api)) return;
 
     const size_t class_count = api->image_get_class_count(image);
@@ -1052,14 +1254,16 @@ void probe_il2cpp_runtime(RuntimeEvent *event) {
     }
 
     event->probe_flags |= kIl2cppApiAvailable;
-    for (int attempt = 0; attempt < kAssemblySurveyAttempts; ++attempt) {
-        const Il2CppImage *csharp_image = nullptr;
-        if (survey_il2cpp_assemblies(&api, event, &csharp_image)) {
-            if (csharp_image != nullptr) survey_candidate_classes(&api, csharp_image, event);
-            break;
-        }
-        usleep(kProbeDelayUs);
-    }
+    // Export discovery is safe as a read-only ELF operation, but calling the
+    // managed IL2CPP domain/assembly APIs from a Zygisk thread during Unity's
+    // il2cpp_init window is not. Pokémon GO aborts or dereferences null in
+    // that window. Defer assembly/class survey until a verified runtime
+    // lifecycle hook exists; never trade game stability for diagnostics.
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "IL2CPP exports discovered; managed survey deferred until runtime is initialized"
+    );
     close_il2cpp_api(&api);
 }
 

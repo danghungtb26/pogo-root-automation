@@ -1253,3 +1253,207 @@ bộ rồi verify bằng build/test/source guard/device read-only smoke test.
 > Phần triển khai xoá screen đã được tách thành task độc lập tại
 > `docs/issues/2026-09-07/remove-screen-runtime-mode/task.md`. Issue này tiếp tục
 > tập trung vào structured observation, bridge, binding và client-owned executor.
+
+## Section 18 — Yêu cầu trigger action thật trên build hiện tại
+
+**Type:** architecture / feature follow-up
+**Date:** 2026-09-08
+
+### 18.1. Vấn đề cần giải quyết
+
+Người vận hành muốn `autoEncounter`, `autoCatch`, `autoSpin`, berry, discard và
+transfer tạo mutation thật trong Pokémon GO thay vì chỉ chạy policy/controller.
+Kết quả harness hiện chứng minh bridge và controller hoạt động, nhưng chưa có
+binding gameplay trong target process nên yêu cầu chưa thể hoàn thành bằng việc
+đổi config hoặc sửa HTTP API.
+
+### 18.2. Ràng buộc
+
+- **Hard constraints:** giữ `GameAdapter`/native boundary; chỉ target đúng
+  package/version/ABI/build fingerprint; runtime phải có strong identity,
+  capability và outcome trước mutation; không thêm screenshot, `input tap`,
+  `input swipe`, accessibility hoặc controller-side memory binding.
+- **Hard constraint từ evidence:** `emulator-5564` đang chạy
+  `0.427.0`/`2026082702`, `arm64-v8a`, `aarch64`, translation `none`,
+  `il2cpp_mapped_only`, IL2CPP export `0/10`, assembly/class survey unavailable.
+- **Soft constraint:** giữ command protocol và core policy hiện tại để không phải
+  đổi planner khi binding được bổ sung.
+
+### 18.3. Quality attributes
+
+Ưu tiên theo thứ tự: fail-closed và correctness, testability/observability,
+maintainability theo game build, rồi mới đến latency. Một action chạy sai hoặc
+không xác định nguy hiểm hơn việc action bị từ chối.
+
+### 18.4. Các hướng triển khai
+
+1. **Binding exact-build ở target process (được chọn):** thêm adapter native
+   cho fingerprint đầy đủ, resolver/invoker client-owned, structured
+   observation và outcome hooks; chỉ publish capability sau device verification.
+2. **Dùng IL2CPP exported API tổng quát:** phù hợp nếu probe chuyển sang
+   `il2cpp_exported_api`, nhưng hiện build mapped-only nên chưa khả dụng và vẫn
+   không thay thế việc xác định class/method/game flow.
+3. **UI automation hoặc gửi input từ controller:** có thể tạo cảm giác trigger
+   nhanh, nhưng vi phạm structured-only boundary, không chứng minh outcome,
+   dễ phụ thuộc độ phân giải và bị loại bỏ.
+
+### 18.5. Trade-off
+
+Hướng 1 mất thời gian phân tích và phải cập nhật sau game update, nhưng giữ được
+ownership đúng, outcome rõ và rollback bằng capability/allowlist. Hướng 2 giảm
+phần resolver nếu export tồn tại nhưng không giải quyết binding game-specific.
+Hướng 3 dễ thử nghiệm nhất nhưng không an toàn, không deterministic và không
+được chấp nhận trong kiến trúc hiện tại.
+
+### 18.6. Integration points và data flow
+
+```text
+Pokémon GO client state
+  -> exact-build native binding
+  -> RuntimeReady(capabilities) + structured ObservationEvent
+  -> BridgePogoRuntimeSource / PogoGameAdapter
+  -> AutomationRunner (freshness, one mutation, idempotency)
+  -> AutomationCommand
+  -> native binding validates session/lifecycle/capability
+  -> client-owned invoker
+  -> definitive AutomationCommandResult
+  -> runner resyncs on a fresh observation
+```
+
+Native runtime là owner duy nhất của class/method resolution và invocation.
+Controller chỉ giữ policy, identity gate, command lifecycle và status. Hiện tại
+`runtime_command_channel_loop()` mới parse prefix rồi trả
+`binding_not_implemented`; `send_runtime_ready()` publish capability rỗng.
+
+### 18.7. Cách kiểm thử
+
+- JVM: giữ các test runner, codec, executor và fake adapter; thêm contract test
+  cho capability matrix và rejection khi thiếu identity/freshness/outcome.
+- Native host: test command parsing/result rejection; thêm fixture binding
+  parser/invoker độc lập nếu có contract cụ thể.
+- Device read-only: xác nhận fingerprint, library build id/metadata/APK
+  evidence, lifecycle/observation telemetry; không enable mutation.
+- Device mutation: chỉ từng capability một, bắt đầu từ action có outcome rõ;
+  xác nhận game state trước/sau và command idempotency; không test discard/
+  transfer cho tới khi storage/inventory revision được chứng minh.
+
+### 18.8. Rủi ro
+
+- Đoán offset/class/signature có thể crash Pokémon GO hoặc tạo mutation sai.
+- Method chạy nhưng outcome không quan sát được sẽ tạo trạng thái
+  `INDETERMINATE`; retry tự động có thể nhân đôi action.
+- Game update làm stale binding; fingerprint phải chặn trước khi invoke.
+- Có thể nhầm “config enabled” với “runtime capability ready”; status phải giữ
+  hai khái niệm riêng.
+
+### 18.9. Migration và rollback
+
+Giữ toàn bộ structured controller/bridge hiện tại, thêm binding theo từng
+capability. Mỗi capability bắt đầu disabled, chỉ thêm vào `RuntimeReady` sau
+device verification và allowlist đúng fingerprint. Rollback bằng cách bỏ
+capability khỏi binding/allowlist hoặc cài module probe-only; không cần quay lại
+screen/input path.
+
+### Acceptance Criteria (from spec)
+
+> Source: không có formal feature spec; các tiêu chí dưới đây là **inferred — needs BA confirm**.
+
+| ID | Rule / Requirement | Formula / Expected | Acceptance note |
+|---|---|---|---|
+| AC-39 | Exact binding selection | Chỉ binding khớp package + version code/name + ABI + engine/strategy + native identity mới được chọn | Không dùng version number đơn lẻ |
+| AC-40 | Runtime observation | Runtime phát lifecycle và state observation có sequence/session/freshness hợp lệ | Không trigger từ config hoặc screenshot |
+| AC-41 | Action invocation | `AutomationCommand` được parse, kiểm tra gate và gọi client-owned flow trong target process | Không controller-side invoke |
+| AC-42 | Capability publication | Mỗi capability chỉ xuất hiện sau binding/outcome device test pass | Current runtime phải giữ `[]` |
+| AC-43 | Outcome safety | Mỗi action trả `COMPLETED`, `FAILED`, `REJECTED`, `SAFE_TIMEOUT` hoặc `INDETERMINATE` đúng semantics | Không báo completed giả |
+| AC-44 | Safe mutation gate | Thiếu strong identity, allowlist, capability, fresh observation hoặc đúng lifecycle thì reject trước invoke | Áp dụng cho catch/spin/berry/discard/transfer |
+| AC-45 | Regression verification | JVM/native tests, Android build và device smoke pass; không test teleport trong scope này | Discard/transfer chỉ test sau khi có storage binding |
+
+- “Trigger action thật” → **AC-39…AC-44**; done khi có exact binding và game outcome thật.
+- “Không làm hỏng runtime hiện tại” → **AC-42, AC-44, AC-45**; done khi build
+  mapped-only vẫn read-only/fail-closed.
+
+### 18.10. Synthesis
+
+#### Key Insight
+
+Blocker không nằm ở `AutomationRunner`, API hay config; blocker nằm ở việc target
+runtime chưa có bất kỳ client-owned game binding nào và hiện còn `0/10` IL2CPP
+core export. Vì vậy code để trigger thật phải là một implementation
+exact-build trong `zygisk`/`game-adapter:pogo`, không phải một route mới hay một
+fallback UI.
+
+#### Recommended Approach
+
+Giữ thay đổi status/readiness hiện tại, thu thập đầy đủ native identity của
+`0.427.0`, sau đó triển khai binding theo từng capability với observation,
+invoker và outcome hook riêng. Chỉ publish capability và mở allowlist sau khi
+device test chứng minh state transition thật; bắt đầu bằng read-only telemetry
+và một action có outcome rõ, chưa đụng discard/transfer.
+
+#### Risks to Watch
+
+- Thiếu metadata/method evidence khiến mọi implementation cụ thể chỉ là đoán.
+- `il2cpp_mapped_only` không cho phép tái sử dụng exported-API path.
+- Action mutation không có outcome rõ có thể tạo duplicate hoặc mất đồng bộ.
+
+#### Open Questions
+
+- Cần artifact/evidence nào để xác định class, method signature, object lifetime
+  và outcome hook của build `0.427.0`?
+- Action đầu tiên được phép verify trên account test là `SPIN` hay
+  `OPEN_ENCOUNTER`/`CATCH`?
+- Có cho phép lấy metadata/native build artifact read-only từ emulator để tạo
+  binding fixture không? Nếu không có, không thể viết resolver an toàn.
+
+### 18.11. Evidence bổ sung từ emulator
+
+Read-only package inspection xác nhận `global-metadata.dat` nằm trong
+`base.apk` (38,678,636 bytes), cùng `libil2cpp.so` trong arm64 split
+(197,376,152 bytes). Đã ghi SHA-256 của base APK, arm64 split và metadata vào
+`docs/LIVE_AUTOMATION_READINESS.md` để pin evidence. Tuy nhiên chưa có
+metadata/code-registration resolver được verify trong workspace, nên evidence
+này chưa đủ để sinh method pointer hoặc client-owned invoker. Không export raw
+metadata/class strings khỏi emulator và không bật action chỉ từ việc file tồn
+tại.
+
+### 18.12. Cập nhật test target và resolver trên BlueStacks Air 1
+
+Theo môi trường test thực tế, target manual/harness là instance **BlueStacks Air
+1**, hiện được ADB nhận là `127.0.0.1:5565`; không dùng instance `BlueStacks Air`
+khác hoặc Android Studio AVD. Quy ước này đã được ghi vào `AGENTS.md`.
+
+Trên Air 1, cold-start có thể load Unity trước IL2CPP hơn 30 giây. Native probe
+đã tăng cửa sổ chờ từ 30 lên 90 giây để không chốt nhầm `mapped-only` khi
+`libil2cpp.so` chỉ xuất hiện muộn. Resolver ELF in-memory đã được thêm cho
+trường hợp Android linker namespace làm `dlsym` không thấy export; log device
+đã xác nhận:
+
+```text
+IL2CPP API resolved through loaded ELF exports
+symbols=16
+```
+
+Đây mới là read-only API discovery. `RuntimeReady` vẫn công bố capability rỗng,
+identity mutation vẫn false, và command loop vẫn reject vì chưa có class/method
+signature, object lifetime, client-owned invoker hoặc definitive outcome hook
+được verify cho build `0.427.0`.
+
+Kết quả kiểm tra trên Air 1: `bluestacks-smoke-test.sh` pass lifecycle
+connected → disconnected → connected; native command/observation protocol
+tests, shell syntax check, source guard và `git diff --check` đều pass. Không
+test teleport và không thực hiện mutation inventory/storage.
+
+### 18.13. Incident: managed survey gọi quá sớm và recovery
+
+Một bản thử nghiệm đã gọi `il2cpp_domain_get`/assembly survey ngay sau khi
+resolver tìm thấy export. Trên Air 1, log xác nhận crash xảy ra trong
+`libil2cpp.so` với stack quay lại `/memfd:jit-zygisk-cache`, ngay sau dòng
+`IL2CPP API resolved through loaded ELF exports`; đây là lỗi timing trong
+`il2cpp_init`, không phải lỗi gameplay command.
+
+Đã gỡ lời gọi managed domain/assembly/class khỏi probe. Probe hiện chỉ đọc ELF
+export table, vẫn giữ `RuntimeReady` capability rỗng và không gọi IL2CPP API
+managed nào. Sau khi cài recovery ZIP và restart Air 1, Pokémon GO giữ process
+sống và controller trở về `runtimeLifecycle=STARTING`, không còn
+`runtime bridge: Connection refused`. Managed survey chỉ được phép quay lại
+sau khi có lifecycle hook post-initialization được verify trên exact build.

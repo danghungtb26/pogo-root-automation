@@ -81,6 +81,13 @@ No M2 code currently extracts Pokémon/spawn objects from Pokémon GO or calls g
 
 Binary/build-specific artifacts must not be committed to this repository; keep derived signatures/mappings small and version-scoped.
 
+The current `emulator-5564` result is documented in
+[`LIVE_AUTOMATION_READINESS.md`](LIVE_AUTOMATION_READINESS.md). It is
+`il2cpp_mapped_only` with zero resolved core exports and no assembly/class
+survey, so it cannot yet publish nearby/encounter observations or execute
+catch/spin/discard/transfer. The policy layer is present, but the runtime must
+remain read-only until the exact binding and outcome hooks are verified.
+
 ## Direct map tap target
 
 The direct map-walk path uses the same version-scoped boundary but a separate

@@ -66,7 +66,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/zygisk-api"
           curl -fsSL \
-            https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/master/module/jni/zygisk.hpp \
+            https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/7bb941ac8edfcffd1d23761e401c45ca95409dc1/module/jni/zygisk.hpp \
             -o "$RUNNER_TEMP/zygisk-api/zygisk.hpp"
 
       - name: Build arm64 Zygisk runtime

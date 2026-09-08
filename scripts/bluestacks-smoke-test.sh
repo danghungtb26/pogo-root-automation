@@ -32,13 +32,14 @@ supported_abis="$(getprop_value ro.product.cpu.abilist)"
 native_bridge="$(getprop_value ro.dalvik.vm.native.bridge)"
 bst_service="$(getprop_value init.svc.bstsvcmgrtest)"
 mountsf_service="$(getprop_value init.svc.mountsf)"
+bst_ime_listener_port="$(getprop_value ro.bst.ime_listener_port)"
 
 identity="$(printf '%s %s %s %s %s' "$manufacturer" "$brand" "$model" "$product" "$hardware" | tr '[:upper:]' '[:lower:]')"
 is_bluestacks=false
 if [[ "$identity" == *bluestacks* || "$identity" == *bstacks* ]]; then
   is_bluestacks=true
 fi
-if [[ -n "$bst_service" ]]; then
+if [[ -n "$bst_service" || -n "$bst_ime_listener_port" ]]; then
   is_bluestacks=true
 fi
 
@@ -51,13 +52,14 @@ if [[ "$is_bluestacks" != true ]]; then
   echo "  hardware=$hardware"
   echo "  init.svc.bstsvcmgrtest=${bst_service:-unset}"
   echo "  init.svc.mountsf=${mountsf_service:-unset}"
+  echo "  ro.bst.ime_listener_port=${bst_ime_listener_port:-unset}"
   fail "connected device does not expose a BlueStacks runtime signal"
 fi
 
 root_id="$(root_shell 'id -u' 2>/dev/null | tr -d '\r' || true)"
 [[ "$root_id" == "0" ]] || fail "BlueStacks ADB shell cannot obtain uid 0 through su"
 
-root_shell "test -x '$MODULE_STATUS_SCRIPT'" \
+root_shell "test -r '$MODULE_STATUS_SCRIPT'" \
   || fail "pogo-root-automation Magisk module is not installed/enabled"
 
 module_abi=
@@ -93,6 +95,7 @@ echo "  manufacturer=$manufacturer"
 echo "  model=$model"
 echo "  bst_service=${bst_service:-unset}"
 echo "  mountsf_service=${mountsf_service:-unset}"
+echo "  bst_ime_listener_port=${bst_ime_listener_port:-unset}"
 echo "  android=$(getprop_value ro.build.version.release) / sdk=$(getprop_value ro.build.version.sdk)"
 echo "  primary_abi=$primary_abi"
 echo "  supported_abis=$supported_abis"

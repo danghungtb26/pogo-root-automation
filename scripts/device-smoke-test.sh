@@ -53,7 +53,7 @@ adb get-state >/dev/null 2>&1 || fail "no adb device connected"
 root_id="$(root_shell 'id -u' 2>/dev/null | tr -d '\r' || true)"
 [[ "$root_id" == "0" ]] || fail "adb shell cannot obtain root through su"
 
-root_shell "test -x $MODULE_STATUS_SCRIPT" || fail "Magisk module is not installed/enabled; install the CI Magisk zip and reboot first"
+root_shell "test -r $MODULE_STATUS_SCRIPT" || fail "Magisk module is not installed/enabled; install the CI Magisk zip and reboot first"
 
 package_name=
 for candidate in "$GOOGLE_PACKAGE" "$GALAXY_PACKAGE"; do

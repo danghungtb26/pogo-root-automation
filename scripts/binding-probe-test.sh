@@ -16,7 +16,7 @@ command -v adb >/dev/null 2>&1 || fail "adb is not installed"
 adb get-state >/dev/null 2>&1 || fail "no adb device connected"
 root_id="$(root_shell 'id -u' 2>/dev/null | tr -d '\r' || true)"
 [[ "$root_id" == "0" ]] || fail "adb shell cannot obtain uid 0 through su"
-root_shell "test -x '$MODULE_STATUS_SCRIPT'" || fail "pogo-root-automation Magisk module is not installed/enabled"
+root_shell "test -r '$MODULE_STATUS_SCRIPT'" || fail "pogo-root-automation Magisk module is not installed/enabled"
 
 package_name=
 for candidate in "$GOOGLE_PACKAGE" "$GALAXY_PACKAGE"; do

@@ -27,6 +27,10 @@ internal class OverlayPositionStore(context: Context) {
         private const val PREF_HUNDO_Y = "hundo_results_overlay_y"
         private const val PREF_SHINY_X = "shiny_results_overlay_x"
         private const val PREF_SHINY_Y = "shiny_results_overlay_y"
+
+        // Matches the emulator's configured real location. It is only a seed;
+        // users can still teleport to another point from the overlay.
+        private val DEFAULT_POINT = GeoPoint(21.027764, 105.834160)
     }
 
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -35,8 +39,16 @@ internal class OverlayPositionStore(context: Context) {
         if (!prefs.contains(PREF_LAT) || !prefs.contains(PREF_LON)) return null
         val latitude = Double.fromBits(prefs.getLong(PREF_LAT, 0L))
         val longitude = Double.fromBits(prefs.getLong(PREF_LON, 0L))
+        if (!latitude.isFinite() || latitude !in -90.0..90.0 ||
+            !longitude.isFinite() || longitude !in -180.0..180.0
+        ) {
+            return null
+        }
         return GeoPoint(latitude, longitude)
     }
+
+    fun loadPointOrDefault(fallback: GeoPoint = DEFAULT_POINT): GeoPoint =
+        loadPoint() ?: fallback
 
     fun persistPoint(point: GeoPoint?) {
         if (point == null) return
