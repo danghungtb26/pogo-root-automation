@@ -80,3 +80,20 @@ No M2 code currently extracts Pokémon/spawn objects from Pokémon GO or calls g
 - mapped-only IL2CPP → analyze the exact client build and create a narrowly version-scoped adapter.
 
 Binary/build-specific artifacts must not be committed to this repository; keep derived signatures/mappings small and version-scoped.
+
+## Direct map tap target
+
+The direct map-walk path uses the same version-scoped boundary but a separate
+read-only observation: `ObservationType.MAP_TARGET`. The binding must observe a
+real Unity/IL2CPP map tap, reject non-map UI hits, and resolve the tap with the
+camera/map state from the same frame. The preferred output is a resolved
+`GeoPoint` encoded by `MapTargetPayloadCodec`; the controller does not infer
+coordinates from screenshots or a fixed pixels-to-meters formula.
+
+The current native module remains probe-only for game behavior. It now broadens
+candidate class discovery, optionally enumerates likely input/map/camera method
+names, and provides the transport seam documented in `MAP_TARGET_BINDING.md`;
+it does not hook Unity input, resolve a camera projection, or emit
+`MAP_TARGET` by itself. The capability must remain disabled until one exact
+build/ABI has passed tap telemetry, map-hit filtering, projection calibration,
+and device smoke tests.

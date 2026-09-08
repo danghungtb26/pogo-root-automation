@@ -16,6 +16,8 @@ import dev.pogoroot.automation.core.automation.AutomationSnapshot
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.core.model.MapTargetObservation
+import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
@@ -42,6 +44,7 @@ class StructuredAutomationController(
     private val allowedBuildFingerprintsProvider: (() -> Set<String>)? = null,
     private val onGameAction: (LastActiveGameAction) -> Unit = {},
     private val onEncounterSnapshot: (EncounterSnapshot) -> Unit = {},
+    private val onMapTarget: (MapTargetObservation) -> Unit = {},
 ) {
     private val configuredAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private val source = BridgePogoRuntimeSource(bridge)
@@ -84,6 +87,18 @@ class StructuredAutomationController(
                     if (event.messageSeq <= processedObservationSeq) continue
                     source.selectObservation(event.messageSeq).getOrThrow()
                     try {
+                        if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.MAP_TARGET) {
+                            if (GameCapability.READ_MAP_TARGET !in adapter.capabilities) {
+                                lastError = "map target ignored: runtime did not advertise READ_MAP_TARGET"
+                            } else {
+                                MapTargetPayloadCodec.decode(event.payload)
+                                    .onSuccess(onMapTarget)
+                                    .onFailure { error -> lastError = "map target decode: ${error.message}" }
+                            }
+                            processedObservationSeq = event.messageSeq
+                            observationSeq = event.messageSeq
+                            continue
+                        }
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
                         val snapshot = readSnapshot()
                         snapshot.encounter?.let(onEncounterSnapshot)

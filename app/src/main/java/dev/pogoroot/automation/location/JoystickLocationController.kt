@@ -1,6 +1,7 @@
 package dev.pogoroot.automation.location
 
 import dev.pogoroot.automation.core.location.GeoMath
+import dev.pogoroot.automation.core.location.WalkPlanner
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.time.TeleportCooldown
 import dev.pogoroot.automation.core.time.TeleportCooldownService
@@ -18,8 +19,24 @@ data class JoystickLocationState(
     val bearingDegrees: Double = 0.0,
     val strengthPercent: Int = 0,
     val teleportCooldown: TeleportCooldown? = null,
+    val walkTarget: GeoPoint? = null,
+    val walkStatus: WalkStatus = WalkStatus.IDLE,
+    val walkToleranceMeters: Double = DEFAULT_WALK_TOLERANCE_METERS,
+    val walkDistanceMeters: Double? = null,
     val error: String? = null,
-)
+) {
+    companion object {
+        const val DEFAULT_WALK_TOLERANCE_METERS = 8.0
+    }
+}
+
+enum class WalkStatus {
+    IDLE,
+    WALKING,
+    ARRIVED,
+    STOPPED,
+    ERROR,
+}
 
 class JoystickLocationController(
     private val sink: MockLocationSink,
@@ -77,9 +94,74 @@ class JoystickLocationController(
                 bearingDegrees = GeoMath.joystickAngleToBearing(angleDegrees),
                 strengthPercent = strength,
                 currentSpeedKmh = if (strength == 0) 0.0 else state.currentSpeedKmh,
+                walkTarget = null,
+                walkStatus = if (state.walkTarget != null) WalkStatus.STOPPED else state.walkStatus,
+                walkDistanceMeters = null,
             )
         }
         if (strengthPercent == 0) dispatchState()
+    }
+
+    /** Starts target-following on the same single writer used by joystick ticks. */
+    fun walkTo(
+        target: GeoPoint,
+        toleranceMeters: Double = JoystickLocationState.DEFAULT_WALK_TOLERANCE_METERS,
+    ) {
+        require(target.latitude in -90.0..90.0) { "invalid latitude" }
+        require(target.longitude in -180.0..180.0) { "invalid longitude" }
+        require(toleranceMeters.isFinite() && toleranceMeters >= 0.0) {
+            "toleranceMeters must be finite and non-negative"
+        }
+
+        synchronized(lock) {
+            val current = state.point
+            if (current == null) {
+                state = state.copy(
+                    walkTarget = null,
+                    walkStatus = WalkStatus.ERROR,
+                    walkDistanceMeters = null,
+                    error = "Cannot walk without a current location",
+                )
+            } else {
+                val distance = GeoMath.distanceMeters(current, target)
+                state = if (distance <= toleranceMeters) {
+                    state.copy(
+                        point = current,
+                        walkTarget = null,
+                        walkStatus = WalkStatus.ARRIVED,
+                        walkToleranceMeters = toleranceMeters,
+                        walkDistanceMeters = distance,
+                        currentSpeedKmh = 0.0,
+                        strengthPercent = 0,
+                        error = null,
+                    )
+                } else {
+                    state.copy(
+                        walkTarget = target,
+                        walkStatus = WalkStatus.WALKING,
+                        walkToleranceMeters = toleranceMeters,
+                        walkDistanceMeters = distance,
+                        currentSpeedKmh = 0.0,
+                        strengthPercent = 0,
+                        error = null,
+                    )
+                }
+            }
+        }
+        dispatchState()
+    }
+
+    fun stopWalking() {
+        synchronized(lock) {
+            state = state.copy(
+                walkTarget = null,
+                walkStatus = if (state.walkTarget != null) WalkStatus.STOPPED else state.walkStatus,
+                walkDistanceMeters = null,
+                currentSpeedKmh = 0.0,
+                strengthPercent = 0,
+            )
+        }
+        dispatchState()
     }
 
     fun setMaxSpeedKmh(speed: Double) {
@@ -102,6 +184,9 @@ class JoystickLocationController(
                 point = point,
                 currentSpeedKmh = 0.0,
                 strengthPercent = 0,
+                walkTarget = null,
+                walkStatus = if (state.walkTarget != null) WalkStatus.STOPPED else state.walkStatus,
+                walkDistanceMeters = null,
                 error = null,
             )
             ready = state.providerReady
@@ -145,36 +230,87 @@ class JoystickLocationController(
         val current = snapshot.first
         val previousTick = snapshot.second
         val point = current.point ?: return
-        if (!current.providerReady || current.strengthPercent <= 0) return
+        if (!current.providerReady) return
 
         val elapsedSeconds = if (previousTick == 0L) {
             0.05
         } else {
             max(0.0, (now - previousTick) / 1_000_000_000.0).coerceAtMost(0.25)
         }
-        val speedKmh = current.maxSpeedKmh * current.strengthPercent / 100.0
+        val isWalkingToTarget = current.walkTarget != null
+        if (!isWalkingToTarget && current.strengthPercent <= 0) return
+
+        val speedKmh = if (isWalkingToTarget) current.maxSpeedKmh else {
+            current.maxSpeedKmh * current.strengthPercent / 100.0
+        }
         val speedMetersPerSecond = speedKmh / 3.6
         val distanceMeters = speedMetersPerSecond * elapsedSeconds
-        val next = GeoMath.destination(point, current.bearingDegrees, distanceMeters)
+        val walkStep = current.walkTarget?.let { target ->
+            WalkPlanner.step(
+                current = point,
+                target = target,
+                maxStepMeters = distanceMeters,
+                toleranceMeters = current.walkToleranceMeters,
+            )
+        }
+        if (walkStep?.arrived == true) {
+            synchronized(lock) {
+                state = state.copy(
+                    walkTarget = null,
+                    walkStatus = WalkStatus.ARRIVED,
+                    walkDistanceMeters = walkStep.distanceAfterMeters,
+                    currentSpeedKmh = 0.0,
+                    strengthPercent = 0,
+                    error = null,
+                )
+            }
+            dispatchState()
+            return
+        }
+
+        val next = walkStep?.nextPoint ?: GeoMath.destination(point, current.bearingDegrees, distanceMeters)
+        val bearing = walkStep?.bearingDegrees ?: current.bearingDegrees
 
         val result = sink.publish(
             point = next,
             speedMetersPerSecond = speedMetersPerSecond.toFloat(),
-            bearingDegrees = current.bearingDegrees.toFloat(),
+            bearingDegrees = bearing.toFloat(),
         )
 
         synchronized(lock) {
             state = if (result.isSuccess) {
+                val remaining = current.walkTarget?.let { GeoMath.distanceMeters(next, it) }
+                val arrived = current.walkTarget != null && remaining!! <= current.walkToleranceMeters
                 state.copy(
                     point = next,
-                    currentSpeedKmh = speedKmh,
+                    bearingDegrees = bearing,
+                    currentSpeedKmh = if (arrived) 0.0 else speedKmh,
+                    strengthPercent = if (arrived) 0 else state.strengthPercent,
+                    walkTarget = if (arrived) null else state.walkTarget,
+                    walkStatus = when {
+                        arrived -> WalkStatus.ARRIVED
+                        state.walkTarget != null -> WalkStatus.WALKING
+                        else -> state.walkStatus
+                    },
+                    walkDistanceMeters = remaining,
                     error = null,
                 )
             } else {
-                state.copy(
-                    currentSpeedKmh = 0.0,
-                    error = result.exceptionOrNull()?.message,
-                )
+                if (state.walkTarget != null) {
+                    state.copy(
+                        walkTarget = null,
+                        walkStatus = WalkStatus.ERROR,
+                        walkDistanceMeters = null,
+                        currentSpeedKmh = 0.0,
+                        strengthPercent = 0,
+                        error = result.exceptionOrNull()?.message,
+                    )
+                } else {
+                    state.copy(
+                        currentSpeedKmh = 0.0,
+                        error = result.exceptionOrNull()?.message,
+                    )
+                }
             }
         }
         dispatchState()

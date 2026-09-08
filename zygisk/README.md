@@ -23,6 +23,15 @@ The automation core must not depend on offsets, symbols, hook frameworks, or a p
 
 The official Zygisk sample is the source of truth for API compatibility and packaging conventions.
 
+## Map-target observation seam
+
+`runtime_observation_protocol.h` defines the versioned private envelope used by
+a verified Pokémon GO binding to publish a resolved map target. The companion
+forwards it as the normal bridge `ObservationEvent`; it does not perform the
+Unity touch hook or screen-to-geo projection. Those operations remain
+version-scoped and must be installed only after the exact package/version/ABI
+binding has been calibrated.
+
 ## Bridge peer authorization
 
 The companion socket is `/data/adb/pogo_root_automation/runtime.sock`. The

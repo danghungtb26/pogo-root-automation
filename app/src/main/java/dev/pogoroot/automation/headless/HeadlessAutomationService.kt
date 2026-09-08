@@ -19,12 +19,14 @@ class HeadlessAutomationService : Service() {
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var structuredController: StructuredAutomationController
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var scanResultRepository: ScanResultRepository
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
+        mapTargetRepository = MapTargetRepository(this)
         scanResultRepository = ScanResultRepository(this)
         scanResultRepository.clear()
         runtimeBridge = RuntimeBridgeClient()
@@ -38,6 +40,11 @@ class HeadlessAutomationService : Service() {
             },
             onGameAction = lastActiveLocationRepository::record,
             onEncounterSnapshot = scanResultRepository::recordEncounter,
+            onMapTarget = { target ->
+                if (configRepository.read().mapTapWalkEnabled) {
+                    mapTargetRepository.publish(target)
+                }
+            },
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,

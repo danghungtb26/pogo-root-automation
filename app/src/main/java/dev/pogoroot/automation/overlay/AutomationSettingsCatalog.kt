@@ -20,7 +20,7 @@ internal object AutomationSettingsCatalog {
             AutomationSettingsCategory(
                 id = "automation",
                 title = "Automation",
-                summary = "Master ${onOff(config.enabled)} · Catch ${onOff(config.autoCatch)} · Preview close ${onOff(config.autoCloseCatchPreview)}",
+                summary = "Master ${onOff(config.enabled)} · Map walk ${onOff(config.mapTapWalkEnabled)} · Catch ${onOff(config.autoCatch)}",
             ),
             AutomationSettingsCategory(
                 id = "discard",

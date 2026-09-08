@@ -53,6 +53,16 @@ object GeoMath {
         )
     }
 
+    fun initialBearingDegrees(start: GeoPoint, end: GeoPoint): Double {
+        val latitude1 = Math.toRadians(start.latitude)
+        val latitude2 = Math.toRadians(end.latitude)
+        val deltaLongitude = Math.toRadians(normalizeLongitude(end.longitude - start.longitude))
+        val y = sin(deltaLongitude) * cos(latitude2)
+        val x = cos(latitude1) * sin(latitude2) -
+            sin(latitude1) * cos(latitude2) * cos(deltaLongitude)
+        return normalizeBearing(Math.toDegrees(atan2(y, x)))
+    }
+
     fun joystickAngleToBearing(angleDegrees: Int): Double =
         normalizeBearing(450.0 - angleDegrees.toDouble())
 

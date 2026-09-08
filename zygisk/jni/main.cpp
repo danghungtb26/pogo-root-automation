@@ -20,6 +20,7 @@
 
 #include "zygisk.hpp"
 #include "runtime_command_protocol.h"
+#include "runtime_observation_protocol.h"
 
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
@@ -117,6 +118,7 @@ struct BrokerContext {
 };
 
 std::mutex g_broker_mutex;
+std::mutex g_internal_message_mutex;
 bool g_broker_running = false;
 std::string g_broker_session_id;
 
@@ -140,6 +142,8 @@ using Il2CppImageGetClassCount = size_t (*)(const Il2CppImage *);
 using Il2CppImageGetClass = Il2CppClass *(*)(const Il2CppImage *, size_t);
 using Il2CppClassGetName = const char *(*)(Il2CppClass *);
 using Il2CppClassGetNamespace = const char *(*)(Il2CppClass *);
+using Il2CppClassGetMethods = const void *(*)(Il2CppClass *, void **);
+using Il2CppMethodGetName = const char *(*)(const void *);
 
 struct Il2CppApi {
     void *handle = nullptr;
@@ -158,6 +162,8 @@ struct Il2CppApi {
     Il2CppImageGetClass image_get_class = nullptr;
     Il2CppClassGetName class_get_name = nullptr;
     Il2CppClassGetNamespace class_get_namespace = nullptr;
+    Il2CppClassGetMethods class_get_methods = nullptr;
+    Il2CppMethodGetName method_get_name = nullptr;
 };
 
 bool is_target_process(const char *process_name) {
@@ -243,6 +249,17 @@ bool read_be32(const std::vector<uint8_t> &input, size_t *offset, uint32_t *valu
         (static_cast<uint32_t>(input[*offset + 2U]) << 8U) |
         static_cast<uint32_t>(input[*offset + 3U]);
     *offset += 4U;
+    return true;
+}
+
+bool read_be64(const std::vector<uint8_t> &input, size_t *offset, uint64_t *value) {
+    if (offset == nullptr || value == nullptr || *offset > input.size() ||
+        input.size() - *offset < 8U) return false;
+    *value = 0U;
+    for (size_t index = 0U; index < 8U; ++index) {
+        *value = (*value << 8U) | input[*offset + index];
+    }
+    *offset += 8U;
     return true;
 }
 
@@ -333,6 +350,7 @@ bool read_bridge_frame(
 
 bool send_internal_message(int fd, uint32_t magic, const std::vector<uint8_t> &payload) {
     if (payload.size() > kBridgeHardMessageBytes) return false;
+    std::lock_guard<std::mutex> lock(g_internal_message_mutex);
     std::vector<uint8_t> envelope;
     envelope.reserve(8U + payload.size());
     append_u32(&envelope, magic);
@@ -386,13 +404,27 @@ void append_optional_absent(std::vector<uint8_t> *output) {
 enum class CompanionMessageType {
     kRuntimeEvent,
     kRuntimeResult,
+    kRuntimeObservation,
 };
+
+bool read_length_prefixed_payload(int fd, std::vector<uint8_t> *payload) {
+    uint8_t length_bytes[4]{};
+    if (payload == nullptr || !read_full(fd, length_bytes, sizeof(length_bytes))) return false;
+    const uint32_t length = (static_cast<uint32_t>(length_bytes[0]) << 24U) |
+        (static_cast<uint32_t>(length_bytes[1]) << 16U) |
+        (static_cast<uint32_t>(length_bytes[2]) << 8U) |
+        static_cast<uint32_t>(length_bytes[3]);
+    if (length > kBridgeHardMessageBytes) return false;
+    payload->resize(length);
+    return length == 0U || read_full(fd, payload->data(), payload->size());
+}
 
 bool read_companion_message(
     int fd,
     CompanionMessageType *message_type,
     RuntimeEvent *runtime_event,
-    std::vector<uint8_t> *runtime_result
+    std::vector<uint8_t> *runtime_result,
+    std::vector<uint8_t> *runtime_observation
 ) {
     uint8_t magic_bytes[4]{};
     if (message_type == nullptr || !read_full(fd, magic_bytes, sizeof(magic_bytes))) return false;
@@ -412,18 +444,17 @@ bool read_companion_message(
         *message_type = CompanionMessageType::kRuntimeEvent;
         return true;
     }
-    if (magic != kRuntimeResultMagic || runtime_result == nullptr) return false;
-    uint8_t length_bytes[4]{};
-    if (!read_full(fd, length_bytes, sizeof(length_bytes))) return false;
-    const uint32_t length = (static_cast<uint32_t>(length_bytes[0]) << 24U) |
-        (static_cast<uint32_t>(length_bytes[1]) << 16U) |
-        (static_cast<uint32_t>(length_bytes[2]) << 8U) |
-        static_cast<uint32_t>(length_bytes[3]);
-    if (length > kBridgeHardMessageBytes) return false;
-    runtime_result->resize(length);
-    if (length != 0U && !read_full(fd, runtime_result->data(), runtime_result->size())) return false;
-    *message_type = CompanionMessageType::kRuntimeResult;
-    return true;
+    if (magic == kRuntimeResultMagic) {
+        if (!read_length_prefixed_payload(fd, runtime_result)) return false;
+        *message_type = CompanionMessageType::kRuntimeResult;
+        return true;
+    }
+    if (magic == pogo_runtime::kRuntimeObservationMagic) {
+        if (!read_length_prefixed_payload(fd, runtime_observation)) return false;
+        *message_type = CompanionMessageType::kRuntimeObservation;
+        return true;
+    }
+    return false;
 }
 
 bool broker_is_current(const char *runtime_session_id) {
@@ -486,6 +517,79 @@ bool send_runtime_command(int fd, uint16_t message_type, uint64_t message_seq, c
     return send_internal_message(fd, kRuntimeCommandMagic, command);
 }
 
+[[maybe_unused]] bool send_runtime_map_target_observation(
+    int fd,
+    const pogo_runtime::MapTargetObservation &observation
+) {
+    std::vector<uint8_t> envelope;
+    if (!pogo_runtime::encode_runtime_map_target_observation(
+            observation,
+            static_cast<uint64_t>(now_epoch_millis()),
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            &envelope
+        )) return false;
+    return send_internal_message(fd, pogo_runtime::kRuntimeObservationMagic, envelope);
+}
+
+bool parse_runtime_map_target_observation(
+    const std::vector<uint8_t> &envelope,
+    std::vector<uint8_t> *payload,
+    uint64_t *observed_at_epoch_ms,
+    uint64_t *observed_at_elapsed_ns
+) {
+    size_t offset = 0U;
+    uint32_t envelope_version = 0U;
+    uint32_t observation_type = 0U;
+    uint32_t payload_version = 0U;
+    uint32_t payload_size = 0U;
+    if (payload == nullptr || observed_at_epoch_ms == nullptr || observed_at_elapsed_ns == nullptr ||
+        !read_be32(envelope, &offset, &envelope_version) ||
+        !read_be32(envelope, &offset, &observation_type) ||
+        !read_be32(envelope, &offset, &payload_version) ||
+        !read_be32(envelope, &offset, &payload_size) ||
+        envelope_version != pogo_runtime::kRuntimeObservationEnvelopeVersion ||
+        observation_type != pogo_runtime::kMapTargetObservationType ||
+        payload_version != pogo_runtime::kMapTargetPayloadVersion ||
+        payload_size > kBridgeHardMessageBytes || offset > envelope.size() ||
+        envelope.size() - offset < payload_size) return false;
+
+    payload->assign(envelope.data() + offset, envelope.data() + offset + payload_size);
+    offset += payload_size;
+    return read_be64(envelope, &offset, observed_at_epoch_ms) &&
+        read_be64(envelope, &offset, observed_at_elapsed_ns) && offset == envelope.size();
+}
+
+bool send_map_target_observation(
+    int fd,
+    BrokerContext &context,
+    const std::vector<uint8_t> &map_target_payload,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns
+) {
+    if (map_target_payload.empty() || map_target_payload.size() > kBridgeHardMessageBytes) return false;
+    const uint64_t message_seq = context.next_message_seq++;
+    std::vector<uint8_t> payload;
+    append_u32(&payload, 1U);
+    append_string(&payload, context.runtime_session_id);
+    append_u64(&payload, message_seq);
+    append_u32(&payload, pogo_runtime::kMapTargetObservationType);
+    append_u32(&payload, pogo_runtime::kMapTargetPayloadVersion);
+    append_u32(&payload, static_cast<uint32_t>(map_target_payload.size()));
+    payload.insert(payload.end(), map_target_payload.begin(), map_target_payload.end());
+    append_u64(&payload, observed_at_epoch_ms);
+    append_u64(&payload, observed_at_elapsed_ns);
+    append_u32(&payload, static_cast<uint32_t>(context.pid));
+    append_string(&payload, context.process_name);
+    append_string(&payload, context.process_name);
+    char fingerprint[192]{};
+    snprintf(fingerprint, sizeof(fingerprint), "unverified|%s", context.process_name);
+    append_string(&payload, fingerprint);
+    append_optional_absent(&payload);  // player latitude
+    append_optional_absent(&payload);  // player longitude
+    append_optional_absent(&payload);  // lifecycle
+    return send_bridge_frame(fd, 3U, message_seq, payload);
+}
+
 bool parse_runtime_result(
     const std::vector<uint8_t> &payload,
     std::string *command_id,
@@ -520,7 +624,14 @@ bool handle_controller(int fd, BrokerContext &context) {
             CompanionMessageType message_type{};
             RuntimeEvent runtime_event{};
             std::vector<uint8_t> runtime_result;
-            if (!read_companion_message(context.runtime_fd, &message_type, &runtime_event, &runtime_result)) {
+            std::vector<uint8_t> runtime_observation;
+            if (!read_companion_message(
+                    context.runtime_fd,
+                    &message_type,
+                    &runtime_event,
+                    &runtime_result,
+                    &runtime_observation
+                )) {
                 return false;
             }
             if (message_type == CompanionMessageType::kRuntimeResult) {
@@ -531,6 +642,23 @@ bool handle_controller(int fd, BrokerContext &context) {
                     !send_command_result(fd, context, command_id.c_str(), error_code.c_str(), message.c_str())) {
                     return true;
                 }
+            }
+            if (message_type == CompanionMessageType::kRuntimeObservation) {
+                std::vector<uint8_t> map_target_payload;
+                uint64_t observed_at_epoch_ms = 0U;
+                uint64_t observed_at_elapsed_ns = 0U;
+                if (!parse_runtime_map_target_observation(
+                        runtime_observation,
+                        &map_target_payload,
+                        &observed_at_epoch_ms,
+                        &observed_at_elapsed_ns
+                    ) || !send_map_target_observation(
+                        fd,
+                        context,
+                        map_target_payload,
+                        observed_at_epoch_ms,
+                        observed_at_elapsed_ns
+                    )) return false;
             }
         }
 
@@ -692,6 +820,10 @@ bool has_class_survey_api(const Il2CppApi &api) {
         api.class_get_name != nullptr && api.class_get_namespace != nullptr;
 }
 
+bool has_method_survey_api(const Il2CppApi &api) {
+    return api.class_get_methods != nullptr && api.method_get_name != nullptr;
+}
+
 bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     if (il2cpp_path == nullptr || il2cpp_path[0] == '\0' || api == nullptr) return false;
     api->handle = dlopen(il2cpp_path, RTLD_NOW | RTLD_NOLOAD);
@@ -713,6 +845,8 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(image_get_class, Il2CppImageGetClass, "il2cpp_image_get_class");
     RESOLVE(class_get_name, Il2CppClassGetName, "il2cpp_class_get_name");
     RESOLVE(class_get_namespace, Il2CppClassGetNamespace, "il2cpp_class_get_namespace");
+    RESOLVE(class_get_methods, Il2CppClassGetMethods, "il2cpp_class_get_methods");
+    RESOLVE(method_get_name, Il2CppMethodGetName, "il2cpp_method_get_name");
 #undef RESOLVE
 
     return has_core_il2cpp_api(*api);
@@ -745,7 +879,9 @@ bool contains_ignore_case(const char *value, const char *needle) {
 
 bool is_candidate_class(const char *name, const char *name_space) {
     const char *keywords[] = {
-        "map", "pokemon", "spawn", "encounter", "fort", "nearby", "wild", "inventory"
+        "map", "camera", "projection", "coordinate", "location", "world",
+        "input", "touch", "pointer", "pokemon", "spawn", "encounter",
+        "fort", "nearby", "wild", "inventory"
     };
     for (const char *keyword : keywords) {
         if (contains_ignore_case(name, keyword) || contains_ignore_case(name_space, keyword)) return true;
@@ -774,6 +910,72 @@ void append_candidate(RuntimeEvent *event, const char *name_space, const char *n
     );
     if (written > 0 && static_cast<size_t>(written) < sizeof(event->candidate_classes) - used) {
         event->candidate_class_count += 1U;
+    }
+}
+
+void append_candidate_method(
+    RuntimeEvent *event,
+    const char *name_space,
+    const char *class_name,
+    const char *method_name
+) {
+    if (event == nullptr || class_name == nullptr || method_name == nullptr ||
+        event->candidate_class_count >= kMaxCandidateClasses) return;
+    char qualified[256]{};
+    if (name_space != nullptr && name_space[0] != '\0') {
+        snprintf(qualified, sizeof(qualified), "%s.%s::%s", name_space, class_name, method_name);
+    } else {
+        snprintf(qualified, sizeof(qualified), "%s::%s", class_name, method_name);
+    }
+
+    const size_t used = strnlen(event->candidate_classes, sizeof(event->candidate_classes));
+    if (used >= sizeof(event->candidate_classes) - 1U) return;
+    const char *separator = used == 0U ? "" : ";";
+    const int written = snprintf(
+        event->candidate_classes + used,
+        sizeof(event->candidate_classes) - used,
+        "%s%s",
+        separator,
+        qualified
+    );
+    if (written > 0 && static_cast<size_t>(written) < sizeof(event->candidate_classes) - used) {
+        event->candidate_class_count += 1U;
+    }
+}
+
+bool is_candidate_method(const char *name) {
+    const char *keywords[] = {
+        "touch", "pointer", "input", "screen", "camera", "project",
+        "world", "geo", "coordinate", "map", "ray", "gesture"
+    };
+    for (const char *keyword : keywords) {
+        if (contains_ignore_case(name, keyword)) return true;
+    }
+    return false;
+}
+
+void survey_candidate_methods(
+    Il2CppApi *api,
+    Il2CppClass *klass,
+    const char *name_space,
+    const char *class_name,
+    RuntimeEvent *event
+) {
+    if (api == nullptr || klass == nullptr || class_name == nullptr || event == nullptr ||
+        !has_method_survey_api(*api)) return;
+
+    void *iterator = nullptr;
+    size_t inspected_methods = 0U;
+    constexpr size_t kMaxMethodsPerClass = 256U;
+    while (event->candidate_class_count < kMaxCandidateClasses &&
+        inspected_methods < kMaxMethodsPerClass) {
+        const void *method = api->class_get_methods(klass, &iterator);
+        if (method == nullptr) break;
+        ++inspected_methods;
+        const char *method_name = api->method_get_name(method);
+        if (method_name != nullptr && is_candidate_method(method_name)) {
+            append_candidate_method(event, name_space, class_name, method_name);
+        }
     }
 }
 
@@ -831,6 +1033,7 @@ void survey_candidate_classes(Il2CppApi *api, const Il2CppImage *image, RuntimeE
         const char *name_space = api->class_get_namespace(klass);
         if (name != nullptr && is_candidate_class(name, name_space)) {
             append_candidate(event, name_space, name);
+            survey_candidate_methods(api, klass, name_space, name, event);
         }
     }
     event->probe_flags |= kClassSurveyComplete;

@@ -46,6 +46,8 @@ enum class ObservationType(val wireValue: Int) {
     FORTS(4),
     INVENTORY(5),
     POKEMON_STORAGE(6),
+    /** Version-scoped tap resolved by the Pokémon GO map binding. */
+    MAP_TARGET(7),
 }
 
 enum class CommandPhase(val wireValue: Int) {

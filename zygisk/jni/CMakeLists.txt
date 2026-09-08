@@ -22,4 +22,8 @@ if(POGO_BUILD_PROTOCOL_TESTS)
     add_executable(runtime_command_protocol_test runtime_command_protocol_test.cpp)
     target_compile_features(runtime_command_protocol_test PRIVATE cxx_std_17)
     target_compile_options(runtime_command_protocol_test PRIVATE -Wall -Wextra -Werror)
+
+    add_executable(runtime_observation_protocol_test runtime_observation_protocol_test.cpp)
+    target_compile_features(runtime_observation_protocol_test PRIVATE cxx_std_17)
+    target_compile_options(runtime_observation_protocol_test PRIVATE -Wall -Wextra -Werror)
 endif()

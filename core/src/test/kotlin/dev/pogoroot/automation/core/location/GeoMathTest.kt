@@ -46,4 +46,22 @@ class GeoMathTest {
 
         assertEquals(222_390.0, distance, 500.0)
     }
+
+    @Test
+    fun `initial bearing points north`() {
+        assertEquals(
+            0.0,
+            GeoMath.initialBearingDegrees(GeoPoint(0.0, 0.0), GeoPoint(1.0, 0.0)),
+            0.001,
+        )
+    }
+
+    @Test
+    fun `initial bearing uses the short longitude path`() {
+        assertEquals(
+            90.0,
+            GeoMath.initialBearingDegrees(GeoPoint(0.0, 179.0), GeoPoint(0.0, -179.0)),
+            0.001,
+        )
+    }
 }

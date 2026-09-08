@@ -31,6 +31,7 @@ import dev.pogoroot.automation.core.time.TeleportCooldownService
 import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.headless.LastActiveGameAction
 import dev.pogoroot.automation.headless.LastActiveLocationRepository
+import dev.pogoroot.automation.headless.MapTargetRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
@@ -66,6 +67,7 @@ class JoystickOverlayService : Service() {
     private lateinit var controller: JoystickLocationController
     private lateinit var automationConfigRepository: AutomationConfigRepository
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var scanResultRepository: ScanResultRepository
     private lateinit var positionStore: OverlayPositionStore
     private lateinit var shortcutMenu: ShortcutMenuView
@@ -98,6 +100,7 @@ class JoystickOverlayService : Service() {
 
     private val cooldownTick = object : Runnable {
         override fun run() {
+            applyPendingMapTarget()
             renderShortcutStates()
             renderCooldown()
             renderScanResults()
@@ -110,6 +113,7 @@ class JoystickOverlayService : Service() {
         windowManager = getSystemService(WindowManager::class.java)
         automationConfigRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
+        mapTargetRepository = MapTargetRepository(this)
         scanResultRepository = ScanResultRepository(this)
         positionStore = OverlayPositionStore(this)
         latestTeleportCooldown = positionStore.loadCooldown()
@@ -614,6 +618,21 @@ class JoystickOverlayService : Service() {
             renderCooldown()
             persistPointOccasionally(state.point)
         }
+    }
+
+    private fun applyPendingMapTarget() {
+        if (!::mapTargetRepository.isInitialized || !controllerStarted) return
+        if (!automationConfigRepository.read().mapTapWalkEnabled) {
+            mapTargetRepository.clear()
+            return
+        }
+
+        val location = controller.snapshot()
+        if (!location.providerReady || location.point == null) return
+
+        val target = mapTargetRepository.read() ?: return
+        mapTargetRepository.clear()
+        controller.walkTo(target.target)
     }
 
     private fun renderCooldown() {
