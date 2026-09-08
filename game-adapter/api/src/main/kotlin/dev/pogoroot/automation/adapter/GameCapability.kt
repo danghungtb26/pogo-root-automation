@@ -10,6 +10,13 @@ enum class GameCapability {
     READ_POKEMON_STORAGE,
     ENCOUNTER,
     CATCH,
+    /** Runtime can execute a client-owned throw profile and report its outcome. */
+    THROW_CONTROL,
+    OBSERVE_THROW_OUTCOME,
+    /** Runtime can enter/validate Pokémon GO's AR+ encounter mode. */
+    AR_ENCOUNTER,
+    /** Runtime can trigger GO Snapshot while an encounter is active. */
+    SNAPSHOT_DURING_ENCOUNTER,
     /** Catch binding confirms CAUGHT and closes the post-catch preview. */
     CATCH_AND_CLOSE_PREVIEW,
     SPIN,

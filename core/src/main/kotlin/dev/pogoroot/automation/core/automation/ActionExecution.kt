@@ -104,6 +104,8 @@ data class ActionExecution(
     val message: String? = null,
     val errorCode: String? = null,
     val catchOutcome: CatchOutcome? = null,
+    val throwOutcome: ThrowOutcome? = null,
+    val snapshotResult: EncounterSnapshotResult? = null,
     val runtimeMessageSeq: Long? = null,
     val observedAtEpochMs: Long? = null,
     val observedAtElapsedNs: Long? = null,
@@ -166,6 +168,7 @@ internal val AutomationAction.isMutation: Boolean
 internal val AutomationAction.expectedLifecycle: GameLifecycleState?
     get() = when (this) {
         is AutomationAction.Catch,
+        is AutomationAction.TakeEncounterSnapshot,
         is AutomationAction.UseBerry,
         -> GameLifecycleState.ENCOUNTER
 
@@ -180,18 +183,25 @@ internal val AutomationAction.expectedLifecycle: GameLifecycleState?
     }
 
 /** Capability names are strings here to keep core independent of adapter APIs. */
-internal val AutomationAction.requiredCapability: String?
+internal val AutomationAction.requiredCapabilities: Set<String>
     get() = when (this) {
-        is AutomationAction.MoveTo -> "MOVE"
-        is AutomationAction.OpenEncounter -> "OPEN_ENCOUNTER"
-        is AutomationAction.Catch -> if (closePreviewAfterCaught) {
-            "CATCH_AND_CLOSE_PREVIEW"
-        } else {
-            "CATCH"
+        is AutomationAction.MoveTo -> setOf("MOVE")
+        is AutomationAction.OpenEncounter -> setOf("OPEN_ENCOUNTER")
+        is AutomationAction.Catch -> buildSet {
+            add(if (closePreviewAfterCaught) "CATCH_AND_CLOSE_PREVIEW" else "CATCH")
+            if (!throwProfile.isDefault) {
+                add("THROW_CONTROL")
+                if (throwProfile.requiresStructuredOutcome) add("OBSERVE_THROW_OUTCOME")
+            }
+            if (throwProfile.encounterMode == EncounterMode.AR_PLUS) add("AR_ENCOUNTER")
         }
-        is AutomationAction.Spin -> "SPIN"
-        is AutomationAction.DiscardItem -> "DISCARD_ITEM"
-        is AutomationAction.TransferPokemon -> "TRANSFER_POKEMON"
-        is AutomationAction.UseBerry -> "USE_BERRY"
-        is AutomationAction.Alert -> null
+        is AutomationAction.TakeEncounterSnapshot -> buildSet {
+            add("SNAPSHOT_DURING_ENCOUNTER")
+            if (encounterMode == EncounterMode.AR_PLUS) add("AR_ENCOUNTER")
+        }
+        is AutomationAction.Spin -> setOf("SPIN")
+        is AutomationAction.DiscardItem -> setOf("DISCARD_ITEM")
+        is AutomationAction.TransferPokemon -> setOf("TRANSFER_POKEMON")
+        is AutomationAction.UseBerry -> setOf("USE_BERRY")
+        is AutomationAction.Alert -> emptySet()
     }

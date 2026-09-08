@@ -94,6 +94,13 @@ class AutomationControlServer(
 
     private fun applyParams(config: HeadlessAutomationConfig, params: Map<String, String>): HeadlessAutomationConfig = config.copy(
         autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
+        catchThrowQuality = params["throwQuality"]?.let(::parseThrowQuality) ?: config.catchThrowQuality,
+        catchCurvePreference = params["curve"]?.let(::parseCurvePreference) ?: config.catchCurvePreference,
+        catchEncounterMode = params.boolean("arPlus")?.let { if (it) dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS else dev.pogoroot.automation.core.automation.EncounterMode.STANDARD }
+            ?: config.catchEncounterMode,
+        autoSnapshotDuringEncounter = params.boolean("autoSnapshot") ?: config.autoSnapshotDuringEncounter,
+        snapshotEncounterMode = params.boolean("snapshotArPlus")?.let { if (it) dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS else dev.pogoroot.automation.core.automation.EncounterMode.STANDARD }
+            ?: config.snapshotEncounterMode,
         mapTapWalkEnabled = params.boolean("mapTapWalk") ?: config.mapTapWalkEnabled,
         autoCloseCatchPreview = params.boolean("autoCloseCatchPreview") ?: config.autoCloseCatchPreview,
         autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
@@ -120,6 +127,18 @@ class AutomationControlServer(
     private fun parseBerry(raw: String): BerryMode = runCatching {
         BerryMode.valueOf(raw.trim().uppercase().replace('-', '_').replace(' ', '_'))
     }.getOrDefault(BerryMode.NONE)
+
+    private fun parseThrowQuality(raw: String) = runCatching {
+        dev.pogoroot.automation.core.automation.ThrowQualityTarget.valueOf(
+            raw.trim().uppercase(),
+        )
+    }.getOrDefault(dev.pogoroot.automation.core.automation.ThrowQualityTarget.ANY)
+
+    private fun parseCurvePreference(raw: String) = runCatching {
+        dev.pogoroot.automation.core.automation.CurvePreference.valueOf(
+            raw.trim().uppercase(),
+        )
+    }.getOrDefault(dev.pogoroot.automation.core.automation.CurvePreference.ANY)
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
@@ -157,11 +176,11 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
+        {"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
     """.trimIndent()
 
     private fun String?.jsonStringOrNull(): String = this?.let {

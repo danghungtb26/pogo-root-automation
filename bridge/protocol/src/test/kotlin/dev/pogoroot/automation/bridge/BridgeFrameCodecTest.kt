@@ -4,6 +4,14 @@ import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.automation.CatchReason
+import dev.pogoroot.automation.core.automation.CurveOutcome
+import dev.pogoroot.automation.core.automation.CurvePreference
+import dev.pogoroot.automation.core.automation.EncounterMode
+import dev.pogoroot.automation.core.automation.EncounterSnapshotResult
+import dev.pogoroot.automation.core.automation.ThrowOutcome
+import dev.pogoroot.automation.core.automation.ThrowProfile
+import dev.pogoroot.automation.core.automation.ThrowQuality
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -133,5 +141,73 @@ class BridgeFrameCodecTest {
         assertEquals(1, ObservationType.LIFECYCLE.wireValue)
         assertEquals(4, CommandPhase.REJECTED.wireValue)
         assertEquals(7, CommandPhase.INDETERMINATE.wireValue)
+    }
+
+    @Test
+    fun `round trips throw profile and encounter snapshot command`() {
+        val throwCommand = BridgeEvent.AutomationCommand(
+            runtimeSessionId = "session-a",
+            commandId = "command-throw-profile",
+            action = AutomationAction.Catch(
+                encounterId = "encounter-1",
+                reason = CatchReason.SHINY,
+                throwProfile = ThrowProfile(
+                    qualityTarget = ThrowQualityTarget.EXCELLENT,
+                    curvePreference = CurvePreference.CURVE,
+                    encounterMode = EncounterMode.AR_PLUS,
+                ),
+            ),
+            basedOnObservationSeq = 7L,
+            expectedLifecycle = GameLifecycleState.ENCOUNTER,
+            expiresAtElapsedNs = 99L,
+            pid = 1234,
+            processName = "com.nianticlabs.pokemongo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified-build",
+        )
+        val decodedThrow = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND,
+            BridgePayloadCodec.encode(throwCommand).getOrThrow(),
+        ).getOrThrow()
+        assertEquals(throwCommand, decodedThrow)
+
+        val snapshotCommand = throwCommand.copy(
+            commandId = "command-snapshot",
+            action = AutomationAction.TakeEncounterSnapshot(
+                encounterId = "encounter-1",
+                encounterMode = EncounterMode.AR_PLUS,
+            ),
+        )
+        val decodedSnapshot = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND,
+            BridgePayloadCodec.encode(snapshotCommand).getOrThrow(),
+        ).getOrThrow()
+        assertEquals(snapshotCommand, decodedSnapshot)
+    }
+
+    @Test
+    fun `round trips typed throw and snapshot results`() {
+        val result = BridgeEvent.AutomationCommandResult(
+            runtimeSessionId = "session-a",
+            messageSeq = 8L,
+            commandId = "command-throw-profile",
+            phase = CommandPhase.COMPLETED,
+            throwOutcome = ThrowOutcome(
+                hit = true,
+                quality = ThrowQuality.EXCELLENT,
+                curve = CurveOutcome.CURVE,
+            ),
+            snapshotResult = EncounterSnapshotResult(
+                encounterId = "encounter-1",
+                mediaReference = "content://snapshot/1",
+            ),
+            observedAtEpochMs = 100L,
+            observedAtElapsedNs = 200L,
+        )
+        val decoded = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND_RESULT,
+            BridgePayloadCodec.encode(result).getOrThrow(),
+        ).getOrThrow()
+        assertEquals(result, decoded)
     }
 }

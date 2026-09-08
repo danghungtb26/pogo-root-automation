@@ -22,6 +22,19 @@ sealed interface AutomationAction {
          * only after it confirms [CatchOutcome.CAUGHT].
          */
         val closePreviewAfterCaught: Boolean = false,
+        /**
+         * Optional client-owned throw intent. This is never a guarantee that
+         * the requested quality or curve will be returned by the game.
+         */
+        val throwProfile: ThrowProfile = ThrowProfile(),
+    ) : AutomationAction {
+        init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
+    }
+
+    /** Trigger Pokémon GO's own Snapshot flow while an encounter is active. */
+    data class TakeEncounterSnapshot(
+        val encounterId: String,
+        val encounterMode: EncounterMode = EncounterMode.STANDARD,
     ) : AutomationAction {
         init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
     }
@@ -82,6 +95,84 @@ enum class CatchOutcome {
     FLED,
     NO_BALL,
     INDETERMINATE,
+}
+
+enum class ThrowQualityTarget {
+    ANY,
+    NICE,
+    GREAT,
+    EXCELLENT,
+}
+
+enum class CurvePreference {
+    ANY,
+    STRAIGHT,
+    CURVE,
+}
+
+enum class EncounterMode {
+    STANDARD,
+    AR_PLUS,
+}
+
+/**
+ * A request to a verified client-owned throw pipeline. It deliberately does
+ * not contain a force-hit/guaranteed-result flag.
+ */
+data class ThrowProfile(
+    val qualityTarget: ThrowQualityTarget = ThrowQualityTarget.ANY,
+    val curvePreference: CurvePreference = CurvePreference.ANY,
+    val encounterMode: EncounterMode = EncounterMode.STANDARD,
+) {
+    val isDefault: Boolean
+        get() = this == DEFAULT
+
+    val requiresStructuredOutcome: Boolean
+        get() = qualityTarget != ThrowQualityTarget.ANY || curvePreference != CurvePreference.ANY
+
+    companion object {
+        val DEFAULT = ThrowProfile()
+    }
+}
+
+enum class ThrowQuality {
+    NONE,
+    NICE,
+    GREAT,
+    EXCELLENT,
+    UNKNOWN,
+}
+
+enum class CurveOutcome {
+    UNKNOWN,
+    STRAIGHT,
+    CURVE,
+}
+
+/** Actual evidence returned by a client-owned throw binding. */
+data class ThrowOutcome(
+    val hit: Boolean?,
+    val quality: ThrowQuality = ThrowQuality.UNKNOWN,
+    val curve: CurveOutcome = CurveOutcome.UNKNOWN,
+) {
+    init {
+        require(quality != ThrowQuality.EXCELLENT || hit == true) {
+            "a miss cannot report excellent quality"
+        }
+    }
+}
+
+/** Metadata for a completed GO Snapshot; the media bytes stay out of bridge frames. */
+data class EncounterSnapshotResult(
+    val encounterId: String,
+    val mediaReference: String? = null,
+) {
+    init {
+        require(encounterId.isNotBlank()) { "encounterId must not be blank" }
+        require(mediaReference == null || mediaReference.isNotBlank()) {
+            "mediaReference must not be blank when present"
+        }
+    }
 }
 
 enum class BerryType {

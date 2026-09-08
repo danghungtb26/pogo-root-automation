@@ -260,6 +260,8 @@ class StructuredAutomationController(
                 message = result.message,
                 errorCode = result.errorCode,
                 catchOutcome = result.catchOutcome,
+                throwOutcome = result.throwOutcome,
+                snapshotResult = result.snapshotResult,
                 runtimeMessageSeq = result.messageSeq,
                 observedAtEpochMs = result.observedAtEpochMs,
                 observedAtElapsedNs = result.observedAtElapsedNs,

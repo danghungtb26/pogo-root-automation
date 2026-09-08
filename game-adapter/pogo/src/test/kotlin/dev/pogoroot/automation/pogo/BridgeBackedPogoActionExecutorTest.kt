@@ -7,8 +7,12 @@ import dev.pogoroot.automation.bridge.BridgePayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeBridge
 import dev.pogoroot.automation.core.automation.ActionRequest
 import dev.pogoroot.automation.core.automation.AutomationAction
+import dev.pogoroot.automation.core.automation.CurvePreference
 import dev.pogoroot.automation.core.automation.CatchReason
+import dev.pogoroot.automation.core.automation.EncounterMode
 import dev.pogoroot.automation.core.model.GameLifecycleState
+import dev.pogoroot.automation.core.automation.ThrowProfile
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -68,6 +72,58 @@ class BridgeBackedPogoActionExecutorTest {
         assertTrue(bridge.sent.isEmpty())
     }
 
+    @Test
+    fun `configured throw requires throw and outcome capabilities`() {
+        val bridge = CapturingBridge(
+            ready(
+                strongIdentityVerified = true,
+                capabilities = setOf(GameCapability.CATCH.name),
+            ),
+        )
+        val executor = BridgeBackedPogoActionExecutor(
+            bridge = bridge,
+            runtimeReady = { bridge.ready },
+            allowedBuildFingerprints = setOf(BUILD_FINGERPRINT),
+        )
+        val request = request().copy(
+            action = AutomationAction.Catch(
+                encounterId = "encounter-1",
+                reason = CatchReason.CATCH_ALL,
+                throwProfile = ThrowProfile(
+                    qualityTarget = ThrowQualityTarget.GREAT,
+                    curvePreference = CurvePreference.CURVE,
+                ),
+            ),
+        )
+
+        assertTrue(executor.submit(request).isFailure)
+        assertTrue(bridge.sent.isEmpty())
+    }
+
+    @Test
+    fun `ar snapshot requires snapshot and ar capabilities`() {
+        val bridge = CapturingBridge(
+            ready(
+                strongIdentityVerified = true,
+                capabilities = setOf(GameCapability.CATCH.name),
+            ),
+        )
+        val executor = BridgeBackedPogoActionExecutor(
+            bridge = bridge,
+            runtimeReady = { bridge.ready },
+            allowedBuildFingerprints = setOf(BUILD_FINGERPRINT),
+        )
+        val request = request().copy(
+            action = AutomationAction.TakeEncounterSnapshot(
+                encounterId = "encounter-1",
+                encounterMode = EncounterMode.AR_PLUS,
+            ),
+        )
+
+        assertTrue(executor.submit(request).isFailure)
+        assertTrue(bridge.sent.isEmpty())
+    }
+
     private fun request() = ActionRequest.create(
         runtimeSessionId = SESSION_ID,
         action = AutomationAction.Catch("encounter-1", CatchReason.CATCH_ALL),
@@ -83,7 +139,10 @@ class BridgeBackedPogoActionExecutorTest {
         commandId = "command-1",
     )
 
-    private fun ready(strongIdentityVerified: Boolean) = BridgeEvent.RuntimeReady(
+    private fun ready(
+        strongIdentityVerified: Boolean,
+        capabilities: Set<String> = setOf(GameCapability.CATCH.name),
+    ) = BridgeEvent.RuntimeReady(
         runtimeSessionId = SESSION_ID,
         messageSeq = 8L,
         pid = PID,
@@ -91,7 +150,7 @@ class BridgeBackedPogoActionExecutorTest {
         packageName = PACKAGE_NAME,
         buildFingerprint = BUILD_FINGERPRINT,
         strongIdentityVerified = strongIdentityVerified,
-        capabilities = setOf(GameCapability.CATCH.name),
+        capabilities = capabilities,
     )
 
     private class CapturingBridge(

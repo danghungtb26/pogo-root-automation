@@ -5,6 +5,14 @@ import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.CatchReason
 import dev.pogoroot.automation.core.automation.CatchOutcome
+import dev.pogoroot.automation.core.automation.EncounterMode
+import dev.pogoroot.automation.core.automation.EncounterSnapshotResult
+import dev.pogoroot.automation.core.automation.ThrowOutcome
+import dev.pogoroot.automation.core.automation.ThrowProfile
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
+import dev.pogoroot.automation.core.automation.CurvePreference
+import dev.pogoroot.automation.core.automation.ThrowQuality
+import dev.pogoroot.automation.core.automation.CurveOutcome
 import dev.pogoroot.automation.core.automation.MovementMode
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -133,6 +141,11 @@ object BridgePayloadCodec {
         // Optional tail keeps probe-only/native peers compatible. New
         // client-owned bindings can append a typed catch outcome here.
         writeNullableCatchOutcome(output, value.catchOutcome)
+        if (value.throwOutcome != null || value.snapshotResult != null) {
+            output.writeBoolean(true)
+            writeNullableThrowOutcome(output, value.throwOutcome)
+            writeNullableSnapshotResult(output, value.snapshotResult)
+        }
     }
 
     private fun writeBindingLost(output: DataOutputStream, value: BridgeEvent.BindingLost) {
@@ -229,7 +242,17 @@ object BridgePayloadCodec {
         observedAtEpochMs = input.readLong(),
         observedAtElapsedNs = input.readLong(),
         catchOutcome = if (input.available() > 0) readNullableCatchOutcome(input) else null,
-    )
+    ).let { decoded ->
+        if (input.available() == 0) {
+            decoded
+        } else {
+            require(input.readBoolean()) { "invalid command result extension marker" }
+            decoded.copy(
+                throwOutcome = readNullableThrowOutcome(input),
+                snapshotResult = readNullableSnapshotResult(input),
+            )
+        }
+    }
 
     private fun readBindingLost(input: DataInputStream): BridgeEvent.BindingLost = BridgeEvent.BindingLost(
         runtimeSessionId = readString(input),
@@ -262,9 +285,22 @@ object BridgePayloadCodec {
                 writeString(output, action.spawnId)
             }
             is AutomationAction.Catch -> {
-                output.writeInt(if (action.closePreviewAfterCaught) 9 else 3)
+                if (action.throwProfile.isDefault) {
+                    output.writeInt(if (action.closePreviewAfterCaught) 9 else 3)
+                    writeString(output, action.encounterId)
+                    output.writeInt(action.reason.wireValue())
+                } else {
+                    output.writeInt(10)
+                    writeString(output, action.encounterId)
+                    output.writeInt(action.reason.wireValue())
+                    output.writeBoolean(action.closePreviewAfterCaught)
+                    writeThrowProfile(output, action.throwProfile)
+                }
+            }
+            is AutomationAction.TakeEncounterSnapshot -> {
+                output.writeInt(11)
                 writeString(output, action.encounterId)
-                output.writeInt(action.reason.wireValue())
+                output.writeInt(action.encounterMode.wireValue())
             }
             is AutomationAction.Spin -> {
                 output.writeInt(4)
@@ -306,6 +342,16 @@ object BridgePayloadCodec {
             encounterId = readString(input),
             reason = readEnum(input, CatchReason.entries) { it.wireValue() },
             closePreviewAfterCaught = true,
+        )
+        10 -> AutomationAction.Catch(
+            encounterId = readString(input),
+            reason = readEnum(input, CatchReason.entries) { it.wireValue() },
+            closePreviewAfterCaught = input.readBoolean(),
+            throwProfile = readThrowProfile(input),
+        )
+        11 -> AutomationAction.TakeEncounterSnapshot(
+            encounterId = readString(input),
+            encounterMode = readEnum(input, EncounterMode.entries) { it.wireValue() },
         )
         4 -> AutomationAction.Spin(readString(input))
         5 -> AutomationAction.DiscardItem(input.readInt(), input.readInt())
@@ -448,6 +494,55 @@ object BridgePayloadCodec {
             null
         }
 
+    private fun writeThrowProfile(output: DataOutputStream, value: ThrowProfile) {
+        output.writeInt(value.qualityTarget.wireValue())
+        output.writeInt(value.curvePreference.wireValue())
+        output.writeInt(value.encounterMode.wireValue())
+    }
+
+    private fun readThrowProfile(input: DataInputStream): ThrowProfile = ThrowProfile(
+        qualityTarget = readEnum(input, ThrowQualityTarget.entries) { it.wireValue() },
+        curvePreference = readEnum(input, CurvePreference.entries) { it.wireValue() },
+        encounterMode = readEnum(input, EncounterMode.entries) { it.wireValue() },
+    )
+
+    private fun writeNullableThrowOutcome(output: DataOutputStream, value: ThrowOutcome?) {
+        output.writeBoolean(value != null)
+        if (value != null) {
+            val hit = value.hit
+            output.writeBoolean(hit != null)
+            if (hit != null) output.writeBoolean(hit)
+            output.writeInt(value.quality.wireValue())
+            output.writeInt(value.curve.wireValue())
+        }
+    }
+
+    private fun readNullableThrowOutcome(input: DataInputStream): ThrowOutcome? {
+        if (!input.readBoolean()) return null
+        val hit = if (input.readBoolean()) input.readBoolean() else null
+        return ThrowOutcome(
+            hit = hit,
+            quality = readEnum(input, ThrowQuality.entries) { it.wireValue() },
+            curve = readEnum(input, CurveOutcome.entries) { it.wireValue() },
+        )
+    }
+
+    private fun writeNullableSnapshotResult(output: DataOutputStream, value: EncounterSnapshotResult?) {
+        output.writeBoolean(value != null)
+        if (value != null) {
+            writeString(output, value.encounterId)
+            writeNullableString(output, value.mediaReference)
+        }
+    }
+
+    private fun readNullableSnapshotResult(input: DataInputStream): EncounterSnapshotResult? {
+        if (!input.readBoolean()) return null
+        return EncounterSnapshotResult(
+            encounterId = readString(input),
+            mediaReference = readNullableString(input),
+        )
+    }
+
     private fun writeNullableLifecycle(output: DataOutputStream, value: GameLifecycleState?) {
         output.writeBoolean(value != null)
         if (value != null) output.writeInt(value.wireValue())
@@ -495,6 +590,38 @@ object BridgePayloadCodec {
         CatchOutcome.FLED -> 4
         CatchOutcome.NO_BALL -> 5
         CatchOutcome.INDETERMINATE -> 6
+    }
+
+    private fun ThrowQualityTarget.wireValue(): Int = when (this) {
+        ThrowQualityTarget.ANY -> 1
+        ThrowQualityTarget.NICE -> 2
+        ThrowQualityTarget.GREAT -> 3
+        ThrowQualityTarget.EXCELLENT -> 4
+    }
+
+    private fun CurvePreference.wireValue(): Int = when (this) {
+        CurvePreference.ANY -> 1
+        CurvePreference.STRAIGHT -> 2
+        CurvePreference.CURVE -> 3
+    }
+
+    private fun EncounterMode.wireValue(): Int = when (this) {
+        EncounterMode.STANDARD -> 1
+        EncounterMode.AR_PLUS -> 2
+    }
+
+    private fun ThrowQuality.wireValue(): Int = when (this) {
+        ThrowQuality.NONE -> 1
+        ThrowQuality.NICE -> 2
+        ThrowQuality.GREAT -> 3
+        ThrowQuality.EXCELLENT -> 4
+        ThrowQuality.UNKNOWN -> 5
+    }
+
+    private fun CurveOutcome.wireValue(): Int = when (this) {
+        CurveOutcome.UNKNOWN -> 1
+        CurveOutcome.STRAIGHT -> 2
+        CurveOutcome.CURVE -> 3
     }
 
     private fun AlertKind.wireValue(): Int = when (this) {

@@ -2,6 +2,8 @@ package dev.pogoroot.automation.bridge
 
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.CatchOutcome
+import dev.pogoroot.automation.core.automation.EncounterSnapshotResult
+import dev.pogoroot.automation.core.automation.ThrowOutcome
 import dev.pogoroot.automation.core.automation.RuntimeIdentity
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import java.io.DataInputStream
@@ -212,6 +214,10 @@ sealed interface BridgeEvent {
         val message: String? = null,
         /** Optional semantic result for a Catch command. */
         val catchOutcome: CatchOutcome? = null,
+        /** Optional evidence from a client-owned throw pipeline. */
+        val throwOutcome: ThrowOutcome? = null,
+        /** Optional metadata from a completed GO Snapshot action. */
+        val snapshotResult: EncounterSnapshotResult? = null,
         val observedAtEpochMs: Long = System.currentTimeMillis(),
         val observedAtElapsedNs: Long = System.nanoTime(),
     ) : BridgeEvent {
@@ -219,6 +225,9 @@ sealed interface BridgeEvent {
             require(runtimeSessionId.isNotBlank()) { "runtimeSessionId must not be blank" }
             require(messageSeq > 0L) { "messageSeq must be positive" }
             require(commandId.isNotBlank()) { "commandId must not be blank" }
+            if (snapshotResult != null) {
+                require(snapshotResult.encounterId.isNotBlank()) { "snapshot encounterId must not be blank" }
+            }
         }
     }
 

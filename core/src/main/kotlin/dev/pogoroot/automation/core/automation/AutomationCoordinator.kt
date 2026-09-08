@@ -76,16 +76,24 @@ class AutomationCoordinator(
         encounter: EncounterSnapshot?,
         policy: AutomationPolicy,
     ): List<AutomationAction> {
-        if (!policy.autoCatch || encounter == null) {
+        if (encounter == null) {
             return emptyList()
         }
+
+        val actions = mutableListOf<AutomationAction>()
+        if (policy.autoSnapshotDuringEncounter) {
+            actions += AutomationAction.TakeEncounterSnapshot(
+                encounterId = encounter.encounterId,
+                encounterMode = policy.snapshotEncounterMode,
+            )
+        }
+
+        if (!policy.autoCatch) return actions
 
         val decision = catchPlanner.decide(encounter, policy.catchPolicy)
-        if (!decision.shouldCatch || decision.reason == null) {
-            return emptyList()
-        }
+        if (!decision.shouldCatch || decision.reason == null) return actions
 
-        return buildList {
+        actions += buildList {
             policy.berryType?.let { berryType ->
                 add(
                     AutomationAction.UseBerry(
@@ -107,8 +115,10 @@ class AutomationCoordinator(
                     encounterId = encounter.encounterId,
                     reason = decision.reason,
                     closePreviewAfterCaught = policy.autoCloseCatchPreview,
+                    throwProfile = policy.catchPolicy.throwProfile,
                 ),
             )
         }
+        return actions
     }
 }

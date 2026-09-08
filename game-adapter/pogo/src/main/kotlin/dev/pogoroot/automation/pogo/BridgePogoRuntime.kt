@@ -305,9 +305,9 @@ class BridgeBackedPogoActionExecutor(
             "mutation blocked: build fingerprint is not allowlisted"
         }
 
-        val capability = requiredCapability(request.action)
-        require(capability == null || capability in capabilities) {
-            "mutation blocked: missing capability $capability"
+        val missingCapabilities = requiredCapabilities(request.action).filterNot { it in capabilities }
+        require(missingCapabilities.isEmpty()) {
+            "mutation blocked: missing capability ${missingCapabilities.joinToString(",")}"
         }
 
         bridge.send(
@@ -326,23 +326,41 @@ class BridgeBackedPogoActionExecutor(
         ).getOrThrow()
     }
 
-    private fun requiredCapability(action: AutomationAction): GameCapability? = when (action) {
-        is AutomationAction.MoveTo -> GameCapability.MOVE
-        is AutomationAction.OpenEncounter -> GameCapability.OPEN_ENCOUNTER
-        is AutomationAction.Catch -> if (action.closePreviewAfterCaught) {
-            GameCapability.CATCH_AND_CLOSE_PREVIEW
-        } else {
-            GameCapability.CATCH
+    private fun requiredCapabilities(action: AutomationAction): Set<GameCapability> = when (action) {
+        is AutomationAction.MoveTo -> setOf(GameCapability.MOVE)
+        is AutomationAction.OpenEncounter -> setOf(GameCapability.OPEN_ENCOUNTER)
+        is AutomationAction.Catch -> buildSet {
+            add(if (action.closePreviewAfterCaught) {
+                GameCapability.CATCH_AND_CLOSE_PREVIEW
+            } else {
+                GameCapability.CATCH
+            })
+            if (!action.throwProfile.isDefault) {
+                add(GameCapability.THROW_CONTROL)
+                if (action.throwProfile.requiresStructuredOutcome) {
+                    add(GameCapability.OBSERVE_THROW_OUTCOME)
+                }
+            }
+            if (action.throwProfile.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
+                add(GameCapability.AR_ENCOUNTER)
+            }
         }
-        is AutomationAction.Spin -> GameCapability.SPIN
-        is AutomationAction.DiscardItem -> GameCapability.DISCARD_ITEM
-        is AutomationAction.TransferPokemon -> GameCapability.TRANSFER_POKEMON
-        is AutomationAction.UseBerry -> GameCapability.USE_BERRY
-        is AutomationAction.Alert -> null
+        is AutomationAction.TakeEncounterSnapshot -> buildSet {
+            add(GameCapability.SNAPSHOT_DURING_ENCOUNTER)
+            if (action.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
+                add(GameCapability.AR_ENCOUNTER)
+            }
+        }
+        is AutomationAction.Spin -> setOf(GameCapability.SPIN)
+        is AutomationAction.DiscardItem -> setOf(GameCapability.DISCARD_ITEM)
+        is AutomationAction.TransferPokemon -> setOf(GameCapability.TRANSFER_POKEMON)
+        is AutomationAction.UseBerry -> setOf(GameCapability.USE_BERRY)
+        is AutomationAction.Alert -> emptySet()
     }
 
     private fun expectedLifecycle(action: AutomationAction): GameLifecycleState? = when (action) {
         is AutomationAction.Catch,
+        is AutomationAction.TakeEncounterSnapshot,
         is AutomationAction.UseBerry,
         -> GameLifecycleState.ENCOUNTER
         is AutomationAction.Alert -> null

@@ -105,9 +105,9 @@ class AutomationRunner(
             return Result.success(RunnerDispatch(alerts = alerts, reason = lastError))
         }
 
-        val capability = mutation.requiredCapability
-        if (capability != null && capability !in runtime.capabilities) {
-            lastError = "mutation blocked: missing capability $capability"
+        val missingCapabilities = mutation.requiredCapabilities.filterNot { it in runtime.capabilities }
+        if (missingCapabilities.isNotEmpty()) {
+            lastError = "mutation blocked: missing capability ${missingCapabilities.joinToString(",")}"
             return Result.success(RunnerDispatch(alerts = alerts, reason = lastError))
         }
 

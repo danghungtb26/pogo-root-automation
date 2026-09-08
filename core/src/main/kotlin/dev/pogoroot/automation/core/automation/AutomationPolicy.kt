@@ -7,6 +7,8 @@ data class AutomationPolicy(
     val autoDiscard: Boolean = false,
     val autoTransfer: Boolean = false,
     val catchPolicy: CatchPolicy = CatchPolicy(),
+    val autoSnapshotDuringEncounter: Boolean = false,
+    val snapshotEncounterMode: EncounterMode = EncounterMode.STANDARD,
     val inventoryPolicy: InventoryPolicy = InventoryPolicy(),
     val transferPolicy: TransferPolicy = TransferPolicy(),
     val berryType: BerryType? = null,
@@ -23,6 +25,7 @@ data class CatchPolicy(
     val alwaysCatchShiny: Boolean = true,
     val alwaysCatchHundo: Boolean = true,
     val minimumIvPercent: Double? = null,
+    val throwProfile: ThrowProfile = ThrowProfile(),
 ) {
     init {
         require(minimumIvPercent == null || minimumIvPercent in 0.0..100.0) {

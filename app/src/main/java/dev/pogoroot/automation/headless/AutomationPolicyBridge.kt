@@ -2,13 +2,23 @@ package dev.pogoroot.automation.headless
 
 import dev.pogoroot.automation.core.automation.AutomationPolicy
 import dev.pogoroot.automation.core.automation.BerryType
+import dev.pogoroot.automation.core.automation.ThrowProfile
 import dev.pogoroot.automation.core.automation.InventoryPolicy
 import dev.pogoroot.automation.core.automation.TransferPolicy
 
 fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy(
     autoEncounter = autoEncounter,
     autoCatch = autoCatch,
+    autoSnapshotDuringEncounter = autoSnapshotDuringEncounter,
+    snapshotEncounterMode = snapshotEncounterMode,
     autoCloseCatchPreview = autoCloseCatchPreview,
+    catchPolicy = dev.pogoroot.automation.core.automation.CatchPolicy(
+        throwProfile = ThrowProfile(
+            qualityTarget = catchThrowQuality,
+            curvePreference = catchCurvePreference,
+            encounterMode = catchEncounterMode,
+        ),
+    ),
     autoSpin = autoSpin,
     autoDiscard = autoDiscard,
     autoTransfer = autoTransfer,

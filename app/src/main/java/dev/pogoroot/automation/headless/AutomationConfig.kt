@@ -1,6 +1,9 @@
 package dev.pogoroot.automation.headless
 
 import android.content.Context
+import dev.pogoroot.automation.core.automation.CurvePreference
+import dev.pogoroot.automation.core.automation.EncounterMode
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 
 enum class BerryMode {
     NONE,
@@ -14,6 +17,11 @@ enum class BerryMode {
 data class HeadlessAutomationConfig(
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
+    val catchThrowQuality: ThrowQualityTarget = ThrowQualityTarget.ANY,
+    val catchCurvePreference: CurvePreference = CurvePreference.ANY,
+    val catchEncounterMode: EncounterMode = EncounterMode.STANDARD,
+    val autoSnapshotDuringEncounter: Boolean = false,
+    val snapshotEncounterMode: EncounterMode = EncounterMode.STANDARD,
     /** Accept verified MAP_TARGET observations and start app-side walking. */
     val mapTapWalkEnabled: Boolean = false,
     /** Only effective when the verified runtime advertises CATCH_AND_CLOSE_PREVIEW. */
@@ -57,6 +65,11 @@ class AutomationConfigRepository(context: Context) {
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
         enabled = prefs.getBoolean(KEY_ENABLED, false),
         autoCatch = prefs.getBoolean(KEY_AUTO_CATCH, true),
+        catchThrowQuality = enumPreference(KEY_THROW_QUALITY, ThrowQualityTarget.ANY),
+        catchCurvePreference = enumPreference(KEY_THROW_CURVE, CurvePreference.ANY),
+        catchEncounterMode = enumPreference(KEY_CATCH_ENCOUNTER_MODE, EncounterMode.STANDARD),
+        autoSnapshotDuringEncounter = prefs.getBoolean(KEY_AUTO_SNAPSHOT, false),
+        snapshotEncounterMode = enumPreference(KEY_SNAPSHOT_ENCOUNTER_MODE, EncounterMode.STANDARD),
         mapTapWalkEnabled = prefs.getBoolean(KEY_MAP_TAP_WALK, false),
         autoCloseCatchPreview = prefs.getBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, false),
         autoSpin = prefs.getBoolean(KEY_AUTO_SPIN, true),
@@ -89,6 +102,11 @@ class AutomationConfigRepository(context: Context) {
         prefs.edit()
             .putBoolean(KEY_ENABLED, next.enabled)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
+            .putString(KEY_THROW_QUALITY, next.catchThrowQuality.name)
+            .putString(KEY_THROW_CURVE, next.catchCurvePreference.name)
+            .putString(KEY_CATCH_ENCOUNTER_MODE, next.catchEncounterMode.name)
+            .putBoolean(KEY_AUTO_SNAPSHOT, next.autoSnapshotDuringEncounter)
+            .putString(KEY_SNAPSHOT_ENCOUNTER_MODE, next.snapshotEncounterMode.name)
             .putBoolean(KEY_MAP_TAP_WALK, next.mapTapWalkEnabled)
             .putBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, next.autoCloseCatchPreview)
             .putBoolean(KEY_AUTO_SPIN, next.autoSpin)
@@ -150,10 +168,19 @@ class AutomationConfigRepository(context: Context) {
         }.toMap()
     }
 
+    private inline fun <reified T : Enum<T>> enumPreference(key: String, default: T): T = runCatching {
+        enumValueOf<T>(prefs.getString(key, default.name) ?: default.name)
+    }.getOrDefault(default)
+
     companion object {
         private const val PREFS_NAME = "headless_automation"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_AUTO_CATCH = "auto_catch"
+        private const val KEY_THROW_QUALITY = "catch_throw_quality"
+        private const val KEY_THROW_CURVE = "catch_throw_curve"
+        private const val KEY_CATCH_ENCOUNTER_MODE = "catch_encounter_mode"
+        private const val KEY_AUTO_SNAPSHOT = "auto_snapshot_during_encounter"
+        private const val KEY_SNAPSHOT_ENCOUNTER_MODE = "snapshot_encounter_mode"
         private const val KEY_MAP_TAP_WALK = "map_tap_walk"
         private const val KEY_AUTO_CLOSE_CATCH_PREVIEW = "auto_close_catch_preview"
         private const val KEY_AUTO_SPIN = "auto_spin"

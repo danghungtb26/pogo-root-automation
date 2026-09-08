@@ -132,4 +132,26 @@ class AutomationCoordinatorTest {
         assertTrue(enabled.closePreviewAfterCaught)
         assertTrue(!disabled.closePreviewAfterCaught)
     }
+
+    @Test
+    fun `plans encounter snapshot before catch`() {
+        val actions = coordinator.plan(
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.ENCOUNTER,
+                encounter = EncounterSnapshot(
+                    encounterId = "encounter-1",
+                    speciesId = 25,
+                    speciesName = "Pikachu",
+                    observedAtEpochMs = 1_000L,
+                ),
+            ),
+            policy = AutomationPolicy(
+                autoCatch = true,
+                autoSnapshotDuringEncounter = true,
+            ),
+        )
+
+        assertTrue(actions.first() is AutomationAction.TakeEncounterSnapshot)
+        assertTrue(actions.last() is AutomationAction.Catch)
+    }
 }
