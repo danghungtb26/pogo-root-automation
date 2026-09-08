@@ -49,6 +49,12 @@ The controller APK now includes a PogoEnhancer-style floating joystick:
 - coordinate display
 - teleport dialog
 - persisted last location
+- compact draggable float icon with shortcut menu
+- quick automation toggles and grouped settings submenus
+- full-screen settings Activity with a category ListView and Fragment-based editors
+- minimal joystick pad opened on demand
+- independent draggable cooldown badge rendered as `HH:MM`
+- persisted positions for the float icon and cooldown badge
 
 From the controller app, tap **Start built-in joystick**. Android will ask for **Display over other apps** permission the first time. The overlay then starts a foreground service and requests the mock-location app-op through `su`.
 

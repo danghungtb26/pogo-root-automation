@@ -6,10 +6,10 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
-import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
+import android.graphics.Typeface
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -18,24 +18,23 @@ import android.view.ContextThemeWrapper
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.EditText
-import android.widget.LinearLayout
+import android.widget.FrameLayout
 import android.widget.TextView
 import dev.pogoroot.automation.MainActivity
+import dev.pogoroot.automation.core.model.GeoPoint
+import dev.pogoroot.automation.core.time.TeleportCooldown
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.core.time.TeleportCooldownService
-import dev.pogoroot.automation.core.time.TeleportCooldown
-import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.headless.LastActiveGameAction
 import dev.pogoroot.automation.headless.LastActiveLocationRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
-import io.github.controlwear.virtual.joystick.android.JoystickView
 import java.util.Locale
+import kotlin.math.max
 
 class JoystickOverlayService : Service() {
     companion object {
@@ -44,14 +43,15 @@ class JoystickOverlayService : Service() {
 
         private const val CHANNEL_ID = "pogo_joystick"
         private const val NOTIFICATION_ID = 4107
-        private const val PREFS = "built_in_joystick"
-        private const val PREF_LAT = "latitude"
-        private const val PREF_LON = "longitude"
-        private const val PREF_COOLDOWN_STARTED_AT = "cooldown_started_at"
-        private const val PREF_COOLDOWN_READY_AT = "cooldown_ready_at"
-        private const val PREF_COOLDOWN_DISTANCE = "cooldown_distance"
-        private const val PREF_COOLDOWN_MODE = "cooldown_mode"
         private const val COOLDOWN_REFRESH_MS = 1_000L
+        private const val DEFAULT_EDGE_MARGIN_DP = 16
+        private const val DEFAULT_BOTTOM_MARGIN_DP = 24
+    }
+
+    private enum class MainOverlayMode {
+        COLLAPSED,
+        SHORTCUTS,
+        JOYSTICK,
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -60,24 +60,34 @@ class JoystickOverlayService : Service() {
     private lateinit var windowManager: WindowManager
     private lateinit var controller: JoystickLocationController
     private lateinit var automationConfigRepository: AutomationConfigRepository
-    private lateinit var rootView: LinearLayout
+    private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
+    private lateinit var positionStore: OverlayPositionStore
+    private lateinit var shortcutMenu: ShortcutMenuView
+    private lateinit var joystickPad: JoystickPadView
+    private lateinit var rootView: FrameLayout
     private lateinit var windowParams: WindowManager.LayoutParams
-    private lateinit var statusView: TextView
-    private lateinit var locationView: TextView
-    private lateinit var speedButton: Button
-    private lateinit var automationSummaryView: TextView
+    private lateinit var floatButton: TextView
     private lateinit var cooldownView: TextView
-    private lateinit var cooldownModeButton: Button
+    private lateinit var cooldownWindowParams: WindowManager.LayoutParams
 
+    private val cooldownService = TeleportCooldownService()
     private var controllerStarted = false
     private var speedPresetIndex = 2
     private var lastPersistAt = 0L
     private var latestTeleportCooldown: TeleportCooldown? = null
     private var cooldownMode = TeleportCooldownMode.CURRENT_POSITION
-    private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
-    private val cooldownService = TeleportCooldownService()
+    private var mainMode = MainOverlayMode.COLLAPSED
+    private var mainAnchorX = 0
+    private var mainAnchorY = 0
+    private var iconSizePx = 0
+    private var cooldownWidthPx = 0
+    private var cooldownHeightPx = 0
+    private var edgeMarginPx = 0
+    private var bottomMarginPx = 0
+
     private val cooldownTick = object : Runnable {
         override fun run() {
+            renderShortcutStates()
             renderCooldown()
             mainHandler.postDelayed(this, COOLDOWN_REFRESH_MS)
         }
@@ -88,8 +98,9 @@ class JoystickOverlayService : Service() {
         windowManager = getSystemService(WindowManager::class.java)
         automationConfigRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
-        latestTeleportCooldown = loadSavedCooldown()
-        cooldownMode = loadCooldownMode()
+        positionStore = OverlayPositionStore(this)
+        latestTeleportCooldown = positionStore.loadCooldown()
+        cooldownMode = positionStore.loadCooldownMode()
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
 
@@ -106,7 +117,7 @@ class JoystickOverlayService : Service() {
         }
 
         ensureOverlay()
-        renderAutomationSummary()
+        renderShortcutStates()
         renderCooldown()
         mainHandler.removeCallbacks(cooldownTick)
         mainHandler.post(cooldownTick)
@@ -119,12 +130,31 @@ class JoystickOverlayService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        mainHandler.post {
+            if (::rootView.isInitialized) {
+                clampMainAnchor()
+                persistMainPosition()
+                relayoutMainOverlay()
+            }
+            if (::cooldownView.isInitialized) {
+                clampCooldownPosition()
+                persistCooldownPosition()
+                runCatching { windowManager.updateViewLayout(cooldownView, cooldownWindowParams) }
+            }
+        }
+    }
+
     override fun onDestroy() {
         mainHandler.removeCallbacks(cooldownTick)
         if (controllerStarted) {
             persistPoint(controller.snapshot().point)
             controller.stop()
             controllerStarted = false
+        }
+        if (::cooldownView.isInitialized) {
+            runCatching { windowManager.removeView(cooldownView) }
         }
         if (::rootView.isInitialized) {
             runCatching { windowManager.removeView(rootView) }
@@ -135,280 +165,261 @@ class JoystickOverlayService : Service() {
     private fun ensureOverlay() {
         if (::rootView.isInitialized) return
 
-        val density = resources.displayMetrics.density
-        val padding = (10 * density).toInt()
-        val panelWidth = (230 * density).toInt()
+        iconSizePx = dp(56)
+        edgeMarginPx = dp(DEFAULT_EDGE_MARGIN_DP)
+        bottomMarginPx = dp(DEFAULT_BOTTOM_MARGIN_DP)
+        cooldownWidthPx = dp(82)
+        cooldownHeightPx = dp(44)
 
-        statusView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            text = "Starting mock location…"
-        }
-        locationView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            text = "Teleport to a location first"
-        }
-        automationSummaryView = TextView(this).apply {
-            setTextColor(0xFFE8EAED.toInt())
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, padding / 2, 0, padding / 2)
-        }
-        cooldownView = TextView(this).apply {
-            setTextColor(0xFFFFE082.toInt())
-            textSize = 11f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, padding / 2, 0, padding / 2)
-            text = "Teleport cooldown (estimate): inactive"
-        }
-        cooldownModeButton = Button(this).apply {
-            text = "Cooldown mode: ${cooldownMode.label}"
-            setOnClickListener {
-                cooldownMode = when (cooldownMode) {
-                    TeleportCooldownMode.CURRENT_POSITION -> TeleportCooldownMode.LAST_ACTIVE
-                    TeleportCooldownMode.LAST_ACTIVE -> TeleportCooldownMode.CURRENT_POSITION
-                }
-                persistCooldownMode()
-                updateCooldownModeLabel()
-                renderCooldown()
-            }
-        }
-
-        val header = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 15f
-            text = "PoGo Tools  ↕"
+        floatButton = TextView(this).apply {
             gravity = Gravity.CENTER
-            setPadding(0, padding / 2, 0, padding / 2)
-        }
-
-        val joystick = JoystickView(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                (190 * density).toInt(),
-                (190 * density).toInt(),
-            ).apply { gravity = Gravity.CENTER_HORIZONTAL }
-            setOnMoveListener(object : JoystickView.OnMoveListener {
-                override fun onMove(angle: Int, strength: Int) {
-                    controller.setJoystick(angle, strength)
-                }
-            })
-        }
-
-        speedButton = Button(this).apply {
-            text = "Speed ${speedPresets[speedPresetIndex].formatSpeed()} km/h"
+            text = "✣"
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            isClickable = true
+            isFocusable = true
+            contentDescription = "PoGo Tools menu"
             setOnClickListener {
-                speedPresetIndex = (speedPresetIndex + 1) % speedPresets.size
-                val speed = speedPresets[speedPresetIndex]
-                controller.setMaxSpeedKmh(speed)
-                text = "Speed ${speed.formatSpeed()} km/h"
+                setMainMode(
+                    when (mainMode) {
+                        MainOverlayMode.COLLAPSED -> MainOverlayMode.SHORTCUTS
+                        MainOverlayMode.SHORTCUTS -> MainOverlayMode.COLLAPSED
+                        MainOverlayMode.JOYSTICK -> MainOverlayMode.SHORTCUTS
+                    },
+                )
             }
         }
-
-        val settingsButton = Button(this).apply {
-            text = "⚙ Automation Settings"
-            setOnClickListener {
-                AutomationSettingsDialog(this@JoystickOverlayService, automationConfigRepository).show()
-                mainHandler.postDelayed(::renderAutomationSummary, 500L)
-            }
-        }
-        val teleportButton = Button(this).apply {
-            text = "Teleport"
-            setOnClickListener { showTeleportDialog() }
-        }
-        val stopButton = Button(this).apply {
-            text = "Close"
-            setOnClickListener { stopSelf() }
-        }
-
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-            addView(teleportButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-            addView(stopButton, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        }
-
-        rootView = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(padding, padding, padding, padding)
-            background = GradientDrawable().apply {
-                setColor(0xDD202124.toInt())
-                cornerRadius = 14 * density
-            }
-            addView(header)
-            addView(statusView)
-            addView(locationView)
-            addView(automationSummaryView)
-            addView(cooldownView)
-            addView(cooldownModeButton)
-            addView(settingsButton)
-            addView(joystick)
-            addView(speedButton)
-            addView(actions)
-        }
-
-        windowParams = WindowManager.LayoutParams(
-            panelWidth,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                @Suppress("DEPRECATION")
-                WindowManager.LayoutParams.TYPE_PHONE
+        OverlayDragHandler(
+            context = this,
+            readPosition = { OverlayPosition(mainAnchorX, mainAnchorY) },
+            writePosition = { position ->
+                mainAnchorX = position.x
+                mainAnchorY = position.y
+                clampMainAnchor()
             },
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-            android.graphics.PixelFormat.TRANSLUCENT,
-        ).apply {
-            gravity = Gravity.START or Gravity.BOTTOM
-            x = padding
-            y = padding * 3
-        }
+            onMove = ::relayoutMainOverlay,
+            onDrop = ::persistMainPosition,
+        ).attachTo(floatButton)
 
-        makeDraggable(header)
-        windowManager.addView(rootView, windowParams)
-    }
+        shortcutMenu = ShortcutMenuView(
+            context = this,
+            speedPresets = speedPresets,
+            onToggle = ::toggleAutomation,
+            onJoystick = { setMainMode(MainOverlayMode.JOYSTICK) },
+            onTeleport = {
+                setMainMode(MainOverlayMode.COLLAPSED)
+                showTeleportDialog()
+            },
+            onSpeed = {
+                speedPresetIndex = (speedPresetIndex + 1) % speedPresets.size
+                controller.setMaxSpeedKmh(speedPresets[speedPresetIndex])
+                renderShortcutStates()
+            },
+            onSettings = {
+                setMainMode(MainOverlayMode.COLLAPSED)
+                startActivity(
+                    Intent(this@JoystickOverlayService, AutomationSettingsActivity::class.java)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            },
+            onClose = { stopSelf() },
+        )
+        joystickPad = JoystickPadView(
+            context = this,
+            onMove = controller::setJoystick,
+            onClose = { setMainMode(MainOverlayMode.SHORTCUTS) },
+        )
 
-    private fun renderAutomationSummary() {
-        if (!::automationSummaryView.isInitialized) return
-        val config = automationConfigRepository.read()
-        automationSummaryView.text = buildString {
-            append("Catch=${onOff(config.autoCatch)} Spin=${onOff(config.autoSpin)}")
-            append("\nDiscard=${onOff(config.autoDiscard)} Transfer=${onOff(config.autoTransfer)}")
-            append("\nBerry=${config.berryMode.name}")
-        }
-    }
-
-    private fun renderCooldown() {
-        if (!::cooldownView.isInitialized) return
-        val lastActive = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
-            lastActiveLocationRepository.read()
-        } else {
-            null
-        }
-        val currentPoint = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
-            controller.snapshot().point ?: loadSavedPoint()
-        } else {
-            null
-        }
-        val cooldown = when (cooldownMode) {
-            TeleportCooldownMode.CURRENT_POSITION -> latestTeleportCooldown
-            TeleportCooldownMode.LAST_ACTIVE -> lastActiveCooldown(lastActive, currentPoint)
-        }
-        if (cooldown == null) {
-            cooldownView.text = when (cooldownMode) {
-                TeleportCooldownMode.CURRENT_POSITION ->
-                    "Current position cooldown: inactive"
-                TeleportCooldownMode.LAST_ACTIVE -> when {
-                    lastActive == null -> "Last active cooldown: inactive (no spin/catch)"
-                    currentPoint == null -> "Last active cooldown: waiting for location"
-                    else -> "Last active cooldown: inactive"
+        rootView = FrameLayout(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            setOnTouchListener { _, event ->
+                if (event.actionMasked == MotionEvent.ACTION_OUTSIDE &&
+                    mainMode != MainOverlayMode.COLLAPSED
+                ) {
+                    setMainMode(MainOverlayMode.COLLAPSED)
+                    true
+                } else {
+                    false
                 }
             }
+            addView(shortcutMenu.view, FrameLayout.LayoutParams(dp(244), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(joystickPad, FrameLayout.LayoutParams(dp(214), ViewGroup.LayoutParams.WRAP_CONTENT))
+            addView(floatButton, FrameLayout.LayoutParams(iconSizePx, iconSizePx))
+        }
+
+        val defaultX = edgeMarginPx
+        val defaultY = (displayHeight() - iconSizePx - bottomMarginPx).coerceAtLeast(0)
+        val savedMainPosition = positionStore.loadMainPosition(OverlayPosition(defaultX, defaultY))
+        mainAnchorX = savedMainPosition.x
+        mainAnchorY = savedMainPosition.y
+        clampMainAnchor()
+
+        windowParams = newOverlayParams(iconSizePx, iconSizePx).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = mainAnchorX
+            y = mainAnchorY
+        }
+        windowManager.addView(rootView, windowParams)
+        setMainMode(MainOverlayMode.COLLAPSED)
+        ensureCooldownOverlay()
+    }
+
+    private fun setMainMode(mode: MainOverlayMode) {
+        mainMode = mode
+        if (!::rootView.isInitialized) return
+
+        shortcutMenu.view.visibility = if (mode == MainOverlayMode.SHORTCUTS) View.VISIBLE else View.GONE
+        joystickPad.visibility = if (mode == MainOverlayMode.JOYSTICK) View.VISIBLE else View.GONE
+        floatButton.visibility = View.VISIBLE
+        renderShortcutStates()
+        rootView.post(::relayoutMainOverlay)
+    }
+
+    private fun relayoutMainOverlay() {
+        if (!::rootView.isInitialized || !::windowParams.isInitialized) return
+
+        if (mainMode == MainOverlayMode.COLLAPSED) {
+            floatButton.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx)
+            windowParams.width = iconSizePx
+            windowParams.height = iconSizePx
+            windowParams.x = clamp(mainAnchorX, displayWidth() - iconSizePx)
+            windowParams.y = clamp(mainAnchorY, displayHeight() - iconSizePx)
+            runCatching { windowManager.updateViewLayout(rootView, windowParams) }
             return
         }
 
-        val remaining = cooldown.remainingMillis(System.currentTimeMillis())
-        val actionSuffix = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
-            " · ${lastActive?.action}"
-        } else {
-            ""
+        val panel = if (mainMode == MainOverlayMode.SHORTCUTS) shortcutMenu.view else joystickPad
+        val panelWidth = panel.layoutParams.width.takeIf { it > 0 } ?: dp(214)
+        val panelMeasureSpec = View.MeasureSpec.makeMeasureSpec(panelWidth, View.MeasureSpec.EXACTLY)
+        panel.measure(panelMeasureSpec, View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+        val panelHeight = panel.measuredHeight
+        val rootWidth = panelWidth + dp(8) + iconSizePx
+        val rootHeight = max(panelHeight, iconSizePx)
+        val opensLeft = mainAnchorX > displayWidth() - iconSizePx - dp(8) - panelWidth
+        val panelLeft = if (opensLeft) 0 else iconSizePx + dp(8)
+        val floatLeft = if (opensLeft) panelWidth + dp(8) else 0
+        val rootLeft = if (opensLeft) mainAnchorX - panelWidth - dp(8) else mainAnchorX
+        val rootTop = mainAnchorY - (rootHeight - iconSizePx) / 2
+
+        panel.layoutParams = FrameLayout.LayoutParams(panelWidth, panelHeight).apply {
+            leftMargin = panelLeft
+            topMargin = 0
         }
-        cooldownView.text = if (remaining == 0L) {
-            "${cooldownMode.label}: Ready (~${cooldown.distanceMeters / 1_000.0} km)$actionSuffix"
-        } else {
-            String.format(
-                Locale.US,
-                "%s: %s (~%.1f km)%s",
-                cooldownMode.label,
-                formatDuration(remaining),
-                cooldown.distanceMeters / 1_000.0,
-                actionSuffix,
-            )
+        floatButton.layoutParams = FrameLayout.LayoutParams(iconSizePx, iconSizePx).apply {
+            leftMargin = floatLeft
+            topMargin = (rootHeight - iconSizePx) / 2
         }
+        windowParams.width = rootWidth
+        windowParams.height = rootHeight
+        windowParams.x = clamp(rootLeft, displayWidth() - rootWidth)
+        windowParams.y = clamp(rootTop, displayHeight() - rootHeight)
+        runCatching { windowManager.updateViewLayout(rootView, windowParams) }
     }
 
-    private fun lastActiveCooldown(
-        activity: LastActiveGameAction?,
-        destination: GeoPoint?,
-    ): TeleportCooldown? {
-        activity ?: return null
-        destination ?: return null
-        return cooldownService.forLastActive(
-            lastActivePoint = activity.point,
-            lastActiveAtEpochMs = activity.activeAtEpochMs,
-            destination = destination,
+    private fun ensureCooldownOverlay() {
+        if (::cooldownView.isInitialized) return
+
+        cooldownView = TextView(this).apply {
+            gravity = Gravity.CENTER
+            textSize = 16f
+            typeface = Typeface.MONOSPACE
+            setTextColor(0xFFFFE082.toInt())
+            background = roundedBackground(0xE6202124.toInt(), 12)
+            setPadding(dp(6), 0, dp(6), 0)
+            contentDescription = "Cooldown"
+            visibility = View.INVISIBLE
+        }
+        val defaultX = (displayWidth() - cooldownWidthPx - edgeMarginPx).coerceAtLeast(0)
+        val defaultY = edgeMarginPx
+        val savedPosition = positionStore.loadCooldownPosition(
+            OverlayPosition(
+                x = defaultX,
+                y = defaultY,
+            ),
         )
-    }
-
-    private fun updateCooldownModeLabel() {
-        if (!::cooldownModeButton.isInitialized) return
-        cooldownModeButton.text = "Cooldown mode: ${cooldownMode.label}"
-    }
-
-    private fun persistCooldownMode() {
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putString(PREF_COOLDOWN_MODE, cooldownMode.name)
-            .apply()
-    }
-
-    private fun loadCooldownMode(): TeleportCooldownMode =
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(PREF_COOLDOWN_MODE, null)
-            ?.let { value -> runCatching { TeleportCooldownMode.valueOf(value) }.getOrNull() }
-            ?: TeleportCooldownMode.CURRENT_POSITION
-
-    private val TeleportCooldownMode.label: String
-        get() = when (this) {
-            TeleportCooldownMode.CURRENT_POSITION -> "Current position"
-            TeleportCooldownMode.LAST_ACTIVE -> "Last active"
+        cooldownWindowParams = newOverlayParams(cooldownWidthPx, cooldownHeightPx).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = savedPosition.x
+            y = savedPosition.y
         }
+        clampCooldownPosition()
+        windowManager.addView(cooldownView, cooldownWindowParams)
+        OverlayDragHandler(
+            context = this,
+            readPosition = { OverlayPosition(cooldownWindowParams.x, cooldownWindowParams.y) },
+            writePosition = { position ->
+                cooldownWindowParams.x = position.x
+                cooldownWindowParams.y = position.y
+                clampCooldownPosition()
+            },
+            onMove = {
+                runCatching { windowManager.updateViewLayout(cooldownView, cooldownWindowParams) }
+            },
+            onDrop = ::persistCooldownPosition,
+        ).attachTo(cooldownView)
+    }
 
-    private fun formatDuration(remainingMillis: Long): String {
-        val totalSeconds = (remainingMillis + 999L) / 1_000L
-        val hours = totalSeconds / 3_600L
-        val minutes = (totalSeconds % 3_600L) / 60L
-        val seconds = totalSeconds % 60L
-        return if (hours > 0L) {
-            String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds)
+    private fun renderShortcutStates() {
+        if (!::floatButton.isInitialized) return
+        val config = automationConfigRepository.read()
+        shortcutMenu.render(config, speedPresetIndex)
+        floatButton.background = roundedBackground(
+            if (config.enabled) 0xE62E7D32.toInt() else 0xE6202124.toInt(),
+            28,
+        )
+        floatButton.contentDescription = if (config.enabled) {
+            "PoGo Tools menu, automation on"
         } else {
-            String.format(Locale.US, "%02d:%02d", minutes, seconds)
+            "PoGo Tools menu, automation off"
         }
     }
 
-    private fun onOff(value: Boolean): String = if (value) "ON" else "OFF"
+    private fun toggleAutomation(key: String) {
+        val current = automationConfigRepository.read()
+        val currentValue = when (key) {
+            "automation" -> current.enabled
+            "catch" -> current.autoCatch
+            "spin" -> current.autoSpin
+            "encounter" -> current.autoEncounter
+            "discard" -> current.autoDiscard
+            "transfer" -> current.autoTransfer
+            else -> return
+        }
+        val nextValue = !currentValue
+        if (nextValue && (key == "discard" || key == "transfer")) {
+            val label = if (key == "discard") "Auto discard" else "Auto transfer"
+            val themed = ContextThemeWrapper(this, android.R.style.Theme_Material_Light_Dialog_Alert)
+            val dialog = AlertDialog.Builder(themed)
+                .setTitle("Enable $label?")
+                .setMessage("This automation can change game inventory or Pokémon. Continue?")
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Enable") { _, _ -> applyAutomationToggle(key, true) }
+                .create()
+            dialog.window?.setType(overlayWindowType())
+            dialog.show()
+        } else {
+            applyAutomationToggle(key, nextValue)
+        }
+    }
 
-    private fun makeDraggable(handle: View) {
-        var initialX = 0
-        var initialY = 0
-        var initialTouchX = 0f
-        var initialTouchY = 0f
-
-        handle.setOnTouchListener { _, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = windowParams.x
-                    initialY = windowParams.y
-                    initialTouchX = event.rawX
-                    initialTouchY = event.rawY
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    windowParams.x = initialX + (event.rawX - initialTouchX).toInt()
-                    windowParams.y = initialY - (event.rawY - initialTouchY).toInt()
-                    windowManager.updateViewLayout(rootView, windowParams)
-                    true
-                }
-                else -> false
+    private fun applyAutomationToggle(key: String, enabled: Boolean) {
+        automationConfigRepository.update { current ->
+            when (key) {
+                "automation" -> current.copy(enabled = enabled)
+                "catch" -> current.copy(autoCatch = enabled)
+                "spin" -> current.copy(autoSpin = enabled)
+                "encounter" -> current.copy(autoEncounter = enabled)
+                "discard" -> current.copy(autoDiscard = enabled)
+                "transfer" -> current.copy(autoTransfer = enabled)
+                else -> current
             }
         }
+        renderShortcutStates()
     }
 
     private fun showTeleportDialog() {
         val themedContext = ContextThemeWrapper(this, android.R.style.Theme_Material_Light_Dialog_Alert)
-        val input = EditText(themedContext).apply {
+        val input = android.widget.EditText(themedContext).apply {
             hint = "21.0285, 105.8542"
             setSingleLine(true)
             controller.snapshot().point?.let { point ->
@@ -425,14 +436,7 @@ class JoystickOverlayService : Service() {
             .setNegativeButton("Cancel", null)
             .create()
 
-        dialog.window?.setType(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                @Suppress("DEPRECATION")
-                WindowManager.LayoutParams.TYPE_PHONE
-            },
-        )
+        dialog.window?.setType(overlayWindowType())
         dialog.setOnShowListener {
             dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 val point = parsePoint(input.text.toString())
@@ -458,40 +462,66 @@ class JoystickOverlayService : Service() {
 
     private fun onLocationStateChanged(state: JoystickLocationState) {
         mainHandler.post {
-            if (!::statusView.isInitialized) return@post
-
-            statusView.text = when {
-                state.error != null -> "Mock location error: ${state.error}"
-                state.providerReady -> "Mock location: ready (root)"
-                else -> "Mock location: preparing…"
-            }
-            locationView.text = state.point?.let { point ->
-                String.format(
-                    Locale.US,
-                    "%.6f, %.6f\n%.1f km/h · %.0f°",
-                    point.latitude,
-                    point.longitude,
-                    state.currentSpeedKmh,
-                    state.bearingDegrees,
-                )
-            } ?: "Teleport to a location first"
             state.teleportCooldown?.let { cooldown ->
                 latestTeleportCooldown = cooldown
                 persistCooldown(cooldown)
             }
             renderCooldown()
-
             persistPointOccasionally(state.point)
         }
     }
 
-    private fun loadSavedPoint(): GeoPoint? {
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!prefs.contains(PREF_LAT) || !prefs.contains(PREF_LON)) return null
-        val latitude = Double.fromBits(prefs.getLong(PREF_LAT, 0L))
-        val longitude = Double.fromBits(prefs.getLong(PREF_LON, 0L))
-        return GeoPoint(latitude, longitude)
+    private fun renderCooldown() {
+        if (!::cooldownView.isInitialized) return
+        cooldownMode = positionStore.loadCooldownMode()
+
+        val lastActive = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
+            lastActiveLocationRepository.read()
+        } else {
+            null
+        }
+        val currentPoint = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
+            controller.snapshot().point ?: loadSavedPoint()
+        } else {
+            null
+        }
+        val cooldown = when (cooldownMode) {
+            TeleportCooldownMode.CURRENT_POSITION -> latestTeleportCooldown
+            TeleportCooldownMode.LAST_ACTIVE -> lastActiveCooldown(lastActive, currentPoint)
+        }
+        val remaining = cooldown?.remainingMillis(System.currentTimeMillis()) ?: 0L
+        if (remaining <= 0L) {
+            cooldownView.visibility = View.INVISIBLE
+            return
+        }
+
+        val text = formatCooldown(remaining)
+        cooldownView.text = text
+        cooldownView.contentDescription = "Cooldown $text"
+        cooldownView.visibility = View.VISIBLE
     }
+
+    private fun formatCooldown(remainingMillis: Long): String {
+        val totalMinutes = (remainingMillis + 59_999L) / 60_000L
+        val hours = totalMinutes / 60L
+        val minutes = totalMinutes % 60L
+        return String.format(Locale.US, "%02d:%02d", hours, minutes)
+    }
+
+    private fun lastActiveCooldown(
+        activity: LastActiveGameAction?,
+        destination: GeoPoint?,
+    ): TeleportCooldown? {
+        activity ?: return null
+        destination ?: return null
+        return cooldownService.forLastActive(
+            lastActivePoint = activity.point,
+            lastActiveAtEpochMs = activity.activeAtEpochMs,
+            destination = destination,
+        )
+    }
+
+    private fun loadSavedPoint(): GeoPoint? = positionStore.loadPoint()
 
     private fun persistPointOccasionally(point: GeoPoint?) {
         val now = android.os.SystemClock.elapsedRealtime()
@@ -501,41 +531,38 @@ class JoystickOverlayService : Service() {
     }
 
     private fun persistPoint(point: GeoPoint?) {
-        if (point == null) return
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putLong(PREF_LAT, point.latitude.toBits())
-            .putLong(PREF_LON, point.longitude.toBits())
-            .apply()
-    }
-
-    private fun loadSavedCooldown(): TeleportCooldown? {
-        val prefs = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!prefs.contains(PREF_COOLDOWN_STARTED_AT) ||
-            !prefs.contains(PREF_COOLDOWN_READY_AT) ||
-            !prefs.contains(PREF_COOLDOWN_DISTANCE)
-        ) {
-            return null
-        }
-
-        val distanceMeters = Double.fromBits(prefs.getLong(PREF_COOLDOWN_DISTANCE, 0L))
-        val startedAtEpochMs = prefs.getLong(PREF_COOLDOWN_STARTED_AT, 0L)
-        val readyAtEpochMs = prefs.getLong(PREF_COOLDOWN_READY_AT, 0L)
-        if (!distanceMeters.isFinite() || distanceMeters < 0.0 || readyAtEpochMs < startedAtEpochMs) {
-            return null
-        }
-
-        return TeleportCooldown(distanceMeters, startedAtEpochMs, readyAtEpochMs)
+        positionStore.persistPoint(point)
     }
 
     private fun persistCooldown(cooldown: TeleportCooldown) {
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit()
-            .putLong(PREF_COOLDOWN_STARTED_AT, cooldown.startedAtEpochMs)
-            .putLong(PREF_COOLDOWN_READY_AT, cooldown.readyAtEpochMs)
-            .putLong(PREF_COOLDOWN_DISTANCE, cooldown.distanceMeters.toBits())
-            .apply()
+        positionStore.persistCooldown(cooldown)
     }
+
+    private fun persistMainPosition() {
+        positionStore.persistMainPosition(OverlayPosition(mainAnchorX, mainAnchorY))
+    }
+
+    private fun persistCooldownPosition() {
+        positionStore.persistCooldownPosition(
+            OverlayPosition(cooldownWindowParams.x, cooldownWindowParams.y),
+        )
+    }
+
+    private fun clampMainAnchor() {
+        mainAnchorX = clamp(mainAnchorX, displayWidth() - iconSizePx)
+        mainAnchorY = clamp(mainAnchorY, displayHeight() - iconSizePx)
+    }
+
+    private fun clampCooldownPosition() {
+        cooldownWindowParams.x = clamp(cooldownWindowParams.x, displayWidth() - cooldownWidthPx)
+        cooldownWindowParams.y = clamp(cooldownWindowParams.y, displayHeight() - cooldownHeightPx)
+    }
+
+    private fun displayWidth(): Int = resources.displayMetrics.widthPixels
+
+    private fun displayHeight(): Int = resources.displayMetrics.heightPixels
+
+    private fun clamp(value: Int, maxValue: Int): Int = value.coerceIn(0, max(0, maxValue))
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -567,15 +594,10 @@ class JoystickOverlayService : Service() {
         return builder
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PoGo built-in joystick")
-            .setContentText("Joystick + automation settings overlay is active")
+            .setContentText("Joystick + shortcut overlay is active")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
     }
 
-    private fun Double.formatSpeed(): String = if (this % 1.0 == 0.0) {
-        toInt().toString()
-    } else {
-        String.format(Locale.US, "%.1f", this)
-    }
 }

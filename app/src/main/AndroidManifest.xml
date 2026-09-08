@@ -23,6 +23,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".overlay.AutomationSettingsActivity"
+            android:exported="false" />
+
         <receiver
             android:name=".headless.AutomationBootReceiver"
             android:enabled="true"
