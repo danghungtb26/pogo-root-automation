@@ -89,21 +89,14 @@ class AutomationControlServer(
             engine.start()
             ApiResponse(200, configJson(config))
         }
-        method == "POST" && path == "/v1/actions/catch" -> {
-            engine.manualCatch().getOrThrow()
-            ApiResponse(200, "{\"ok\":true,\"action\":\"catch\"}")
-        }
-        method == "POST" && path == "/v1/actions/spin" -> {
-            engine.manualSpin().getOrThrow()
-            ApiResponse(200, "{\"ok\":true,\"action\":\"spin\"}")
-        }
         else -> ApiResponse(404, jsonError("not found"))
     }
 
     private fun applyParams(config: HeadlessAutomationConfig, params: Map<String, String>): HeadlessAutomationConfig = config.copy(
         autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
         autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
-        encounterSweep = params.boolean("encounterSweep") ?: config.encounterSweep,
+        // The old encounterSweep query parameter is intentionally ignored.
+        autoEncounter = params.boolean("autoEncounter") ?: config.autoEncounter,
         autoDiscard = params.boolean("autoDiscard") ?: config.autoDiscard,
         autoTransfer = params.boolean("autoTransfer") ?: config.autoTransfer,
         transferKeepHundo = params.boolean("keepHundo") ?: config.transferKeepHundo,
@@ -117,25 +110,14 @@ class AutomationControlServer(
             ?.filter(String::isNotBlank)
             ?.toSet()
             ?: config.structuredAllowedBuildFingerprints,
-        runtimeMode = params["runtimeMode"]?.let(::parseRuntimeMode) ?: config.runtimeMode,
         berryMode = params["berry"]?.let(::parseBerry) ?: config.berryMode,
         showActionToasts = params.boolean("toasts") ?: config.showActionToasts,
         loopIntervalMs = params["loopIntervalMs"]?.toLongOrNull() ?: config.loopIntervalMs,
-        catchThrowDurationMs = params["catchThrowDurationMs"]?.toIntOrNull() ?: config.catchThrowDurationMs,
-        catchResultDelayMs = params["catchResultDelayMs"]?.toLongOrNull() ?: config.catchResultDelayMs,
-        spinOpenDelayMs = params["spinOpenDelayMs"]?.toLongOrNull() ?: config.spinOpenDelayMs,
-        spinSwipeDurationMs = params["spinSwipeDurationMs"]?.toIntOrNull() ?: config.spinSwipeDurationMs,
-        spinResultDelayMs = params["spinResultDelayMs"]?.toLongOrNull() ?: config.spinResultDelayMs,
-        actionCooldownMs = params["actionCooldownMs"]?.toLongOrNull() ?: config.actionCooldownMs,
     )
 
     private fun parseBerry(raw: String): BerryMode = runCatching {
         BerryMode.valueOf(raw.trim().uppercase().replace('-', '_').replace(' ', '_'))
     }.getOrDefault(BerryMode.NONE)
-
-    private fun parseRuntimeMode(raw: String): AutomationRuntimeMode = runCatching {
-        AutomationRuntimeMode.valueOf(raw.trim().uppercase())
-    }.getOrDefault(AutomationRuntimeMode.SCREEN)
 
     private fun parseQuery(query: String): Map<String, String> {
         if (query.isBlank()) return emptyMap()
@@ -173,16 +155,21 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeMode":"${config.runtimeMode.name}","structuredRuntime":${status.structuredRuntime},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"pokemonGoForeground":${status.pokemonGoForeground},"screenState":"${status.screenState.name}","lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"framesAnalyzed":${status.framesAnalyzed},"catchAttempts":${status.catchAttempts},"spinAttempts":${status.spinAttempts},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","runtimeMode":"${config.runtimeMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.joinToString(",").jsonStringOrNull()},"toasts":${config.showActionToasts}}
+        {"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
     """.trimIndent()
 
     private fun String?.jsonStringOrNull(): String = this?.let {
         "\"${it.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")}\""
     } ?: "null"
+
+    private fun Set<String>.toJsonArray(): String = joinToString(
+        prefix = "[",
+        postfix = "]",
+    ) { it.jsonStringOrNull() }
 
     private fun jsonError(message: String): String = "{\"ok\":false,\"error\":${message.jsonStringOrNull()}}"
 

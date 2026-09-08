@@ -34,8 +34,8 @@
 
 ## M3 — Catch
 
-- [ ] Manual encounter action
-- [ ] Manual catch action
+- [ ] Structured manual encounter action with explicit identity
+- [ ] Structured manual catch action through `AutomationRunner`
 - [ ] Normalize catch outcomes
 - [ ] Catch filter
 - [ ] Serialized catch queue
@@ -45,7 +45,7 @@
 
 - [ ] Fort reader
 - [ ] Spin eligibility state
-- [ ] Manual spin action
+- [ ] Structured manual spin action through `AutomationRunner`
 - [ ] Stop cooldown tracking
 - [ ] Auto-spin scheduler
 

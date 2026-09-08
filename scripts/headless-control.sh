@@ -14,9 +14,7 @@ Usage:
   bash scripts/headless-control.sh status
   bash scripts/headless-control.sh start
   bash scripts/headless-control.sh stop
-  bash scripts/headless-control.sh catch
-  bash scripts/headless-control.sh spin
-  bash scripts/headless-control.sh config 'autoCatch=true&autoSpin=true&encounterSweep=true&loopIntervalMs=900'
+  bash scripts/headless-control.sh config 'autoEncounter=true&autoCatch=true&autoSpin=true&loopIntervalMs=900'
   bash scripts/headless-control.sh game
 
 Environment:
@@ -77,19 +75,11 @@ case "$command" in
     ;;
   start)
     ensure_api
-    request POST '/v1/start?catch=true&spin=true&encounterSweep=true'
+    request POST '/v1/start?autoEncounter=true&catch=true&spin=true'
     ;;
   stop)
     ensure_api
     request POST /v1/stop
-    ;;
-  catch)
-    ensure_api
-    request POST /v1/actions/catch
-    ;;
-  spin)
-    ensure_api
-    request POST /v1/actions/spin
     ;;
   config)
     ensure_api

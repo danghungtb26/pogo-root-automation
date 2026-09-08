@@ -64,12 +64,10 @@ sequence). Typed messages include `RuntimeReady`, `ObservationEvent`,
 `RuntimeError`. Raw observation payloads remain opaque to the bridge and are
 decoded by `game-adapter:pogo`.
 
-`HeadlessAutomationService` keeps the existing screen automation path as its
-default. The structured controller is selected explicitly with
-`runtimeMode=structured`; it does not use screen recognition as its policy
-source. Mutation remains disabled until an exact, strong build fingerprint is
-added to the local allowlist. The native probe currently publishes diagnostics
-and a read-only `RuntimeReady`; its persistent companion command channel safely
-rejects commands until a verified runtime binding/capability is installed.
-Mutation also requires the explicit `strongIdentityVerified` readiness flag,
-the exact allowlist entry, and the capability required by the action.
+`HeadlessAutomationService` always runs the structured controller. The native
+probe currently publishes diagnostics and a read-only `RuntimeReady`; its
+persistent companion command channel safely rejects commands until a verified
+runtime binding/capability is installed. Mutation also requires the explicit
+`strongIdentityVerified` readiness flag, the exact allowlist entry, and the
+capability required by the action. Until those conditions hold, the service
+reports read-only/fail-closed status and has no alternate automation path.

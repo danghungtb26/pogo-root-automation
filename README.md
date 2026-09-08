@@ -9,7 +9,7 @@ Rooted Android automation framework for experimenting with structured game-state
 - The project is split into a stable automation core and version-specific Pokémon GO/runtime adapters.
 - POGOProtos is vendored for decoding known Pokémon GO protobuf payloads into stable internal observation models.
 - Catch, spin, discard and transfer rules live in the automation core; live mutation executors are kept separate from decision logic.
-- The headless service uses a persistent, versioned runtime bridge for structured observations and client-owned commands; mutation is disabled until an exact build fingerprint is allowlisted.
+- The headless service is structured-only: it uses a persistent, versioned runtime bridge for observations and client-owned commands; mutation is disabled until an exact build fingerprint and runtime capability are verified.
 - No Play Integrity bypass, root hiding, anti-detection or account-safety evasion is implemented.
 
 ## Target architecture

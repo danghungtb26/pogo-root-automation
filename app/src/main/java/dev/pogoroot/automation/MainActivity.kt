@@ -66,7 +66,7 @@ class MainActivity : Activity() {
             })
 
             addView(TextView(context).apply {
-                text = "Headless mode: no Nearby/Encounter preview is required. Keep Pokémon GO in foreground; this controller may stay in background."
+                text = "Headless mode uses the structured runtime bridge. Until observation and action capabilities are verified, it stays read-only and fail-closed."
                 textSize = 15f
                 setPadding(0, padding / 2, 0, padding / 2)
             })
@@ -104,7 +104,7 @@ class MainActivity : Activity() {
             })
 
             addView(TextView(context).apply {
-                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?catch=true&spin=true\nPOST /v1/stop\nPOST /v1/config?..."
+                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?autoEncounter=true&catch=true&spin=true\nPOST /v1/stop\nPOST /v1/config?..."
                 textSize = 14f
                 typeface = Typeface.MONOSPACE
                 setPadding(0, 0, 0, padding / 2)
@@ -137,7 +137,7 @@ class MainActivity : Activity() {
             append("automation: ${if (config.enabled) "ON" else "OFF"}")
             append("\nautoCatch: ${config.autoCatch}")
             append("\nautoSpin: ${config.autoSpin}")
-            append("\nencounterSweep: ${config.encounterSweep}")
+            append("\nautoEncounter: ${config.autoEncounter}")
             append("\nAPI: localhost:${AutomationControlServer.DEFAULT_PORT}")
         }
     }

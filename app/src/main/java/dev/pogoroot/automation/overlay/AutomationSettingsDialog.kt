@@ -75,7 +75,7 @@ class AutomationSettingsDialog(
             addLimitRow("Minimum IV % to keep", minIv)
 
             addSection("Encounter berry")
-            addView(TextView(themed).apply { text = "Use berry only after encounter screen is confirmed" })
+            addView(TextView(themed).apply { text = "Use berry only after a structured encounter is confirmed" })
             addView(berrySpinner)
 
             addSection("Feedback")

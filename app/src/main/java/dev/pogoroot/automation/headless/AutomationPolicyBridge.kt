@@ -6,7 +6,7 @@ import dev.pogoroot.automation.core.automation.InventoryPolicy
 import dev.pogoroot.automation.core.automation.TransferPolicy
 
 fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy(
-    autoEncounter = autoCatch && encounterSweep,
+    autoEncounter = autoEncounter,
     autoCatch = autoCatch,
     autoSpin = autoSpin,
     autoDiscard = autoDiscard,

@@ -11,16 +11,11 @@ enum class BerryMode {
     SILVER_PINAP,
 }
 
-enum class AutomationRuntimeMode {
-    SCREEN,
-    STRUCTURED,
-}
-
 data class HeadlessAutomationConfig(
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
     val autoSpin: Boolean = true,
-    val encounterSweep: Boolean = true,
+    val autoEncounter: Boolean = true,
     val autoDiscard: Boolean = false,
     val discardLimits: Map<Int, Int> = DEFAULT_DISCARD_LIMITS,
     val autoTransfer: Boolean = false,
@@ -32,16 +27,8 @@ data class HeadlessAutomationConfig(
     val berryMode: BerryMode = BerryMode.NONE,
     val showActionToasts: Boolean = true,
     val loopIntervalMs: Long = 900L,
-    val catchThrowDurationMs: Int = 280,
-    val catchResultDelayMs: Long = 3_500L,
-    val spinOpenDelayMs: Long = 1_200L,
-    val spinSwipeDurationMs: Int = 450,
-    val spinResultDelayMs: Long = 1_000L,
-    val actionCooldownMs: Long = 1_000L,
     /** Exact strong fingerprints verified for client-owned mutation. */
     val structuredAllowedBuildFingerprints: Set<String> = emptySet(),
-    /** SCREEN preserves the existing automation path until structured observations are live. */
-    val runtimeMode: AutomationRuntimeMode = AutomationRuntimeMode.SCREEN,
 ) {
     companion object {
         // Common Poké Ball / berry limits. Users can override these from overlay settings.
@@ -59,11 +46,15 @@ data class HeadlessAutomationConfig(
 class AutomationConfigRepository(context: Context) {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+    init {
+        migrateLegacyPreferences()
+    }
+
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
         enabled = prefs.getBoolean(KEY_ENABLED, false),
         autoCatch = prefs.getBoolean(KEY_AUTO_CATCH, true),
         autoSpin = prefs.getBoolean(KEY_AUTO_SPIN, true),
-        encounterSweep = prefs.getBoolean(KEY_ENCOUNTER_SWEEP, true),
+        autoEncounter = prefs.getBoolean(KEY_AUTO_ENCOUNTER, true),
         autoDiscard = prefs.getBoolean(KEY_AUTO_DISCARD, false),
         discardLimits = decodeLimits(
             prefs.getString(KEY_DISCARD_LIMITS, null),
@@ -79,24 +70,12 @@ class AutomationConfigRepository(context: Context) {
         }.getOrDefault(BerryMode.NONE),
         showActionToasts = prefs.getBoolean(KEY_SHOW_ACTION_TOASTS, true),
         loopIntervalMs = prefs.getLong(KEY_LOOP_INTERVAL, 900L).coerceIn(300L, 5_000L),
-        catchThrowDurationMs = prefs.getInt(KEY_CATCH_THROW_DURATION, 280).coerceIn(100, 1_200),
-        catchResultDelayMs = prefs.getLong(KEY_CATCH_RESULT_DELAY, 3_500L).coerceIn(1_000L, 10_000L),
-        spinOpenDelayMs = prefs.getLong(KEY_SPIN_OPEN_DELAY, 1_200L).coerceIn(300L, 5_000L),
-        spinSwipeDurationMs = prefs.getInt(KEY_SPIN_SWIPE_DURATION, 450).coerceIn(100, 1_500),
-        spinResultDelayMs = prefs.getLong(KEY_SPIN_RESULT_DELAY, 1_000L).coerceIn(300L, 5_000L),
-        actionCooldownMs = prefs.getLong(KEY_ACTION_COOLDOWN, 1_000L).coerceIn(250L, 10_000L),
         structuredAllowedBuildFingerprints = prefs.getString(KEY_STRUCTURED_ALLOWLIST, null)
             .orEmpty()
             .split(',')
             .map(String::trim)
             .filter(String::isNotBlank)
             .toSet(),
-        runtimeMode = runCatching {
-            AutomationRuntimeMode.valueOf(
-                prefs.getString(KEY_RUNTIME_MODE, AutomationRuntimeMode.SCREEN.name)
-                    ?: AutomationRuntimeMode.SCREEN.name,
-            )
-        }.getOrDefault(AutomationRuntimeMode.SCREEN),
     )
 
     fun update(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig): HeadlessAutomationConfig {
@@ -105,7 +84,7 @@ class AutomationConfigRepository(context: Context) {
             .putBoolean(KEY_ENABLED, next.enabled)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
             .putBoolean(KEY_AUTO_SPIN, next.autoSpin)
-            .putBoolean(KEY_ENCOUNTER_SWEEP, next.encounterSweep)
+            .putBoolean(KEY_AUTO_ENCOUNTER, next.autoEncounter)
             .putBoolean(KEY_AUTO_DISCARD, next.autoDiscard)
             .putString(KEY_DISCARD_LIMITS, encodeLimits(next.discardLimits))
             .putBoolean(KEY_AUTO_TRANSFER, next.autoTransfer)
@@ -117,19 +96,36 @@ class AutomationConfigRepository(context: Context) {
             .putString(KEY_BERRY_MODE, next.berryMode.name)
             .putBoolean(KEY_SHOW_ACTION_TOASTS, next.showActionToasts)
             .putLong(KEY_LOOP_INTERVAL, next.loopIntervalMs.coerceIn(300L, 5_000L))
-            .putInt(KEY_CATCH_THROW_DURATION, next.catchThrowDurationMs.coerceIn(100, 1_200))
-            .putLong(KEY_CATCH_RESULT_DELAY, next.catchResultDelayMs.coerceIn(1_000L, 10_000L))
-            .putLong(KEY_SPIN_OPEN_DELAY, next.spinOpenDelayMs.coerceIn(300L, 5_000L))
-            .putInt(KEY_SPIN_SWIPE_DURATION, next.spinSwipeDurationMs.coerceIn(100, 1_500))
-            .putLong(KEY_SPIN_RESULT_DELAY, next.spinResultDelayMs.coerceIn(300L, 5_000L))
-            .putLong(KEY_ACTION_COOLDOWN, next.actionCooldownMs.coerceIn(250L, 10_000L))
             .putString(KEY_STRUCTURED_ALLOWLIST, next.structuredAllowedBuildFingerprints
                 .filter(String::isNotBlank)
                 .sorted()
                 .joinToString(","))
-            .putString(KEY_RUNTIME_MODE, next.runtimeMode.name)
             .apply()
         return read()
+    }
+
+    /**
+     * The old persisted mode and pixel-driver settings are intentionally not
+     * read. Preserve the old encounter preference under its structured name,
+     * then remove legacy keys so a stale install cannot re-enable deleted code.
+     */
+    private fun migrateLegacyPreferences() {
+        val editor = prefs.edit()
+        if (!prefs.contains(KEY_AUTO_ENCOUNTER) && prefs.contains(KEY_LEGACY_ENCOUNTER_SWEEP)) {
+            editor.putBoolean(
+                KEY_AUTO_ENCOUNTER,
+                prefs.getBoolean(KEY_LEGACY_ENCOUNTER_SWEEP, true),
+            )
+        }
+        editor.remove(KEY_LEGACY_ENCOUNTER_SWEEP)
+            .remove(KEY_LEGACY_RUNTIME_MODE)
+            .remove(KEY_LEGACY_CATCH_THROW_DURATION)
+            .remove(KEY_LEGACY_CATCH_RESULT_DELAY)
+            .remove(KEY_LEGACY_SPIN_OPEN_DELAY)
+            .remove(KEY_LEGACY_SPIN_SWIPE_DURATION)
+            .remove(KEY_LEGACY_SPIN_RESULT_DELAY)
+            .remove(KEY_LEGACY_ACTION_COOLDOWN)
+            .apply()
     }
 
     private fun encodeLimits(limits: Map<Int, Int>): String = limits.entries
@@ -151,7 +147,7 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_ENABLED = "enabled"
         private const val KEY_AUTO_CATCH = "auto_catch"
         private const val KEY_AUTO_SPIN = "auto_spin"
-        private const val KEY_ENCOUNTER_SWEEP = "encounter_sweep"
+        private const val KEY_AUTO_ENCOUNTER = "auto_encounter"
         private const val KEY_AUTO_DISCARD = "auto_discard"
         private const val KEY_DISCARD_LIMITS = "discard_limits"
         private const val KEY_AUTO_TRANSFER = "auto_transfer"
@@ -163,13 +159,14 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_BERRY_MODE = "berry_mode"
         private const val KEY_SHOW_ACTION_TOASTS = "show_action_toasts"
         private const val KEY_LOOP_INTERVAL = "loop_interval_ms"
-        private const val KEY_CATCH_THROW_DURATION = "catch_throw_duration_ms"
-        private const val KEY_CATCH_RESULT_DELAY = "catch_result_delay_ms"
-        private const val KEY_SPIN_OPEN_DELAY = "spin_open_delay_ms"
-        private const val KEY_SPIN_SWIPE_DURATION = "spin_swipe_duration_ms"
-        private const val KEY_SPIN_RESULT_DELAY = "spin_result_delay_ms"
-        private const val KEY_ACTION_COOLDOWN = "action_cooldown_ms"
         private const val KEY_STRUCTURED_ALLOWLIST = "structured_allowed_build_fingerprints"
-        private const val KEY_RUNTIME_MODE = "runtime_mode"
+        private const val KEY_LEGACY_ENCOUNTER_SWEEP = "encounter_sweep"
+        private const val KEY_LEGACY_RUNTIME_MODE = "runtime_mode"
+        private const val KEY_LEGACY_CATCH_THROW_DURATION = "catch_throw_duration_ms"
+        private const val KEY_LEGACY_CATCH_RESULT_DELAY = "catch_result_delay_ms"
+        private const val KEY_LEGACY_SPIN_OPEN_DELAY = "spin_open_delay_ms"
+        private const val KEY_LEGACY_SPIN_SWIPE_DURATION = "spin_swipe_duration_ms"
+        private const val KEY_LEGACY_SPIN_RESULT_DELAY = "spin_result_delay_ms"
+        private const val KEY_LEGACY_ACTION_COOLDOWN = "action_cooldown_ms"
     }
 }

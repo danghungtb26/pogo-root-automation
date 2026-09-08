@@ -38,7 +38,7 @@
             android:foregroundServiceType="specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Headless local automation controller and root screen worker" />
+                android:value="Headless structured runtime automation controller" />
         </service>
 
         <service

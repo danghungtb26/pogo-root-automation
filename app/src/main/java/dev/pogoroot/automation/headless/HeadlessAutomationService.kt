@@ -16,7 +16,7 @@ class HeadlessAutomationService : Service() {
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
     private var runtimeBridge: RuntimeBridgeClient? = null
-    private var structuredController: StructuredAutomationController? = null
+    private lateinit var structuredController: StructuredAutomationController
 
     override fun onCreate() {
         super.onCreate()
@@ -33,8 +33,8 @@ class HeadlessAutomationService : Service() {
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
-            eventSink = ToastAutomationEventSink(this, configRepository),
             structuredController = structuredController,
+            eventSink = ToastAutomationEventSink(this, configRepository),
         )
         apiServer = AutomationControlServer(configRepository, engine)
 
@@ -74,7 +74,7 @@ class HeadlessAutomationService : Service() {
     override fun onDestroy() {
         apiServer.stop()
         engine.shutdown()
-        structuredController?.stop()
+        structuredController.stop()
         runtimeBridge?.disconnect()
         super.onDestroy()
     }
