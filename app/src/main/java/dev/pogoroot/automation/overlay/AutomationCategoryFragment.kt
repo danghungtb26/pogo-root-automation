@@ -62,12 +62,15 @@ class AutomationCategoryFragment : Fragment() {
         val config = host.repository.read()
         val enabled = switch(host, "Enable automation", config.enabled)
         val autoCatch = switch(host, "Auto catch", config.autoCatch)
+        val autoCloseCatchPreview = switch(host, "Close catch preview after caught", config.autoCloseCatchPreview)
         val autoSpin = switch(host, "Auto spin", config.autoSpin)
         val autoEncounter = switch(host, "Auto encounter", config.autoEncounter)
         val content = editorContent(host).apply {
             addView(description(host, "These switches control the structured headless automation service."))
             addView(enabled)
             addView(autoCatch)
+            addView(description(host, "Preview close only activates on a verified runtime that advertises the catch/close binding."))
+            addView(autoCloseCatchPreview)
             addView(autoSpin)
             addView(autoEncounter)
         }
@@ -76,6 +79,7 @@ class AutomationCategoryFragment : Fragment() {
                 current.copy(
                     enabled = enabled.isChecked,
                     autoCatch = autoCatch.isChecked,
+                    autoCloseCatchPreview = autoCloseCatchPreview.isChecked,
                     autoSpin = autoSpin.isChecked,
                     autoEncounter = autoEncounter.isChecked,
                 )

@@ -14,6 +14,8 @@ enum class BerryMode {
 data class HeadlessAutomationConfig(
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
+    /** Only effective when the verified runtime advertises CATCH_AND_CLOSE_PREVIEW. */
+    val autoCloseCatchPreview: Boolean = false,
     val autoSpin: Boolean = true,
     val autoEncounter: Boolean = true,
     val autoDiscard: Boolean = false,
@@ -53,6 +55,7 @@ class AutomationConfigRepository(context: Context) {
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
         enabled = prefs.getBoolean(KEY_ENABLED, false),
         autoCatch = prefs.getBoolean(KEY_AUTO_CATCH, true),
+        autoCloseCatchPreview = prefs.getBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, false),
         autoSpin = prefs.getBoolean(KEY_AUTO_SPIN, true),
         autoEncounter = prefs.getBoolean(KEY_AUTO_ENCOUNTER, true),
         autoDiscard = prefs.getBoolean(KEY_AUTO_DISCARD, false),
@@ -83,6 +86,7 @@ class AutomationConfigRepository(context: Context) {
         prefs.edit()
             .putBoolean(KEY_ENABLED, next.enabled)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
+            .putBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, next.autoCloseCatchPreview)
             .putBoolean(KEY_AUTO_SPIN, next.autoSpin)
             .putBoolean(KEY_AUTO_ENCOUNTER, next.autoEncounter)
             .putBoolean(KEY_AUTO_DISCARD, next.autoDiscard)
@@ -146,6 +150,7 @@ class AutomationConfigRepository(context: Context) {
         private const val PREFS_NAME = "headless_automation"
         private const val KEY_ENABLED = "enabled"
         private const val KEY_AUTO_CATCH = "auto_catch"
+        private const val KEY_AUTO_CLOSE_CATCH_PREVIEW = "auto_close_catch_preview"
         private const val KEY_AUTO_SPIN = "auto_spin"
         private const val KEY_AUTO_ENCOUNTER = "auto_encounter"
         private const val KEY_AUTO_DISCARD = "auto_discard"

@@ -98,9 +98,19 @@ class StructuredAutomationController(
                             runner.acceptResync(automationObservation).getOrThrow()
                             runner.resumeAfterResync().getOrThrow()
                         } else {
+                            val policy = config.toCorePolicy().let { configured ->
+                                if (configured.autoCloseCatchPreview &&
+                                    GameCapability.CATCH_AND_CLOSE_PREVIEW !in adapter.capabilities
+                                ) {
+                                    lastError = "catch preview close unavailable; using normal catch"
+                                    configured.copy(autoCloseCatchPreview = false)
+                                } else {
+                                    configured
+                                }
+                            }
                             val dispatch = runner.onObservation(
                                 automationObservation,
-                                config.toCorePolicy(),
+                                policy,
                             ).getOrThrow()
                             dispatch.alerts.forEach { alert ->
                                 eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
@@ -231,6 +241,7 @@ class StructuredAutomationController(
                 phase = phase,
                 message = result.message,
                 errorCode = result.errorCode,
+                catchOutcome = result.catchOutcome,
                 runtimeMessageSeq = result.messageSeq,
                 observedAtEpochMs = result.observedAtEpochMs,
                 observedAtElapsedNs = result.observedAtElapsedNs,

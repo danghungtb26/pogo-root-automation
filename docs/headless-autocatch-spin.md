@@ -54,6 +54,8 @@ Optional query parameters:
 
 - `autoEncounter=true|false`
 - `catch=true|false` or `autoCatch=true|false`
+- `autoCloseCatchPreview=true|false` — only active when the verified runtime
+  advertises `CATCH_AND_CLOSE_PREVIEW`; otherwise normal catch remains enabled
 - `spin=true|false` or `autoSpin=true|false`
 
 Example:
@@ -69,6 +71,7 @@ Disables automation while leaving the service/API alive.
 ### `POST /v1/config`
 
 Supported parameters include `autoEncounter`, `autoCatch`, `autoSpin`,
+`autoCloseCatchPreview`,
 `autoDiscard`, `autoTransfer`, `keepHundo`, `keepShiny`, `keepBackground`,
 `keepFavorite`, `transferMinIv`, `berry`, `loopIntervalMs`,
 `buildFingerprints`, and `toasts`.
@@ -81,3 +84,10 @@ automation path.
 There are intentionally no `/v1/actions/catch` or `/v1/actions/spin` routes.
 Any future manual action API must carry structured identity and observation
 context and pass through `AutomationRunner`.
+
+When `autoCloseCatchPreview` is enabled, the structured `Catch` command carries
+an explicit close-preview intent. The client-owned runtime must verify
+`CAUGHT` before closing the preview and must advertise the
+`CATCH_AND_CLOSE_PREVIEW` capability. The current probe-only runtime does not
+advertise that capability, so it remains read-only/rejects mutation and never
+uses a timer or screen-input fallback.

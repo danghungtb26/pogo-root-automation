@@ -106,6 +106,7 @@ class AutomationCoordinator(
                 AutomationAction.Catch(
                     encounterId = encounter.encounterId,
                     reason = decision.reason,
+                    closePreviewAfterCaught = policy.autoCloseCatchPreview,
                 ),
             )
         }

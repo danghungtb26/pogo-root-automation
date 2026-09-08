@@ -48,6 +48,26 @@ class BridgeBackedPogoActionExecutorTest {
         assertTrue(bridge.sent.isEmpty())
     }
 
+    @Test
+    fun `close-preview catch requires the combined capability`() {
+        val bridge = CapturingBridge(ready(strongIdentityVerified = true))
+        val executor = BridgeBackedPogoActionExecutor(
+            bridge = bridge,
+            runtimeReady = { bridge.ready },
+            allowedBuildFingerprints = setOf(BUILD_FINGERPRINT),
+        )
+        val closeRequest = request().copy(
+            action = AutomationAction.Catch(
+                "encounter-1",
+                CatchReason.CATCH_ALL,
+                closePreviewAfterCaught = true,
+            ),
+        )
+
+        assertTrue(executor.submit(closeRequest).isFailure)
+        assertTrue(bridge.sent.isEmpty())
+    }
+
     private fun request() = ActionRequest.create(
         runtimeSessionId = SESSION_ID,
         action = AutomationAction.Catch("encounter-1", CatchReason.CATCH_ALL),

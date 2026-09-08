@@ -4,6 +4,7 @@ import dev.pogoroot.automation.core.automation.AlertKind
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.CatchReason
+import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.automation.MovementMode
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -129,6 +130,9 @@ object BridgePayloadCodec {
         writeNullableString(output, value.message)
         output.writeLong(value.observedAtEpochMs)
         output.writeLong(value.observedAtElapsedNs)
+        // Optional tail keeps probe-only/native peers compatible. New
+        // client-owned bindings can append a typed catch outcome here.
+        writeNullableCatchOutcome(output, value.catchOutcome)
     }
 
     private fun writeBindingLost(output: DataOutputStream, value: BridgeEvent.BindingLost) {
@@ -224,6 +228,7 @@ object BridgePayloadCodec {
         message = readNullableString(input),
         observedAtEpochMs = input.readLong(),
         observedAtElapsedNs = input.readLong(),
+        catchOutcome = if (input.available() > 0) readNullableCatchOutcome(input) else null,
     )
 
     private fun readBindingLost(input: DataInputStream): BridgeEvent.BindingLost = BridgeEvent.BindingLost(
@@ -257,7 +262,7 @@ object BridgePayloadCodec {
                 writeString(output, action.spawnId)
             }
             is AutomationAction.Catch -> {
-                output.writeInt(3)
+                output.writeInt(if (action.closePreviewAfterCaught) 9 else 3)
                 writeString(output, action.encounterId)
                 output.writeInt(action.reason.wireValue())
             }
@@ -296,6 +301,11 @@ object BridgePayloadCodec {
         3 -> AutomationAction.Catch(
             encounterId = readString(input),
             reason = readEnum(input, CatchReason.entries) { it.wireValue() },
+        )
+        9 -> AutomationAction.Catch(
+            encounterId = readString(input),
+            reason = readEnum(input, CatchReason.entries) { it.wireValue() },
+            closePreviewAfterCaught = true,
         )
         4 -> AutomationAction.Spin(readString(input))
         5 -> AutomationAction.DiscardItem(input.readInt(), input.readInt())
@@ -426,6 +436,18 @@ object BridgePayloadCodec {
     private fun readNullablePoint(input: DataInputStream): GeoPoint? =
         if (input.readBoolean()) GeoPoint(input.readDouble(), input.readDouble()) else null
 
+    private fun writeNullableCatchOutcome(output: DataOutputStream, value: CatchOutcome?) {
+        output.writeBoolean(value != null)
+        if (value != null) output.writeInt(value.wireValue())
+    }
+
+    private fun readNullableCatchOutcome(input: DataInputStream): CatchOutcome? =
+        if (input.readBoolean()) {
+            readEnum(input, CatchOutcome.entries) { it.wireValue() }
+        } else {
+            null
+        }
+
     private fun writeNullableLifecycle(output: DataOutputStream, value: GameLifecycleState?) {
         output.writeBoolean(value != null)
         if (value != null) output.writeInt(value.wireValue())
@@ -464,6 +486,15 @@ object BridgePayloadCodec {
         CatchReason.HUNDO -> 3
         CatchReason.IV_THRESHOLD -> 4
         CatchReason.CATCH_ALL -> 5
+    }
+
+    private fun CatchOutcome.wireValue(): Int = when (this) {
+        CatchOutcome.CAUGHT -> 1
+        CatchOutcome.MISSED -> 2
+        CatchOutcome.BREAKOUT -> 3
+        CatchOutcome.FLED -> 4
+        CatchOutcome.NO_BALL -> 5
+        CatchOutcome.INDETERMINATE -> 6
     }
 
     private fun AlertKind.wireValue(): Int = when (this) {

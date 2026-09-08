@@ -328,7 +328,11 @@ class BridgeBackedPogoActionExecutor(
     private fun requiredCapability(action: AutomationAction): GameCapability? = when (action) {
         is AutomationAction.MoveTo -> GameCapability.MOVE
         is AutomationAction.OpenEncounter -> GameCapability.OPEN_ENCOUNTER
-        is AutomationAction.Catch -> GameCapability.CATCH
+        is AutomationAction.Catch -> if (action.closePreviewAfterCaught) {
+            GameCapability.CATCH_AND_CLOSE_PREVIEW
+        } else {
+            GameCapability.CATCH
+        }
         is AutomationAction.Spin -> GameCapability.SPIN
         is AutomationAction.DiscardItem -> GameCapability.DISCARD_ITEM
         is AutomationAction.TransferPokemon -> GameCapability.TRANSFER_POKEMON

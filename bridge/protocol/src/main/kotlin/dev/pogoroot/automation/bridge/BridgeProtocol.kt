@@ -1,6 +1,7 @@
 package dev.pogoroot.automation.bridge
 
 import dev.pogoroot.automation.core.automation.AutomationAction
+import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.automation.RuntimeIdentity
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import java.io.DataInputStream
@@ -207,6 +208,8 @@ sealed interface BridgeEvent {
         val phase: CommandPhase,
         val errorCode: String? = null,
         val message: String? = null,
+        /** Optional semantic result for a Catch command. */
+        val catchOutcome: CatchOutcome? = null,
         val observedAtEpochMs: Long = System.currentTimeMillis(),
         val observedAtElapsedNs: Long = System.nanoTime(),
     ) : BridgeEvent {

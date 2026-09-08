@@ -8,6 +8,7 @@ import dev.pogoroot.automation.core.automation.TransferPolicy
 fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy(
     autoEncounter = autoEncounter,
     autoCatch = autoCatch,
+    autoCloseCatchPreview = autoCloseCatchPreview,
     autoSpin = autoSpin,
     autoDiscard = autoDiscard,
     autoTransfer = autoTransfer,

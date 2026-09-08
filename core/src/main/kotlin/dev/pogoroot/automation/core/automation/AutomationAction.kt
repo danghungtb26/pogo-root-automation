@@ -17,6 +17,11 @@ sealed interface AutomationAction {
     data class Catch(
         val encounterId: String,
         val reason: CatchReason,
+        /**
+         * Ask a verified client-owned runtime to close the post-catch preview
+         * only after it confirms [CatchOutcome.CAUGHT].
+         */
+        val closePreviewAfterCaught: Boolean = false,
     ) : AutomationAction {
         init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
     }
@@ -67,6 +72,16 @@ enum class CatchReason {
     HUNDO,
     IV_THRESHOLD,
     CATCH_ALL,
+}
+
+/** Semantic result emitted by a client-owned catch binding. */
+enum class CatchOutcome {
+    CAUGHT,
+    MISSED,
+    BREAKOUT,
+    FLED,
+    NO_BALL,
+    INDETERMINATE,
 }
 
 enum class BerryType {

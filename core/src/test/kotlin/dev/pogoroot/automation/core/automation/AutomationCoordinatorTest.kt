@@ -107,4 +107,29 @@ class AutomationCoordinatorTest {
             actions,
         )
     }
+
+    @Test
+    fun `catch preview close intent is opt in`() {
+        val snapshot = AutomationSnapshot(
+            lifecycleState = GameLifecycleState.ENCOUNTER,
+            encounter = EncounterSnapshot(
+                encounterId = "enc-close",
+                speciesId = 25,
+                speciesName = "Pikachu",
+                observedAtEpochMs = 1_000L,
+            ),
+        )
+
+        val enabled = coordinator.plan(
+            snapshot = snapshot,
+            policy = AutomationPolicy(autoCatch = true, autoCloseCatchPreview = true),
+        ).single() as AutomationAction.Catch
+        val disabled = coordinator.plan(
+            snapshot = snapshot,
+            policy = AutomationPolicy(autoCatch = true),
+        ).single() as AutomationAction.Catch
+
+        assertTrue(enabled.closePreviewAfterCaught)
+        assertTrue(!disabled.closePreviewAfterCaught)
+    }
 }

@@ -103,6 +103,7 @@ data class ActionExecution(
     val phase: ActionExecutionPhase,
     val message: String? = null,
     val errorCode: String? = null,
+    val catchOutcome: CatchOutcome? = null,
     val runtimeMessageSeq: Long? = null,
     val observedAtEpochMs: Long? = null,
     val observedAtElapsedNs: Long? = null,
@@ -183,7 +184,11 @@ internal val AutomationAction.requiredCapability: String?
     get() = when (this) {
         is AutomationAction.MoveTo -> "MOVE"
         is AutomationAction.OpenEncounter -> "OPEN_ENCOUNTER"
-        is AutomationAction.Catch -> "CATCH"
+        is AutomationAction.Catch -> if (closePreviewAfterCaught) {
+            "CATCH_AND_CLOSE_PREVIEW"
+        } else {
+            "CATCH"
+        }
         is AutomationAction.Spin -> "SPIN"
         is AutomationAction.DiscardItem -> "DISCARD_ITEM"
         is AutomationAction.TransferPokemon -> "TRANSFER_POKEMON"

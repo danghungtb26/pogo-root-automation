@@ -104,7 +104,7 @@ class MainActivity : Activity() {
             })
 
             addView(TextView(context).apply {
-                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?autoEncounter=true&catch=true&spin=true\nPOST /v1/stop\nPOST /v1/config?..."
+                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?autoEncounter=true&catch=true&spin=true&autoCloseCatchPreview=true\nPOST /v1/stop\nPOST /v1/config?..."
                 textSize = 14f
                 typeface = Typeface.MONOSPACE
                 setPadding(0, 0, 0, padding / 2)
@@ -136,6 +136,7 @@ class MainActivity : Activity() {
         statusView.text = buildString {
             append("automation: ${if (config.enabled) "ON" else "OFF"}")
             append("\nautoCatch: ${config.autoCatch}")
+            append("\nautoCloseCatchPreview: ${config.autoCloseCatchPreview}")
             append("\nautoSpin: ${config.autoSpin}")
             append("\nautoEncounter: ${config.autoEncounter}")
             append("\nAPI: localhost:${AutomationControlServer.DEFAULT_PORT}")

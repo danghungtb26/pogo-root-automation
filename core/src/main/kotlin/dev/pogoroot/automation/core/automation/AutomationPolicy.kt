@@ -10,6 +10,12 @@ data class AutomationPolicy(
     val inventoryPolicy: InventoryPolicy = InventoryPolicy(),
     val transferPolicy: TransferPolicy = TransferPolicy(),
     val berryType: BerryType? = null,
+    /**
+     * Enables the version-gated client-owned close-preview behavior for
+     * structured catches. It remains off until a verified runtime advertises
+     * the combined catch/close capability.
+     */
+    val autoCloseCatchPreview: Boolean = false,
 )
 
 data class CatchPolicy(

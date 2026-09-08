@@ -48,7 +48,7 @@ kiểm tra ở boundary.
 - `JoystickOverlayService` là service độc lập cho location control.
 
 Config lưu trong SharedPreferences namespace `headless_automation`. Các policy
-chính là `autoEncounter`, `autoCatch`, `autoSpin`, berry, discard/transfer và
+chính là `autoEncounter`, `autoCatch`, `autoCloseCatchPreview`, `autoSpin`, berry, discard/transfer và
 chu kỳ polling. Preference cũ `encounter_sweep` được migrate một lần sang
 `auto_encounter`; preference lựa chọn runtime cũ và các delay thao tác cũ bị
 loại bỏ, không thể kích hoạt behavior đã xóa.
@@ -138,6 +138,9 @@ Core định nghĩa lifecycle, nearby/encounter/fort/inventory/storage snapshots
 actions `MoveTo`, `OpenEncounter`, `Catch`, `Spin`, `UseBerry`, discard,
 transfer và alert. `autoEncounter` tạo `OpenEncounter` từ nearby structured state;
 `autoCatch` tạo `Catch` trong encounter; berry là action riêng trước catch.
+Khi `autoCloseCatchPreview` bật, `Catch` chỉ mang close-preview intent; runtime
+phải xác nhận `CAUGHT` và có capability `CATCH_AND_CLOSE_PREVIEW` trước khi
+đóng preview. Probe hiện tại không có capability này nên không có fallback UI.
 
 ## 9. Module map
 

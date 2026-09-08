@@ -2,6 +2,8 @@ package dev.pogoroot.automation.bridge
 
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
+import dev.pogoroot.automation.core.automation.CatchOutcome
+import dev.pogoroot.automation.core.automation.CatchReason
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -84,6 +86,46 @@ class BridgeFrameCodecTest {
         ).getOrThrow()
 
         assertEquals(command, decoded)
+    }
+
+    @Test
+    fun `round trips catch close intent and semantic outcome`() {
+        val command = BridgeEvent.AutomationCommand(
+            runtimeSessionId = "session-a",
+            commandId = "command-catch-close",
+            action = AutomationAction.Catch(
+                encounterId = "encounter-1",
+                reason = CatchReason.CATCH_ALL,
+                closePreviewAfterCaught = true,
+            ),
+            basedOnObservationSeq = 7L,
+            expectedLifecycle = GameLifecycleState.ENCOUNTER,
+            expiresAtElapsedNs = 99L,
+            pid = 1234,
+            processName = "com.nianticlabs.pokemongo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified-build",
+        )
+        val decodedCommand = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND,
+            BridgePayloadCodec.encode(command).getOrThrow(),
+        ).getOrThrow() as BridgeEvent.AutomationCommand
+        assertEquals(command, decodedCommand)
+
+        val result = BridgeEvent.AutomationCommandResult(
+            runtimeSessionId = "session-a",
+            messageSeq = 8L,
+            commandId = "command-catch-close",
+            phase = CommandPhase.COMPLETED,
+            catchOutcome = CatchOutcome.CAUGHT,
+            observedAtEpochMs = 100L,
+            observedAtElapsedNs = 200L,
+        )
+        val decodedResult = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND_RESULT,
+            BridgePayloadCodec.encode(result).getOrThrow(),
+        ).getOrThrow()
+        assertEquals(result, decodedResult)
     }
 
     @Test

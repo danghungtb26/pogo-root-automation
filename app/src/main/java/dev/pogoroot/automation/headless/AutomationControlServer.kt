@@ -94,6 +94,7 @@ class AutomationControlServer(
 
     private fun applyParams(config: HeadlessAutomationConfig, params: Map<String, String>): HeadlessAutomationConfig = config.copy(
         autoCatch = params.boolean("autoCatch") ?: params.boolean("catch") ?: config.autoCatch,
+        autoCloseCatchPreview = params.boolean("autoCloseCatchPreview") ?: config.autoCloseCatchPreview,
         autoSpin = params.boolean("autoSpin") ?: params.boolean("spin") ?: config.autoSpin,
         // The old encounterSweep query parameter is intentionally ignored.
         autoEncounter = params.boolean("autoEncounter") ?: config.autoEncounter,
@@ -155,11 +156,11 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
-        {"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
+        {"enabled":${config.enabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"keepHundo":${config.transferKeepHundo},"keepShiny":${config.transferKeepShiny},"keepBackground":${config.transferKeepSpecialBackground},"keepFavorite":${config.transferKeepFavorite},"transferMinIv":${config.transferMinimumIvPercent},"berry":"${config.berryMode.name}","buildFingerprints":${config.structuredAllowedBuildFingerprints.toJsonArray()},"toasts":${config.showActionToasts}}
     """.trimIndent()
 
     private fun String?.jsonStringOrNull(): String = this?.let {

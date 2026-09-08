@@ -8,6 +8,8 @@ enum class GameCapability {
     READ_POKEMON_STORAGE,
     ENCOUNTER,
     CATCH,
+    /** Catch binding confirms CAUGHT and closes the post-catch preview. */
+    CATCH_AND_CLOSE_PREVIEW,
     SPIN,
     DISCARD_ITEM,
     TRANSFER_POKEMON,
