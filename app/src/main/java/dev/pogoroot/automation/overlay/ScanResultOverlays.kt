@@ -21,6 +21,7 @@ internal class ScanResultOverlays(
     private lateinit var shinyView: ScanResultOverlayView
     private lateinit var hundoParams: WindowManager.LayoutParams
     private lateinit var shinyParams: WindowManager.LayoutParams
+    private var gameVisible = false
 
     fun ensure() {
         if (::hundoView.isInitialized || ::shinyView.isInitialized) return
@@ -79,6 +80,33 @@ internal class ScanResultOverlays(
         shinyView.render(scanResultRepository.read(ScanMatchType.SHINY))
         resizeWidget(hundoView, hundoParams)
         resizeWidget(shinyView, shinyParams)
+        if (!gameVisible) {
+            hundoView.visibility = android.view.View.INVISIBLE
+            shinyView.visibility = android.view.View.INVISIBLE
+        }
+    }
+
+    fun setVisible(visible: Boolean) {
+        gameVisible = visible
+        if (!::hundoView.isInitialized || !::shinyView.isInitialized) return
+        if (!visible) {
+            hundoView.visibility = android.view.View.INVISIBLE
+            shinyView.visibility = android.view.View.INVISIBLE
+        }
+        hundoParams.flags = if (visible) {
+            hundoParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            hundoParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        shinyParams.flags = if (visible) {
+            shinyParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            shinyParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        runCatching {
+            windowManager.updateViewLayout(hundoView, hundoParams)
+            windowManager.updateViewLayout(shinyView, shinyParams)
+        }
     }
 
     fun onConfigurationChanged() {

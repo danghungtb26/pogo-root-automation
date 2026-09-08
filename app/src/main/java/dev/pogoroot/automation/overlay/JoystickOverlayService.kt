@@ -31,6 +31,9 @@ import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
 import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 class JoystickOverlayService : Service() {
     companion object {
@@ -40,6 +43,7 @@ class JoystickOverlayService : Service() {
         private const val CHANNEL_ID = "pogo_joystick"
         private const val NOTIFICATION_ID = 4107
         private const val COOLDOWN_REFRESH_MS = 1_000L
+        private const val FOREGROUND_POLL_MS = 750L
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -53,13 +57,20 @@ class JoystickOverlayService : Service() {
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var scanResultRepository: ScanResultRepository
     private lateinit var positionStore: OverlayPositionStore
+    private lateinit var gameForegroundDetector: GameForegroundDetector
     private lateinit var mainOverlay: MainOverlayView
     private lateinit var cooldownOverlay: CooldownOverlayView
     private lateinit var scanResultOverlays: ScanResultOverlays
 
     private val cooldownService = TeleportCooldownService()
+    private val foregroundExecutor = Executors.newSingleThreadScheduledExecutor()
+    private var foregroundPoll: ScheduledFuture<*>? = null
+    private val overlayDialogs = mutableSetOf<AlertDialog>()
     private var favoriteLocationsDialog: FavoriteLocationsDialog? = null
+    private var teleportDialog: AlertDialog? = null
     private var controllerStarted = false
+    private var overlayVisible = false
+    private var destroyed = false
     private var speedPresetIndex = 2
     private var lastPersistAt = 0L
     private var latestTeleportCooldown: TeleportCooldown? = null
@@ -85,6 +96,7 @@ class JoystickOverlayService : Service() {
         mapTargetRepository = MapTargetRepository(this)
         scanResultRepository = ScanResultRepository()
         positionStore = OverlayPositionStore(this)
+        gameForegroundDetector = GameForegroundDetector(this)
         latestTeleportCooldown = positionStore.loadCooldown()
         cooldownMode = positionStore.loadCooldownMode()
         createNotificationChannel()
@@ -94,6 +106,12 @@ class JoystickOverlayService : Service() {
             sink = RootMockLocationProvider(this),
             onStateChanged = ::onLocationStateChanged,
         )
+        foregroundPoll = foregroundExecutor.scheduleWithFixedDelay(
+            ::pollGameForeground,
+            0L,
+            FOREGROUND_POLL_MS,
+            TimeUnit.MILLISECONDS,
+        )
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -102,10 +120,6 @@ class JoystickOverlayService : Service() {
             return START_NOT_STICKY
         }
 
-        ensureOverlay()
-        renderShortcutStates()
-        renderCooldown()
-        scanResultOverlays.render()
         mainHandler.removeCallbacks(cooldownTick)
         mainHandler.post(cooldownTick)
         if (!controllerStarted) {
@@ -127,7 +141,11 @@ class JoystickOverlayService : Service() {
     }
 
     override fun onDestroy() {
+        destroyed = true
+        foregroundPoll?.cancel(true)
+        foregroundExecutor.shutdownNow()
         mainHandler.removeCallbacks(cooldownTick)
+        dismissOverlayDialogs()
         runCatching { favoriteLocationsDialog?.dismiss() }
         favoriteLocationsDialog = null
         if (controllerStarted) {
@@ -139,6 +157,37 @@ class JoystickOverlayService : Service() {
         if (::cooldownOverlay.isInitialized) cooldownOverlay.dispose()
         if (::mainOverlay.isInitialized) mainOverlay.dispose()
         super.onDestroy()
+    }
+
+    private fun pollGameForeground() {
+        val state = gameForegroundDetector.read()
+        mainHandler.post {
+            if (!destroyed) applyGameForeground(state)
+        }
+    }
+
+    private fun applyGameForeground(state: GameForegroundDetector.State) {
+        val shouldShow = state == GameForegroundDetector.State.FOREGROUND
+        if (shouldShow == overlayVisible) return
+
+        if (shouldShow) {
+            ensureOverlay()
+            overlayVisible = true
+            mainOverlay.setVisible(true)
+            cooldownOverlay.setVisible(true)
+            scanResultOverlays.setVisible(true)
+            renderShortcutStates()
+            renderCooldown()
+            scanResultOverlays.render()
+        } else {
+            overlayVisible = false
+            collapseMainOverlay()
+            if (::mainOverlay.isInitialized) mainOverlay.setVisible(false)
+            if (::cooldownOverlay.isInitialized) cooldownOverlay.setVisible(false)
+            if (::scanResultOverlays.isInitialized) scanResultOverlays.setVisible(false)
+            dismissOverlayDialogs()
+            runCatching { favoriteLocationsDialog?.dismiss() }
+        }
     }
 
     private fun ensureOverlay() {
@@ -228,7 +277,7 @@ class JoystickOverlayService : Service() {
                 .setPositiveButton("Enable") { _, _ -> applyAutomationToggle(key, true) }
                 .create()
             dialog.window?.setType(overlayWindowType())
-            dialog.show()
+            showOverlayDialog(dialog)
         } else {
             applyAutomationToggle(key, nextValue)
         }
@@ -250,11 +299,15 @@ class JoystickOverlayService : Service() {
     }
 
     private fun showTeleportDialog() {
-        TeleportLocationDialog(
+        val dialog = TeleportLocationDialog(
             context = this,
             currentPoint = { controller.snapshot().point },
             onTeleport = controller::teleport,
-        ).show()
+        ).create()
+        teleportDialog = dialog
+        showOverlayDialog(dialog) {
+            if (teleportDialog === dialog) teleportDialog = null
+        }
     }
 
     private fun showFavoriteLocationsDialog() {
@@ -299,6 +352,23 @@ class JoystickOverlayService : Service() {
 
     private fun showLocationToast(message: String) {
         android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showOverlayDialog(dialog: AlertDialog, onDismissed: () -> Unit = {}) {
+        overlayDialogs += dialog
+        dialog.setOnDismissListener {
+            overlayDialogs.remove(dialog)
+            onDismissed()
+        }
+        dialog.show()
+    }
+
+    private fun dismissOverlayDialogs() {
+        overlayDialogs.toList().forEach { dialog ->
+            runCatching { dialog.dismiss() }
+        }
+        overlayDialogs.clear()
+        teleportDialog = null
     }
 
     private fun onLocationStateChanged(state: JoystickLocationState) {
@@ -416,7 +486,7 @@ class JoystickOverlayService : Service() {
         return builder
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
             .setContentTitle("PoGo built-in joystick")
-            .setContentText("Joystick + shortcut overlay is active")
+            .setContentText("Overlay appears while Pokémon GO is on screen")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()

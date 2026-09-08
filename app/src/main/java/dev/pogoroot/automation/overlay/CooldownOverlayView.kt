@@ -19,6 +19,7 @@ internal class CooldownOverlayView(
 
     private lateinit var view: TextView
     private lateinit var windowParams: WindowManager.LayoutParams
+    private var gameVisible = false
 
     fun ensure() {
         if (::view.isInitialized) return
@@ -63,7 +64,7 @@ internal class CooldownOverlayView(
 
     fun render(remainingMillis: Long) {
         if (!::view.isInitialized) return
-        if (remainingMillis <= 0L) {
+        if (!gameVisible || remainingMillis <= 0L) {
             view.visibility = View.INVISIBLE
             return
         }
@@ -74,6 +75,18 @@ internal class CooldownOverlayView(
         view.text = text
         view.contentDescription = "Cooldown $text"
         view.visibility = View.VISIBLE
+    }
+
+    fun setVisible(visible: Boolean) {
+        gameVisible = visible
+        if (!::view.isInitialized) return
+        view.visibility = if (visible) view.visibility else View.INVISIBLE
+        windowParams.flags = if (visible) {
+            windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            windowParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        runCatching { windowManager.updateViewLayout(view, windowParams) }
     }
 
     fun onConfigurationChanged() {

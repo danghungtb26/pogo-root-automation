@@ -16,6 +16,7 @@ import android.widget.Toast
 import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.headless.AutomationControlServer
 import dev.pogoroot.automation.headless.HeadlessAutomationService
+import dev.pogoroot.automation.overlay.GameForegroundDetector
 import dev.pogoroot.automation.overlay.JoystickOverlayService
 
 class MainActivity : Activity() {
@@ -23,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var statusView: TextView
     private var startJoystickAfterOverlayGrant = false
+    private var startJoystickAfterUsageGrant = false
 
     private val statusTick = object : Runnable {
         override fun run() {
@@ -43,6 +45,11 @@ class MainActivity : Activity() {
         super.onResume()
         if (startJoystickAfterOverlayGrant && Settings.canDrawOverlays(this)) {
             startJoystickAfterOverlayGrant = false
+            requestOverlayAndStartJoystick()
+        } else if (startJoystickAfterUsageGrant &&
+            GameForegroundDetector.hasUsageAccess(this)
+        ) {
+            startJoystickAfterUsageGrant = false
             startBuiltInJoystick()
         }
     }
@@ -144,22 +151,34 @@ class MainActivity : Activity() {
     }
 
     private fun requestOverlayAndStartJoystick() {
-        if (Settings.canDrawOverlays(this)) {
-            startBuiltInJoystick()
+        if (!Settings.canDrawOverlays(this)) {
+            startJoystickAfterOverlayGrant = true
+            Toast.makeText(
+                this,
+                "Allow display over other apps, then return to PoGo Root Automation.",
+                Toast.LENGTH_LONG,
+            ).show()
+            startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName"),
+                ),
+            )
             return
         }
-        startJoystickAfterOverlayGrant = true
-        Toast.makeText(
-            this,
-            "Allow display over other apps, then return to PoGo Root Automation.",
-            Toast.LENGTH_LONG,
-        ).show()
-        startActivity(
-            Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:$packageName"),
-            ),
-        )
+
+        if (!GameForegroundDetector.hasUsageAccess(this)) {
+            startJoystickAfterUsageGrant = true
+            Toast.makeText(
+                this,
+                "Allow usage access so the overlay only appears over Pokémon GO.",
+                Toast.LENGTH_LONG,
+            ).show()
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+            return
+        }
+
+        startBuiltInJoystick()
     }
 
     private fun startBuiltInJoystick() {

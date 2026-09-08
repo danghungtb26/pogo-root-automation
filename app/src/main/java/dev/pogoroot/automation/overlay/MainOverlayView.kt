@@ -156,6 +156,18 @@ internal class MainOverlayView(
         setMode(Mode.COLLAPSED)
     }
 
+    fun setVisible(visible: Boolean) {
+        if (!::rootView.isInitialized) return
+        if (!visible) collapse()
+        rootView.visibility = if (visible) View.VISIBLE else View.INVISIBLE
+        windowParams.flags = if (visible) {
+            windowParams.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        } else {
+            windowParams.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        runCatching { windowManager.updateViewLayout(rootView, windowParams) }
+    }
+
     fun render(config: HeadlessAutomationConfig, speedPresetIndex: Int) {
         if (!::rootView.isInitialized) return
         shortcutMenu.render(config, speedPresetIndex)

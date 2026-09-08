@@ -12,7 +12,7 @@ internal class TeleportLocationDialog(
     private val currentPoint: () -> GeoPoint?,
     private val onTeleport: (GeoPoint) -> Unit,
 ) {
-    fun show() {
+    fun create(): AlertDialog {
         val themedContext = ContextThemeWrapper(
             context,
             android.R.style.Theme_Material_Light_Dialog_Alert,
@@ -44,7 +44,7 @@ internal class TeleportLocationDialog(
                 }
             }
         }
-        dialog.show()
+        return dialog
     }
 
     private fun parsePoint(raw: String): GeoPoint? {
