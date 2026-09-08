@@ -861,11 +861,28 @@ void probe_il2cpp_runtime(RuntimeEvent *event) {
 }
 
 void persist_runtime_state(const RuntimeState &state) {
-    if (mkdir(kStateDirectory, 0700) != 0 && errno != EEXIST) return;
+    if (mkdir(kStateDirectory, 0700) != 0 && errno != EEXIST) {
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            kLogTag,
+            "cannot create runtime state directory: errno=%d",
+            errno
+        );
+        return;
+    }
     char temp_path[192]{};
     snprintf(temp_path, sizeof(temp_path), "%s.%d", kTempStatePrefix, state.pid);
     const int fd = open(temp_path, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0600);
-    if (fd < 0) return;
+    if (fd < 0) {
+        __android_log_print(
+            ANDROID_LOG_ERROR,
+            kLogTag,
+            "cannot open runtime state temp file pid=%d: errno=%d",
+            state.pid,
+            errno
+        );
+        return;
+    }
 
     const bool probe_complete = (state.probe_flags & kProbeComplete) != 0U;
     const bool il2cpp_loaded = (state.probe_flags & kIl2cppLoaded) != 0U;
@@ -902,14 +919,38 @@ void persist_runtime_state(const RuntimeState &state) {
     close(fd);
     if (rename(temp_path, kStatePath) != 0) {
         __android_log_print(ANDROID_LOG_ERROR, kLogTag, "cannot publish runtime state: errno=%d", errno);
+    } else {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime state published pid=%d process=%s",
+            state.pid,
+            state.process_name
+        );
     }
 }
 
 void companion_handler(int fd) {
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "companion_handler started fd=%d pid=%d",
+        fd,
+        getpid()
+    );
     RuntimeState state{};
     RuntimeEvent event{};
     while (read_full(fd, &event, sizeof(event))) {
-        if (event.magic != kRuntimeEventMagic || event.protocol_version != kRuntimeProtocolVersion) return;
+        if (event.magic != kRuntimeEventMagic || event.protocol_version != kRuntimeProtocolVersion) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                kLogTag,
+                "companion_handler rejected event magic=0x%08x protocol=%u",
+                event.magic,
+                event.protocol_version
+            );
+            return;
+        }
         event.process_name[sizeof(event.process_name) - 1U] = '\0';
         event.il2cpp_path[sizeof(event.il2cpp_path) - 1U] = '\0';
         event.unity_path[sizeof(event.unity_path) - 1U] = '\0';
@@ -918,6 +959,13 @@ void companion_handler(int fd) {
         event.candidate_classes[sizeof(event.candidate_classes) - 1U] = '\0';
 
         if (event.event_type == static_cast<uint32_t>(RuntimeEventType::kTargetAttached)) {
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "companion TargetAttached pid=%d process=%s",
+                event.pid,
+                event.process_name
+            );
             state = RuntimeState{};
             state.protocol_version = event.protocol_version;
             state.pid = event.pid;
@@ -1050,23 +1098,47 @@ public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override {
         api_ = api;
         env_ = env;
+        __android_log_print(ANDROID_LOG_INFO, kLogTag, "onLoad pid=%d", getpid());
     }
 
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
         if (args == nullptr || args->nice_name == nullptr) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                kLogTag,
+                "preAppSpecialize process=<unavailable> target=0 reason=missing_args_or_nice_name"
+            );
             api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         const char *process_name = env_->GetStringUTFChars(args->nice_name, nullptr);
         if (process_name == nullptr) {
+            __android_log_print(
+                ANDROID_LOG_ERROR,
+                kLogTag,
+                "preAppSpecialize process=<unavailable> target=0 reason=GetStringUTFChars_failed"
+            );
             api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
             return;
         }
         target_process_ = is_target_process(process_name);
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "preAppSpecialize process=%s target=%d",
+            process_name,
+            target_process_ ? 1 : 0
+        );
         if (target_process_) {
             process_pid_ = static_cast<int32_t>(getpid());
             copy_string(process_name_, sizeof(process_name_), process_name);
             companion_fd_ = api_->connectCompanion();
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "connectCompanion fd=%d",
+                companion_fd_
+            );
             if (companion_fd_ >= 0) {
                 RuntimeEvent event{};
                 event.magic = kRuntimeEventMagic;
@@ -1075,17 +1147,63 @@ public:
                 event.pid = process_pid_;
                 event.il2cpp_required_symbol_count = kRequiredIl2cppCoreSymbolCount;
                 copy_string(event.process_name, sizeof(event.process_name), process_name_);
-                if (!write_full(companion_fd_, &event, sizeof(event)) || !api_->exemptFd(companion_fd_)) {
+                const bool event_write_succeeded = write_full(companion_fd_, &event, sizeof(event));
+                __android_log_print(
+                    event_write_succeeded ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+                    kLogTag,
+                    "target event write=%d",
+                    event_write_succeeded ? 1 : 0
+                );
+                bool exempt_succeeded = false;
+                if (event_write_succeeded) {
+                    exempt_succeeded = api_->exemptFd(companion_fd_);
+                    __android_log_print(
+                        exempt_succeeded ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+                        kLogTag,
+                        "exemptFd=%d",
+                        exempt_succeeded ? 1 : 0
+                    );
+                } else {
+                    __android_log_print(
+                        ANDROID_LOG_ERROR,
+                        kLogTag,
+                        "exemptFd=skipped reason=target_event_write_failed"
+                    );
+                }
+                if (!event_write_succeeded || !exempt_succeeded) {
                     close(companion_fd_);
                     companion_fd_ = -1;
                 }
+            } else {
+                __android_log_print(
+                    ANDROID_LOG_ERROR,
+                    kLogTag,
+                    "connectCompanion failed fd=%d",
+                    companion_fd_
+                );
             }
         }
         env_->ReleaseStringUTFChars(args->nice_name, process_name);
-        if (!target_process_ || companion_fd_ < 0) api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+        if (!target_process_ || companion_fd_ < 0) {
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "DLCLOSE_MODULE_LIBRARY target=%d companion_fd=%d",
+                target_process_ ? 1 : 0,
+                companion_fd_
+            );
+            api_->setOption(zygisk::Option::DLCLOSE_MODULE_LIBRARY);
+        }
     }
 
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "postAppSpecialize target=%d companion_fd=%d",
+            target_process_ ? 1 : 0,
+            companion_fd_
+        );
         if (!target_process_ || companion_fd_ < 0) return;
         auto *context = new ProbeContext{};
         context->fd = companion_fd_;
@@ -1094,6 +1212,12 @@ public:
         companion_fd_ = -1;
         pthread_t thread{};
         const int result = pthread_create(&thread, nullptr, binding_probe_thread, context);
+        __android_log_print(
+            result == 0 ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
+            kLogTag,
+            "pthread_create result=%d",
+            result
+        );
         if (result != 0) {
             close(context->fd);
             delete context;
