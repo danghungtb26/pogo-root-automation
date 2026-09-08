@@ -38,7 +38,7 @@ class ScanResultsFragment : Fragment() {
         savedInstanceState: Bundle?,
     ): View {
         matchType = readType(arguments?.getString(ARG_TYPE))
-        repository = ScanResultRepository(context())
+        repository = ScanResultRepository()
 
         val scroll = ScrollView(context())
         list = LinearLayout(context()).apply {

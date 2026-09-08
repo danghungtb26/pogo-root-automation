@@ -27,7 +27,7 @@ class HeadlessAutomationService : Service() {
         configRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
         mapTargetRepository = MapTargetRepository(this)
-        scanResultRepository = ScanResultRepository(this)
+        scanResultRepository = ScanResultRepository()
         scanResultRepository.clear()
         runtimeBridge = RuntimeBridgeClient()
         structuredController = StructuredAutomationController(

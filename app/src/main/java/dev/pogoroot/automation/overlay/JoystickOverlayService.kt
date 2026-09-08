@@ -114,7 +114,7 @@ class JoystickOverlayService : Service() {
         automationConfigRepository = AutomationConfigRepository(this)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
         mapTargetRepository = MapTargetRepository(this)
-        scanResultRepository = ScanResultRepository(this)
+        scanResultRepository = ScanResultRepository()
         positionStore = OverlayPositionStore(this)
         latestTeleportCooldown = positionStore.loadCooldown()
         cooldownMode = positionStore.loadCooldownMode()
