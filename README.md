@@ -78,6 +78,60 @@ virtualjoystick-1.10.1.aar
 
 ## Runtime targets
 
+### Build, install and capture logs
+
+The host scripts use Bash on macOS/Linux. Build both native ABIs and package
+the module ZIP with one command (SDK NDK `28.2.13676358`, CMake `3.22.1`):
+
+```bash
+./scripts/build-magisk.sh
+```
+
+This fetches the pinned canonical Zygisk API 4 header when needed and writes
+`build/pogo-root-automation-magisk-multiabi.zip`. Set `ANDROID_HOME` if the SDK
+is outside its standard location; `ANDROID_NDK`, `ANDROID_CMAKE`,
+`ANDROID_NINJA`, and `ZYGISK_API_DIR` can override local tool/header paths.
+For example, a machine with NDK 27 already installed can explicitly use:
+
+```bash
+ANDROID_NDK="$HOME/Library/Android/sdk/ndk/27.1.12297006" ./scripts/build-magisk.sh
+```
+
+Start **BlueStacks Air 1** with root and Magisk already installed, then:
+
+```bash
+adb devices -l
+export ANDROID_SERIAL=127.0.0.1:5565
+./scripts/push-emulator.sh
+./scripts/install-magisk-module.sh
+```
+
+The device scripts default to this serial and reconnect it after restarting ADB
+if missing; they never automatically choose another connected device. Push
+accepts an optional local ZIP path. Install extracts that uploaded ZIP into a
+temporary directory, checks its module ID and both libraries, then calls
+`magisk --install-module`. Enable Zygisk in Magisk settings and restart the
+instance to activate it, or pass `--reboot` to the install script.
+
+To also build and install the controller APK:
+
+```bash
+./gradlew assembleDebug
+./scripts/install-magisk-module.sh --apk app/build/outputs/apk/debug/app-debug.apk --reboot
+```
+
+Capture all available logcat buffers as root, with all tags and priorities:
+
+```bash
+./scripts/logcat-full.sh                 # Dump buffered logs and exit
+./scripts/logcat-full.sh --follow        # Buffered + new logs, Ctrl+C to stop
+./scripts/logcat-full.sh build/logs/session.txt
+```
+
+Default captures go to `build/logs/` with a timestamp and PID. Existing output
+files are never overwritten. Buffers are not cleared; logs already evicted by
+Android cannot be recovered. Every script supports `--help`.
+
 ### Physical Android
 
 Primary production/debug target: rooted ARM64 Android with Magisk/Zygisk.

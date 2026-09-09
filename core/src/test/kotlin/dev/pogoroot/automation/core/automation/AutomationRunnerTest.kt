@@ -367,7 +367,7 @@ class AutomationRunnerTest {
     }
 
     @Test
-    fun `direct catch resumes after fresh map observation removes target`() {
+    fun `direct catch stays suspended when fresh map observation removes target`() {
         val submitted = mutableListOf<ActionRequest>()
         val identity = RuntimeIdentity(
             runtimeSessionId = "session-direct-catch",
@@ -426,7 +426,7 @@ class AutomationRunnerTest {
         ).getOrThrow()
 
         assertEquals(1, submitted.size)
-        assertTrue(!runner.snapshot().suspended)
-        assertNull(runner.snapshot().activeExecution)
+        assertTrue(runner.snapshot().suspended)
+        assertEquals(ActionExecutionPhase.INDETERMINATE, runner.snapshot().activeExecution?.phase)
     }
 }

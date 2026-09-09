@@ -81,6 +81,14 @@ void discover_direct_map_bindings(
     Il2CppClass *wild_map_pokemon_class = find_runtime_class(
         api, assemblies, assembly_count, "Niantic.Holoholo.Map", "WildMapPokemon", nullptr
     );
+    binding->soft_sfida_capture_out_proto_class = find_runtime_class(
+        api,
+        assemblies,
+        assembly_count,
+        "Holoholo.Rpc",
+        "SoftSfidaCaptureOutProto",
+        nullptr
+    );
     binding->map_pokemon_get_spawn_point_id = find_direct_map_instance_method(
         api, wild_map_pokemon_class, "get_SpawnPointId", 0U
     );
@@ -88,6 +96,12 @@ void discover_direct_map_bindings(
         binding->ar_plus_encounter_values_class != nullptr &&
         binding->catch_pokemon_proto_class != nullptr &&
         binding->map_pokemon_get_spawn_point_id != nullptr;
+    // The current binding has no verified way to observe the returned
+    // IPromise/CatchPokemon result. Keep invocation evidence separate from the
+    // capability advertised to the controller; disappearance from the map is
+    // not an authoritative caught/fled result.
+    binding->direct_catch_outcome_verified = false;
+    binding->soft_sfida_outcome_observer_verified = false;
 
     void *directory = nullptr;
     if (binding->map_entity_service != nullptr) {
@@ -165,6 +179,27 @@ void discover_direct_map_bindings(
         "managed diagnostic: direct map catch binding verified=%d method=%p",
         binding->direct_catch_verified ? 1 : 0,
         binding->map_pokemon_try_capture
+    );
+    __android_log_print(
+        binding->direct_catch_outcome_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: direct map catch outcome observer verified=%d",
+        binding->direct_catch_outcome_verified ? 1 : 0
+    );
+    __android_log_print(
+        binding->soft_sfida_capture_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: SoftSfidaCaptureRpc binding verified=%d handler=%p method=%p result_proto=%p",
+        binding->soft_sfida_capture_verified ? 1 : 0,
+        binding->soft_sfida_rpc_handler,
+        binding->soft_sfida_capture_rpc,
+        binding->soft_sfida_capture_out_proto_class
+    );
+    __android_log_print(
+        binding->soft_sfida_outcome_observer_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: SoftSfida outcome observer verified=%d",
+        binding->soft_sfida_outcome_observer_verified ? 1 : 0
     );
     __android_log_print(
         binding->forts_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,

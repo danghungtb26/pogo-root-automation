@@ -272,6 +272,7 @@ void discover_runtime_owners(
         {"Niantic.Holoholo.NearbyPokemon", "INearbyPokemonService", "INearbyPokemonService", "NearbyPokemonService"},
         {"Niantic.Holoholo.Map", "IMapSceneViewService", "IMapSceneViewService", "MapSceneViewService"},
         {"Niantic.Holoholo.Services.DynamicTappables", "IDynamicTappablesService", "IDynamicTappablesService", "DynamicTappablesService"},
+        {"Niantic.Holoholo.Services.SoftSfidaService", "ISoftSfidaRpcHandler", "ISoftSfidaRpcHandler", "SoftSfidaRpcHandler"},
     };
     for (const ServiceCandidate &service : services) {
         Il2CppClass *service_class = find_runtime_class(
@@ -421,8 +422,10 @@ void discover_runtime_owners(
                 binding->dynamic_tappables_tap
             );
         }
+        if (strcmp(service.label, "ISoftSfidaRpcHandler") == 0) {
+            bind_soft_sfida_rpc(api, owner, binding);
+        }
     }
-
     Il2CppClass *wild_map_class = find_runtime_class(
         api, assemblies, assembly_count, "Niantic.Holoholo.Map", "WildMapPokemon", nullptr
     );

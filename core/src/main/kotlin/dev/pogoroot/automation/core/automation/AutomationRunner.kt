@@ -1,5 +1,6 @@
 package dev.pogoroot.automation.core.automation
 
+import dev.pogoroot.automation.core.model.GameLifecycleState
 import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 
@@ -31,6 +32,7 @@ class AutomationRunner(
     private var suspended = false
     private var needsResync = false
     private var blockedActionAfterIndeterminate: AutomationAction? = null
+    private var pendingMapSyncExecution: ActionExecution? = null
     private var lastError: String? = null
     private var lastMessageSeq = 0L
     private var nextMutationAllowedAtElapsedNs = 0L
@@ -39,9 +41,6 @@ class AutomationRunner(
     fun attach(runtime: RuntimeIdentity): Result<Unit> {
         val replacingSession = identity?.runtimeSessionId != runtime.runtimeSessionId
         if (identity != null && replacingSession) disconnect("runtime session replaced")
-        // Recovery state belongs to the session that produced the unknown
-        // result. A newly attached runtime session has a new authority and
-        // must not inherit a stale blocked action from the previous session.
         val preserveRecovery = !replacingSession &&
             suspended &&
             needsResync &&
@@ -51,6 +50,7 @@ class AutomationRunner(
         // A new runtime session is a new authority. Never carry an old command
         // into it, even if the PID happens to be reused.
         if (replacingSession || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
+        if (replacingSession) pendingMapSyncExecution = null
         lastObservation = null
         clearMutationQueue()
         lastMessageSeq = 0L
@@ -100,11 +100,7 @@ class AutomationRunner(
         lastObservation = observation
         lastMessageSeq = observation.messageSeq
 
-        if (suspended && resolveIndeterminateMapAction(observation)) {
-            // The client-side invocation is now corroborated by a fresh map
-            // state. Continue planning from this observation without retrying
-            // the command that had an unknown server response.
-        }
+        resolvePendingMapSync(observation)
         if (suspended || active != null) {
             return Result.success(
                 RunnerDispatch(
@@ -210,11 +206,14 @@ class AutomationRunner(
         }
         if (resultSeq != null) lastMessageSeq = resultSeq
         if (!isValidTransition(current.phase, validatedExecution.phase)) {
-            return Result.failure(
-                IllegalStateException("invalid action transition ${current.phase} -> ${validatedExecution.phase}"),
-            )
+            val lateAuthoritativeCatch = current.phase == ActionExecutionPhase.INDETERMINATE &&
+                validatedExecution.hasAuthoritativeCatchOutcome()
+            if (!lateAuthoritativeCatch) {
+                return Result.failure(
+                    IllegalStateException("invalid action transition ${current.phase} -> ${validatedExecution.phase}"),
+                )
+            }
         }
-
         active = validatedExecution
         if (validatedExecution.phase == ActionExecutionPhase.INDETERMINATE) {
             suspended = true
@@ -225,14 +224,28 @@ class AutomationRunner(
         } else if (validatedExecution.phase.isDefinitive) {
             consumeQueuedAction(validatedExecution.request.action)
             requeueSamePlanAfterSettle = validatedExecution.phase == ActionExecutionPhase.COMPLETED &&
-                validatedExecution.request.settleDelayNs > 0L
+                validatedExecution.request.settleDelayNs > 0L &&
+                !validatedExecution.isDirectMapCatch()
+            if (current.phase == ActionExecutionPhase.INDETERMINATE) {
+                suspended = false
+                needsResync = false
+                blockedActionAfterIndeterminate = null
+            }
             active = null
-            lastError = validatedExecution.message.takeUnless { validatedExecution.phase == ActionExecutionPhase.COMPLETED }
+            pendingMapSyncExecution = validatedExecution.takeIf { it.requiresMapSync() }
+            if (pendingMapSyncExecution != null) {
+                suspended = true
+                needsResync = true
+                blockedActionAfterIndeterminate = null
+                lastError = "catch result confirmed; waiting for map synchronization"
+            } else {
+                lastError = validatedExecution.message
+                    .takeUnless { validatedExecution.phase == ActionExecutionPhase.COMPLETED }
+            }
             scheduleSettle(validatedExecution.request.settleDelayNs)
         }
         return Result.success(snapshot())
     }
-
     /** Called when the broker reports a binding/process/socket loss. */
     @Synchronized
     fun disconnect(reason: String): ActionExecution? {
@@ -253,6 +266,7 @@ class AutomationRunner(
         identity = null
         suspended = true
         needsResync = true
+        pendingMapSyncExecution = null
         clearMutationQueue()
         nextMutationAllowedAtElapsedNs = 0L
         return active
@@ -276,6 +290,9 @@ class AutomationRunner(
     @Synchronized
     fun resumeAfterResync(): Result<Unit> {
         if (!suspended || !needsResync) return Result.failure(IllegalStateException("resync is not pending"))
+        if (pendingMapSyncExecution != null) {
+            return Result.failure(IllegalStateException("map synchronization is pending"))
+        }
         if (lastObservation == null) return Result.failure(IllegalStateException("fresh observation required"))
         val indeterminateAction = active
             ?.takeIf { it.phase == ActionExecutionPhase.INDETERMINATE }
@@ -357,27 +374,33 @@ class AutomationRunner(
             now + delayNs
         }
     }
+    private fun resolvePendingMapSync(observation: AutomationObservation): Boolean {
+        val execution = pendingMapSyncExecution ?: return false
+        val action = execution.request.action as? AutomationAction.Catch ?: return false
+        val nearby = observation.snapshot.nearby ?: return false
+        if (!nearby.isComplete || observation.snapshot.lifecycleState != GameLifecycleState.OVERWORLD) return false
+        if (nearby.spawns.any { it.spawnId == action.encounterId }) return false
 
-    private fun resolveIndeterminateMapAction(observation: AutomationObservation): Boolean {
-        val execution = active?.takeIf { it.phase == ActionExecutionPhase.INDETERMINATE } ?: return false
-        val action = execution.request.action
-        val postconditionObserved = when (action) {
-            is AutomationAction.Catch -> action.mode == CatchMode.DIRECT_MAP &&
-                execution.errorCode == "direct_catch_outcome_unavailable" &&
-                observation.snapshot.nearby?.spawns?.none { it.spawnId == action.encounterId } == true
-            else -> false
-        }
-        if (!postconditionObserved) return false
-
-        consumeQueuedAction(action)
-        active = null
+        pendingMapSyncExecution = null
         suspended = false
         needsResync = false
         blockedActionAfterIndeterminate = null
         lastError = null
-        scheduleSettle(execution.request.settleDelayNs)
         return true
     }
+
+    private fun ActionExecution.hasAuthoritativeCatchOutcome(): Boolean =
+        phase == ActionExecutionPhase.COMPLETED &&
+            request.action is AutomationAction.Catch &&
+            catchOutcome != null &&
+            catchOutcome != CatchOutcome.INDETERMINATE
+
+    private fun ActionExecution.isDirectMapCatch(): Boolean =
+        request.action is AutomationAction.Catch &&
+            request.action.mode == CatchMode.DIRECT_MAP
+
+    private fun ActionExecution.requiresMapSync(): Boolean =
+        isDirectMapCatch() && catchOutcome in setOf(CatchOutcome.CAUGHT, CatchOutcome.FLED)
 
     /**
      * Reconciles the pending FIFO with the latest plan. Already consumed

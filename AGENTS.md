@@ -106,42 +106,40 @@ ABI-specific configuration.
 
 ## Build the Magisk ZIP
 
-The APK build and the Zygisk runtime build are separate. To reproduce the
-multi-ABI artifact produced by CI, install/configure Android SDK components
-for platform 36, build-tools 36.0.0, NDK `28.2.13676358` and CMake 3.22.1,
-then fetch the canonical `zygisk.hpp` into a temporary include directory.
-
-Build both native ABIs with the Android toolchain:
+The APK build and the Zygisk runtime build are separate. Use the existing
+workflow scripts below for native builds, packaging, emulator uploads,
+module installation and logcat collection. These scripts replace ad hoc
+commands for those operations.
 
 ```bash
-ANDROID_CMAKE="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
-ANDROID_NDK="$ANDROID_HOME/ndk/28.2.13676358"
-ZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
-
-"$ANDROID_CMAKE" -S zygisk/jni -B build/zygisk-arm64 -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
-  -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-28 \
-  -DZYGISK_API_DIR="$ZYGISK_API_DIR"
-"$ANDROID_CMAKE" --build build/zygisk-arm64
-
-"$ANDROID_CMAKE" -S zygisk/jni -B build/zygisk-x86_64 -G Ninja \
-  -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK/build/cmake/android.toolchain.cmake" \
-  -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-28 \
-  -DZYGISK_API_DIR="$ZYGISK_API_DIR"
-"$ANDROID_CMAKE" --build build/zygisk-x86_64
+./scripts/build-magisk.sh
+ANDROID_SERIAL=127.0.0.1:5565 ./scripts/push-emulator.sh
+ANDROID_SERIAL=127.0.0.1:5565 ./scripts/install-magisk-module.sh
+ANDROID_SERIAL=127.0.0.1:5565 ./scripts/logcat-full.sh
 ```
 
-Package the two `.so` files into the installable Magisk module:
+User preference: do not create replacement scripts, temporary scripts,
+inline shell/Python workflows, or manually reproduce these steps unless the
+user explicitly requests it. Use the existing scripts' options and environment
+variables. If a script is insufficient or fails, diagnose the problem and
+report the needed change; do not silently bypass it or change its behavior
+without the user's request.
+
+The build script defaults to NDK `28.2.13676358` and CMake `3.22.1`. On the
+current Mac, use the installed NDK through its supported override:
 
 ```bash
-./scripts/package-magisk.sh \
-  build/zygisk-arm64/libpogo_root_automation.so \
-  build/zygisk-x86_64/libpogo_root_automation.so \
-  build/pogo-root-automation-magisk-multiabi.zip
+ANDROID_NDK="$HOME/Library/Android/sdk/ndk/27.1.12297006" ./scripts/build-magisk.sh
 ```
 
-The script validates that the ZIP contains both
-`zygisk/arm64-v8a.so` and `zygisk/x86_64.so`. The resulting artifacts are:
+The install script uses Magisk already installed on the emulator. Use
+`--reboot` when a reboot is requested or authorized, and `--apk <path>` to
+also install the controller APK. Logcat supports `--follow` for continuous
+capture; its default output directory is `build/logs/`.
+
+The build script calls `scripts/package-magisk.sh` internally and validates
+that the ZIP contains both `zygisk/arm64-v8a.so` and `zygisk/x86_64.so`.
+The resulting artifacts are:
 
 - `app/build/outputs/apk/debug/app-debug.apk`
 - `build/pogo-root-automation-magisk-multiabi.zip`

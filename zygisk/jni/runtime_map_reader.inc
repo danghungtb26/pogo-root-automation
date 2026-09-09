@@ -233,6 +233,7 @@ bool read_runtime_map_snapshot_on_main_thread(
     if (cells == nullptr) return false;
     if (kMapReaderStage == 1) return true;
     observation->spawns.clear();
+    observation->is_complete = true;
     forts->forts.clear();
     if (kMapReaderStage == 2) {
         count_map_collection(context.il2cpp_api, cells);
@@ -251,7 +252,10 @@ bool read_runtime_map_snapshot_on_main_thread(
         return false;
     }
     for (const MapDictionaryEntry &cell_entry : cell_entries) {
-        if (observation->spawns.size() >= 512U) break;
+        if (observation->spawns.size() >= 512U) {
+            observation->is_complete = false;
+            break;
+        }
         void *cell = cell_entry.value;
         if (cell != nullptr && !read_map_wild_pokemon(
                 context.il2cpp_api, cell, &observation->spawns)) return false;

@@ -47,6 +47,7 @@ class PogoNearbyMapper(
                 observedAtEpochMs = observation.observedAtEpochMs,
                 playerPosition = playerPosition(observation),
                 spawns = mapped,
+                isComplete = observation.isComplete,
             ),
             issues = issues,
         )

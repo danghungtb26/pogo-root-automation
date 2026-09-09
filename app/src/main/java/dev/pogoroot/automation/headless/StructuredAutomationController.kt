@@ -13,6 +13,7 @@ import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
+import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.GeoPoint
@@ -73,6 +74,8 @@ class StructuredAutomationController(
     private var lastError: String? = null
     private var latestPlayerPosition: GeoPoint? = null
     private val recordedGameActionCommands = mutableSetOf<String>()
+    private val catchLabelsByCommand = mutableMapOf<String, String>()
+    private val publishedCatchOutcomeCommands = mutableSetOf<String>()
 
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
         syncSafetyConfig()
@@ -145,11 +148,6 @@ class StructuredAutomationController(
                                 configured
                             }
                         }
-                        // A fresh observation is also the evidence used to
-                        // resolve an indeterminate direct-map catch. Do not
-                        // call resumeAfterResync() unconditionally: doing so
-                        // would let the queue advance while the catch target
-                        // was still present on the map.
                         val dispatch = runner.onObservation(
                             automationObservation,
                             policy,
@@ -159,9 +157,15 @@ class StructuredAutomationController(
                         }
                         dispatch.reason?.let {
                             lastError = it
-                            eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
+                            if (it != "runner suspended; resync required" &&
+                                it != "mutation active" &&
+                                !it.startsWith("mutation blocked: missing capability DIRECT_CATCH")
+                            ) {
+                                eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
+                            }
                         }
                         dispatch.request?.let {
+                            rememberCatchLabel(it, snapshot)
                             submitted = true
                             lastAction = it.action::class.simpleName
                         }
@@ -217,6 +221,8 @@ class StructuredAutomationController(
         processedObservationSeq = 0L
         latestPlayerPosition = null
         recordedGameActionCommands.clear()
+        catchLabelsByCommand.clear()
+        publishedCatchOutcomeCommands.clear()
         connected = true
         lastError = null
     }
@@ -285,7 +291,7 @@ class StructuredAutomationController(
             dev.pogoroot.automation.bridge.CommandPhase.SAFE_TIMEOUT -> ActionExecutionPhase.SAFE_TIMEOUT
             dev.pogoroot.automation.bridge.CommandPhase.INDETERMINATE -> ActionExecutionPhase.INDETERMINATE
         }
-        runner.onResult(
+        val resultStatus = runner.onResult(
             ActionExecution(
                 request = request,
                 phase = phase,
@@ -299,12 +305,67 @@ class StructuredAutomationController(
                 observedAtElapsedNs = result.observedAtElapsedNs,
             ),
         ).onFailure { lastError = it.message }
-        if (phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
+        if (resultStatus.isSuccess && phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
             recordGameActionIfNeeded(request, result)
         }
-        if (phase.isTerminal) {
+        if (resultStatus.isSuccess && phase.isTerminal) {
             lastAction = request.action::class.simpleName
         }
+        if (resultStatus.isSuccess && isAuthoritativeCatchResult(request, result, phase)) {
+            publishCatchOutcome(request, result)
+        }
+    }
+
+    private fun rememberCatchLabel(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        snapshot: AutomationSnapshot,
+    ) {
+        val action = request.action as? AutomationAction.Catch ?: return
+        val label = snapshot.nearby?.spawns
+            ?.firstOrNull { it.spawnId == action.encounterId }
+            ?.speciesName
+            ?.takeIf { it.isNotBlank() }
+            ?: snapshot.encounter
+                ?.takeIf { it.encounterId == action.encounterId }
+                ?.speciesName
+                ?.takeIf { it.isNotBlank() }
+            ?: action.encounterId
+        catchLabelsByCommand[request.commandId] = label
+    }
+
+    private fun isAuthoritativeCatchResult(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        result: BridgeEvent.AutomationCommandResult,
+        phase: ActionExecutionPhase,
+    ): Boolean {
+        if (phase != ActionExecutionPhase.COMPLETED) return false
+        val action = request.action as? AutomationAction.Catch ?: return false
+        val outcome = result.catchOutcome ?: return false
+        if (outcome == CatchOutcome.INDETERMINATE) return false
+        return !action.throwProfile.requiresStructuredOutcome || result.throwOutcome?.isAttempt == true
+    }
+
+    private fun publishCatchOutcome(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        result: BridgeEvent.AutomationCommandResult,
+    ) {
+        if (!publishedCatchOutcomeCommands.add(request.commandId)) return
+        val label = catchLabelsByCommand.remove(request.commandId) ?: request.action.encounterId()
+        val outcome = result.catchOutcome ?: return
+        val event = when (outcome) {
+            CatchOutcome.CAUGHT -> AutomationEvent(AutomationEventType.CAUGHT, "Caught $label")
+            CatchOutcome.FLED -> AutomationEvent(AutomationEventType.RAN_AWAY, "$label ran away")
+            CatchOutcome.MISSED -> AutomationEvent(AutomationEventType.INFO, "Missed $label")
+            CatchOutcome.BREAKOUT -> AutomationEvent(AutomationEventType.INFO, "$label broke out")
+            CatchOutcome.NO_BALL -> AutomationEvent(AutomationEventType.ERROR, "No Poké Balls for $label")
+            CatchOutcome.INDETERMINATE -> return
+        }
+        eventSink.publish(event)
+    }
+
+    private fun AutomationAction.encounterId(): String = when (this) {
+        is AutomationAction.Catch -> encounterId
+        else -> "target"
     }
 
     private fun recordGameActionIfNeeded(

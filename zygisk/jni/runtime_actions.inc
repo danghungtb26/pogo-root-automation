@@ -289,7 +289,8 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
     if (kCatchExecutionEnabled && binding.catch_throw_verified) {
         capabilities.emplace_back("CATCH");
     }
-    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified) {
+    if (kDirectCatchExecutionEnabled && binding.soft_sfida_capture_verified &&
+        binding.soft_sfida_outcome_observer_verified) {
         capabilities.emplace_back("DIRECT_CATCH");
     }
     if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
@@ -328,14 +329,16 @@ void runtime_command_channel_loop(ProbeContext &context) {
             const bool success = run_managed_runtime_diagnostic(context);
             if (success) {
                 const bool throw_hooks_installed = install_runtime_throw_hooks(context);
+                const bool soft_catch_hooks_installed = install_runtime_soft_catch_hooks(context);
                 const RuntimeBinding binding = runtime_binding_snapshot(context);
                 const bool capabilities_sent = send_runtime_capability_update(context.fd, binding);
                 __android_log_print(
                     capabilities_sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
-                    "runtime diagnostic capabilities sent=%d throw_hooks=%d berry=%d encounter_read=%d",
+                    "runtime diagnostic capabilities sent=%d throw_hooks=%d soft_catch_hooks=%d berry=%d encounter_read=%d",
                     capabilities_sent ? 1 : 0,
                     throw_hooks_installed ? 1 : 0,
+                    soft_catch_hooks_installed ? 1 : 0,
                     binding.use_berry_verified ? 1 : 0,
                     binding.encounter_read_verified ? 1 : 0
                 );
@@ -352,8 +355,12 @@ void runtime_command_channel_loop(ProbeContext &context) {
                     action.command_id.c_str(),
                     result.phase,
                     result.error_code,
-                    result.message
+                    result.message,
+                    result.catch_outcome_wire
                 )) break;
+            if (action.action_tag == 12U && result.phase != kCommandPhaseRejected) {
+                mark_direct_catch_initial_result_published(context, action.command_id);
+            }
             continue;
         }
         if (parse_runtime_spin_command(command, &action)) {

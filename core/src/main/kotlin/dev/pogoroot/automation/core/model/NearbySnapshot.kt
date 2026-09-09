@@ -4,4 +4,5 @@ data class NearbySnapshot(
     val observedAtEpochMs: Long,
     val playerPosition: GeoPoint?,
     val spawns: List<NearbySpawn>,
+    val isComplete: Boolean = true,
 )

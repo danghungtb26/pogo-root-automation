@@ -33,14 +33,23 @@ bool handle_controller(int fd, BrokerContext &context) {
                 uint32_t phase = 0U;
                 std::string error_code;
                 std::string message;
-                if (!parse_runtime_result(runtime_result, &command_id, &phase, &error_code, &message) ||
+                uint32_t catch_outcome_wire = 0U;
+                if (!parse_runtime_result(
+                        runtime_result,
+                        &command_id,
+                        &phase,
+                        &error_code,
+                        &message,
+                        &catch_outcome_wire
+                    ) ||
                     !send_command_result(
                         fd,
                         context,
                         command_id.c_str(),
                         phase,
                         error_code.c_str(),
-                        message.c_str()
+                        message.c_str(),
+                        catch_outcome_wire
                     )) {
                     return true;
                 }

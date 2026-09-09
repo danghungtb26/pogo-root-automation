@@ -164,5 +164,6 @@ internal object BridgePayloadEncoder {
             codec.writeNullableLong(output, spawn.expiresAtEpochMs)
             output.writeInt(codec.spawnExpiryWireValue(spawn.expiryConfidence))
         }
+        output.writeBoolean(snapshot.isComplete)
     }
 }

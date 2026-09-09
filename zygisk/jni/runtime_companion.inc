@@ -185,6 +185,7 @@ void companion_handler(int fd) {
     }
 }
 
+constexpr uint32_t kCommandPhaseStarted = 2U;
 constexpr uint32_t kCommandPhaseRejected = 4U;
 constexpr uint32_t kCommandPhaseCompleted = 3U;
 constexpr uint32_t kCommandPhaseIndeterminate = 7U;

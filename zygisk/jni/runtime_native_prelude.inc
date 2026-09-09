@@ -29,7 +29,6 @@
 #include "runtime_command_protocol.h"
 #include "runtime_observation_protocol.h"
 #include "runtime_throw_events.h"
-
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
 constexpr const char *kGooglePlayProcess = "com.nianticlabs.pokemongo";
@@ -264,6 +263,11 @@ struct RuntimeBinding {
     const void *map_pokemon_get_spawn_point_id = nullptr;
     Il2CppClass *ar_plus_encounter_values_class = nullptr;
     Il2CppClass *catch_pokemon_proto_class = nullptr;
+    void *soft_sfida_rpc_handler = nullptr;
+    const void *soft_sfida_capture_rpc = nullptr;
+    Il2CppClass *soft_sfida_capture_out_proto_class = nullptr;
+    bool soft_sfida_capture_verified = false;
+    bool soft_sfida_outcome_observer_verified = false;
     const void *map_pokemon_on_tapped = nullptr;
     const void *unity_find_objects_of_type = nullptr;
     void *map_scene_view_service = nullptr;
@@ -276,6 +280,7 @@ struct RuntimeBinding {
     bool encounter_read_verified = false;
     bool catch_throw_verified = false;
     bool direct_catch_verified = false;
+    bool direct_catch_outcome_verified = false;
     bool forts_read_verified = false;
     bool spin_verified = false;
     bool exact_build_verified = false;
@@ -320,6 +325,18 @@ struct MainThreadBridge {
     bool ready = false;
 };
 
+struct PendingDirectCatch {
+    bool active = false;
+    bool initial_result_published = false;
+    bool terminal = false;
+    uint64_t encounter_id = 0U;
+    std::string command_id;
+    uint32_t phase = 0U;
+    uint32_t catch_outcome_wire = 0U;
+    std::string error_code;
+    std::string message;
+};
+
 struct MapDictionaryEntry {
     uint64_t key = 0U;
     void *key_object = nullptr;
@@ -352,6 +369,8 @@ struct ProbeContext {
     bool il2cpp_api_ready = false;
     std::string last_action_command_id;
     MainThreadBridge main_thread_bridge;
+    std::mutex pending_direct_catch_mutex;
+    PendingDirectCatch pending_direct_catch;
     std::atomic<bool> observation_running{false};
     pthread_t observation_thread{};
     bool observation_thread_started = false;
@@ -367,6 +386,8 @@ bool read_runtime_map_snapshot_on_main_thread(
     pogo_runtime::RuntimeNearbyObservation *observation,
     pogo_runtime::RuntimeFortsObservation *forts
 );
+
+void *find_active_map_pokemon_by_id(ProbeContext &context, uint64_t encounter_id);
 
 bool read_runtime_map_forts(
     const Il2CppApi &api,
@@ -476,25 +497,3 @@ void diagnose_managed_runtime_candidates(
     const ManagedDiagnosticClass *candidates,
     size_t candidate_count
 );
-
-struct RuntimeActionCommand {
-    uint64_t message_seq = 0U;
-    std::string session_id;
-    std::string command_id;
-    uint32_t action_tag = 0U;
-    std::string encounter_id;
-    uint32_t berry_wire = 0U;
-    bool close_preview_after_caught = false;
-    bool has_throw_profile = false;
-    uint32_t throw_quality_wire = 0U;
-    uint32_t throw_curve_wire = 0U;
-    uint32_t throw_encounter_mode_wire = 0U;
-    uint64_t based_on_observation_seq = 0U;
-    bool expected_lifecycle_present = false;
-    uint32_t expected_lifecycle = 0U;
-    uint64_t expires_at_elapsed_ns = 0U;
-    uint32_t pid = 0U;
-    std::string process_name;
-    std::string package_name;
-    std::string build_fingerprint;
-};

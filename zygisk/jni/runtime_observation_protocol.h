@@ -92,6 +92,7 @@ struct RuntimeNearbySpawnObservation {
 
 struct RuntimeNearbyObservation {
     std::vector<RuntimeNearbySpawnObservation> spawns;
+    bool is_complete = true;
 };
 
 struct RuntimeFortObservation {
@@ -221,6 +222,7 @@ inline bool encode_runtime_nearby_payload(
         append_f64(payload, spawn.latitude);
         append_f64(payload, spawn.longitude);
     }
+    payload->push_back(value.is_complete ? 1U : 0U);
     return true;
 }
 

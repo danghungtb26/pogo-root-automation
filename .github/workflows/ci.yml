@@ -29,6 +29,11 @@ jobs:
 
       - name: Shell syntax
         run: |
+          bash -n scripts/build-magisk.sh
+          bash -n scripts/push-emulator.sh
+          bash -n scripts/install-magisk-module.sh
+          bash -n scripts/logcat-full.sh
+          bash -n scripts/lib/emulator.sh
           bash -n scripts/package-magisk.sh
           bash -n scripts/device-smoke-test.sh
           bash -n scripts/bluestacks-smoke-test.sh

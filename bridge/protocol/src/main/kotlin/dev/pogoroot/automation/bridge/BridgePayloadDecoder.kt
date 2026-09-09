@@ -182,6 +182,11 @@ internal object BridgePayloadDecoder {
                 ),
             )
         }
-        return NearbySnapshot(observedAt, playerPosition, spawns)
+        return NearbySnapshot(
+            observedAtEpochMs = observedAt,
+            playerPosition = playerPosition,
+            spawns = spawns,
+            isComplete = if (input.available() > 0) input.readBoolean() else true,
+        )
     }
 }

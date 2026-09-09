@@ -111,9 +111,9 @@ ID to send to the game.
 
 The direct map catch and PokéStop spin bindings were added after this baseline
 capture. The native code compiles for both supported ABIs, but no new Air 1
-live invocation has been recorded yet. Until that run verifies target lookup,
-client state changes, and the asynchronous result boundary, treat the new
-capabilities as implementation-ready but unverified on device.
+live invocation has been recorded yet. `DIRECT_CATCH` remains absent until a
+run verifies target lookup, the authoritative asynchronous result boundary,
+and the complete-map synchronization postcondition.
 
 ## Action capability matrix
 
@@ -121,7 +121,7 @@ capabilities as implementation-ready but unverified on device.
 |---|---|---|
 | auto-encounter | `OPEN_ENCOUNTER` | fresh nearby observation and target id |
 | catch | `CATCH` | fresh encounter observation and definitive outcome |
-| direct map catch | `DIRECT_CATCH` | fresh nearby observation, live `WildMapPokemon`, and catch result transition; no encounter UI |
+| direct map catch | `DIRECT_CATCH` | fresh nearby observation, live `WildMapPokemon`, verified authoritative catch result observer, and complete-map synchronization; no encounter UI |
 | close catch preview | `CATCH_AND_CLOSE_PREVIEW` | `CAUGHT` confirmed before close |
 | throw quality/curve | `THROW_CONTROL`, `OBSERVE_THROW_OUTCOME` | client-owned throw result |
 | berry | `USE_BERRY` | fresh encounter and item result; current binding returns `INDETERMINATE` until Promise outcome observation is added |
@@ -132,8 +132,9 @@ capabilities as implementation-ready but unverified on device.
 | transfer | `TRANSFER_POKEMON` | storage revision and transfer result |
 
 The core already plans and serializes these actions. Direct map catch and spin
-now have version-scoped client-owned bindings inside the target process; their
-remaining gate is live Air 1 verification of object lookup and postconditions.
+now have version-scoped client-owned bindings inside the target process. Spin
+has its own live verification gate; direct map catch additionally requires the
+authoritative result observer before the capability can be exposed.
 
 ## Current action boundary
 

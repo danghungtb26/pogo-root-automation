@@ -21,4 +21,5 @@ data class RawNearbyObservation(
     val playerLatitude: Double?,
     val playerLongitude: Double?,
     val spawns: List<RawNearbySpawn>,
+    val isComplete: Boolean = true,
 )

@@ -111,7 +111,8 @@ bool send_command_result(
     const char *command_id,
     uint32_t phase,
     const char *error_code,
-    const char *message
+    const char *message,
+    uint32_t catch_outcome_wire = 0U
 ) {
     if (command_id == nullptr || command_id[0] == '\0') return false;
     const uint64_t message_seq = context.next_message_seq++;
@@ -125,6 +126,11 @@ bool send_command_result(
     append_nullable_string(&payload, message);
     append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
     append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
+    if (catch_outcome_wire != 0U) {
+        if (catch_outcome_wire > 6U) return false;
+        payload.push_back(1U);
+        append_u32(&payload, catch_outcome_wire);
+    }
     const bool sent = send_bridge_frame(fd, kBridgeCommandResultType, message_seq, payload);
     __android_log_print(
         sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
@@ -351,7 +357,8 @@ bool parse_runtime_result(
     std::string *command_id,
     uint32_t *phase,
     std::string *error_code,
-    std::string *message
+    std::string *message,
+    uint32_t *catch_outcome_wire = nullptr
 ) {
     size_t offset = 0U;
     uint32_t version = 0U;
@@ -361,6 +368,12 @@ bool parse_runtime_result(
         !read_be32(payload, &offset, phase) ||
         !read_string(payload, &offset, error_code) ||
         !read_string(payload, &offset, message)) return false;
+    if (catch_outcome_wire != nullptr) *catch_outcome_wire = 0U;
+    if (offset < payload.size()) {
+        if (payload[offset++] != 1U || catch_outcome_wire == nullptr ||
+            !read_be32(payload, &offset, catch_outcome_wire) ||
+            *catch_outcome_wire == 0U || *catch_outcome_wire > 6U) return false;
+    }
     return offset == payload.size();
 }
 

@@ -39,12 +39,14 @@ object RuntimeNearbyPayloadCodec {
                     )
                 }
             }
+            val isComplete = if (input.available() > 0) input.readBoolean() else true
             require(input.available() == 0) { "trailing runtime nearby payload" }
             RawNearbyObservation(
                 observedAtEpochMs = observedAtEpochMs,
                 playerLatitude = null,
                 playerLongitude = null,
                 spawns = spawns,
+                isComplete = isComplete,
             )
         }
     }

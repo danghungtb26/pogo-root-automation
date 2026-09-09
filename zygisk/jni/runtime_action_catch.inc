@@ -75,10 +75,12 @@ RuntimeActionResult execute_runtime_catch(
         RuntimeActionResult direct_result{};
         const RuntimeBinding direct_binding = runtime_binding_snapshot(context);
         if (!kDirectCatchExecutionEnabled || !direct_binding.exact_build_verified ||
-            !direct_binding.direct_catch_verified ||
-            direct_binding.map_pokemon_try_capture == nullptr) {
+            !direct_binding.soft_sfida_capture_verified ||
+            !direct_binding.soft_sfida_outcome_observer_verified ||
+            direct_binding.soft_sfida_rpc_handler == nullptr ||
+            direct_binding.soft_sfida_capture_rpc == nullptr) {
             direct_result.error_code = "binding_unavailable";
-            direct_result.message = "direct map catch is unavailable for this verified build";
+            direct_result.message = "direct map catch is unavailable until the verified SoftSfida RPC and outcome observer are installed";
             return direct_result;
         }
         if (command.pid != static_cast<uint32_t>(context.pid) ||
@@ -114,19 +116,25 @@ RuntimeActionResult execute_runtime_catch(
             direct_result.message = "map spawn id is invalid";
             return direct_result;
         }
+        if (!begin_pending_direct_catch(context, command.command_id, encounter_id)) {
+            direct_result.error_code = "direct_catch_busy";
+            direct_result.message = "another direct map catch is still awaiting its authoritative result";
+            return direct_result;
+        }
         context.last_action_command_id = command.command_id;
         const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
             context, encounter_id
         );
         if (outcome == MainThreadActionOutcome::kInvoked) {
-            direct_result.phase = kCommandPhaseIndeterminate;
-            direct_result.error_code = "direct_catch_outcome_unavailable";
-            direct_result.message = "MapPokemon.TryCapture was invoked; server catch outcome is not yet observed";
+            direct_result.phase = kCommandPhaseStarted;
+            direct_result.error_code = "";
+            direct_result.message = "SoftSfidaCaptureRpc invoked; awaiting authoritative catch result";
         } else if (outcome == MainThreadActionOutcome::kIndeterminate) {
             direct_result.phase = kCommandPhaseIndeterminate;
             direct_result.error_code = "invoke_outcome_indeterminate";
-            direct_result.message = "MapPokemon.TryCapture may have run but the main-thread result was lost";
+            direct_result.message = "SoftSfidaCaptureRpc may have run but the main-thread result was lost";
         } else {
+            clear_pending_direct_catch(context);
             direct_result.error_code = "catch_target_unavailable";
             direct_result.message = "the requested map Pokémon is no longer available";
         }
