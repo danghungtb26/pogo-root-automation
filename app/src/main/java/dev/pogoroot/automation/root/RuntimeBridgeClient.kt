@@ -60,6 +60,11 @@ class RuntimeBridgeClient(
             val ready = events.findAndRemove { it is BridgeEvent.RuntimeReady }
             if (ready is BridgeEvent.RuntimeReady) {
                 runtimeReady = ready
+                // Runtime inspection used to require an explicit HTTP diagnostic
+                // call. Bootstrap it automatically only after a controller is
+                // connected, so the native observer always has a consumer and
+                // never floods the broker socket during game startup.
+                requestRuntimeDiagnostic().getOrThrow()
                 return@runCatching ready
             }
             readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
@@ -93,10 +98,10 @@ class RuntimeBridgeClient(
     }
 
     /**
-     * Requests the explicit post-init read-only inspector in the injected
-     * process. This bypasses gameplay capability gates by design: the payload
-     * is a reserved Alert marker and the native side never publishes a
-     * mutation capability for it.
+     * Requests the post-init runtime binding bootstrap in the injected process.
+     * The marker is retained for wire compatibility with existing diagnostic
+     * tooling, but native handling is intentionally bounded and no longer runs
+     * a full class/metadata survey.
      */
     fun requestRuntimeDiagnostic(): Result<Unit> = runCatching {
         val ready = runtimeReady ?: error("runtime bridge is not connected")
