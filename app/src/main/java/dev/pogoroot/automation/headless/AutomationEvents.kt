@@ -3,6 +3,7 @@ package dev.pogoroot.automation.headless
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.widget.Toast
 
 enum class AutomationEventType {
@@ -35,9 +36,14 @@ class ToastAutomationEventSink(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun publish(event: AutomationEvent) {
+        Log.i(LOG_TAG, "automation event type=${event.type} message=${event.message}")
         if (!configRepository.read().showActionToasts) return
         mainHandler.post {
             Toast.makeText(appContext, event.message, Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private companion object {
+        const val LOG_TAG = "PogoRootAutomation"
     }
 }

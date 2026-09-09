@@ -209,6 +209,29 @@ class AutomationCoordinatorTest {
     }
 
     @Test
+    fun `encounter catch carries the requested excellent throw profile`() {
+        val action = coordinator.plan(
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.ENCOUNTER,
+                encounter = EncounterSnapshot(
+                    encounterId = "enc-excellent",
+                    speciesId = 25,
+                    speciesName = "Pikachu",
+                    observedAtEpochMs = 1_000L,
+                ),
+            ),
+            policy = AutomationPolicy(
+                autoCatch = true,
+                catchPolicy = CatchPolicy(
+                    throwProfile = ThrowProfile(qualityTarget = ThrowQualityTarget.EXCELLENT),
+                ),
+            ),
+        ).single() as AutomationAction.Catch
+
+        assertEquals(ThrowQualityTarget.EXCELLENT, action.throwProfile.qualityTarget)
+    }
+
+    @Test
     fun `plans encounter snapshot before catch`() {
         val actions = coordinator.plan(
             snapshot = AutomationSnapshot(

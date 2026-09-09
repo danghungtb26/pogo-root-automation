@@ -60,6 +60,7 @@ Optional query parameters:
 
 - `autoEncounter=true|false`
 - `catch=true|false` or `autoCatch=true|false`
+- `autoExcellent=true|false` — convenience alias for the encounter throw quality
 - `autoCloseCatchPreview=true|false` — only active when the verified runtime
   advertises `CATCH_AND_CLOSE_PREVIEW`; otherwise normal catch remains enabled
 - `spin=true|false` or `autoSpin=true|false`
@@ -77,12 +78,17 @@ Disables automation while leaving the service/API alive.
 ### `POST /v1/config`
 
 Supported parameters include `autoEncounter`, `autoCatch`, `autoSpin`,
+`autoExcellent`,
 `autoCloseCatchPreview`,
 `autoDiscard`, `autoTransfer`, `keepHundo`, `keepShiny`, `keepBackground`,
 `keepFavorite`, `transferMinIv`, `berry`, `loopIntervalMs`,
 `spinSettleDelayMs`, `catchSettleDelayMs`,
 `buildFingerprints`, `throwQuality`, `curve`, `arPlus`, `autoSnapshot`,
 `snapshotArPlus`, and `toasts`.
+
+`autoExcellent=true` is a convenience alias for
+`throwQuality=excellent`; `GET /v1/status` and `POST /v1/config` expose the
+resolved value as both `autoExcellent` and `throwQuality`.
 
 Throw settings are client-owned intents: `throwQuality` accepts `any`, `nice`,
 `great`, or `excellent`; `curve` accepts `any`, `straight`, or `curve`.
@@ -94,6 +100,13 @@ throw settings: it uses `MapPokemon.TryCapture` with an ordinary Poké Ball and
 does not open the encounter UI. It is intentionally limited to `catchAll`,
 because nearby map state does not contain IV/shiny metadata. The spin branch
 reads active PokéStops and invokes the client-owned spinner method.
+
+Selecting `excellent` does not fabricate an excellent result. The runner only
+releases a completed encounter catch after the runtime supplies a catch outcome
+and, for a structured throw profile, a real throw outcome. A `MISSED` outcome is
+still a completed throw attempt and is not silently retried. The current native
+runtime does not publish the required throw capabilities, so this setting stays
+blocked until the exact-build user/throw binding is calibrated.
 
 The native bindings are now implemented and compiled for the supported ABIs,
 but capability publication still depends on the exact runtime resolver. A

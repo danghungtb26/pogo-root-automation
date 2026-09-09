@@ -49,5 +49,19 @@ int main() {
 
     forts.forts.front().type = 2;
     assert(!pogo_runtime::encode_runtime_forts_payload(forts, &payload));
+
+    pogo_runtime::RuntimeThrowDiagnosticObservation throw_diagnostic;
+    throw_diagnostic.encounter_id = 99U;
+    throw_diagnostic.stage = pogo_runtime::kThrowCapturePromiseCreated;
+    throw_diagnostic.ball_type = 1;
+    throw_diagnostic.flags = pogo_runtime::kThrowBallInPlay |
+        pogo_runtime::kThrowCapturePromise;
+    std::vector<uint8_t> throw_envelope;
+    assert(pogo_runtime::encode_runtime_throw_diagnostic_observation(
+        throw_diagnostic, 55U, 66U, &throw_envelope
+    ));
+    assert(read_u32(throw_envelope, 0U) == pogo_runtime::kRuntimeObservationEnvelopeVersion);
+    assert(read_u32(throw_envelope, 4U) == pogo_runtime::kThrowDiagnosticObservationType);
+    assert(read_u32(throw_envelope, 8U) == pogo_runtime::kThrowDiagnosticPayloadVersion);
     return 0;
 }

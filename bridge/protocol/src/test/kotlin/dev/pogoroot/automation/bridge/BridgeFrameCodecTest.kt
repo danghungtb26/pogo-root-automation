@@ -142,6 +142,7 @@ class BridgeFrameCodecTest {
         assertEquals(1, ObservationType.LIFECYCLE.wireValue)
         assertEquals(4, CommandPhase.REJECTED.wireValue)
         assertEquals(7, CommandPhase.INDETERMINATE.wireValue)
+        assertEquals(8, ObservationType.THROW_DIAGNOSTIC.wireValue)
     }
 
     @Test

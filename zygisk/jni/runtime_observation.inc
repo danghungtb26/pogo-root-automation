@@ -257,6 +257,52 @@ bool send_runtime_lifecycle(
     return sent;
 }
 
+bool send_runtime_throw_diagnostic(
+    ProbeContext &context,
+    const pogo_runtime::RuntimeThrowDiagnosticObservation &diagnostic
+) {
+    std::vector<uint8_t> envelope;
+    if (!pogo_runtime::encode_runtime_throw_diagnostic_observation(
+            diagnostic,
+            static_cast<uint64_t>(now_epoch_millis()),
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            &envelope
+        )) return false;
+    const bool sent = send_internal_message(
+        context.fd,
+        pogo_runtime::kRuntimeObservationMagic,
+        envelope
+    );
+    __android_log_print(
+        sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "runtime throw diagnostic stage=%u encounter=%llu ball=%d flags=0x%x sent=%d",
+        diagnostic.stage,
+        static_cast<unsigned long long>(diagnostic.encounter_id),
+        diagnostic.ball_type,
+        diagnostic.flags,
+        sent ? 1 : 0
+    );
+    return sent;
+}
+
+bool send_pending_runtime_throw_events(ProbeContext &context) {
+    RuntimeThrowEventRecord event;
+    while (context.throw_events.pop(&event)) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime throw event dispatch seq=%llu stage=%u object=%p encounter=%llu",
+            static_cast<unsigned long long>(event.sequence),
+            event.diagnostic.stage,
+            reinterpret_cast<void *>(event.ball_instance),
+            static_cast<unsigned long long>(event.diagnostic.encounter_id)
+        );
+        if (!send_runtime_throw_diagnostic(context, event.diagnostic)) return false;
+    }
+    return true;
+}
+
 void *runtime_observation_thread(void *opaque_context) {
     auto *context = static_cast<ProbeContext *>(opaque_context);
     if (context == nullptr) return nullptr;
@@ -268,15 +314,16 @@ void *runtime_observation_thread(void *opaque_context) {
     uint32_t nearby_ticks = 0U;
     uint32_t encounter_owner_refresh_ticks = 0U;
     while (context->observation_running.load() && kill(getpid(), 0) == 0) {
+        if (!send_pending_runtime_throw_events(*context)) break;
         bool active_encounter = false;
         pogo_runtime::RuntimeEncounterObservation observation{};
         const Il2CppApi &api = context->il2cpp_api;
-        const RuntimeBinding binding = runtime_binding_snapshot(*context);
         if (encounter_owner_refresh_ticks >= 4U) {
             refresh_runtime_encounter_owners(*context);
             encounter_owner_refresh_ticks = 0U;
         }
         ++encounter_owner_refresh_ticks;
+        const RuntimeBinding binding = runtime_binding_snapshot(*context);
         if (binding.map_entity_read_verified &&
             context->main_thread_bridge.ready && nearby_ticks >= 2U) {
             pogo_runtime::RuntimeNearbyObservation nearby_observation;
@@ -305,6 +352,9 @@ void *runtime_observation_thread(void *opaque_context) {
                     encounter_binding.encounter_state,
                     &observation
                 );
+                if (active_encounter) {
+                    context->active_encounter_id.store(observation.encounter_id);
+                }
                 api.thread_detach(thread);
             }
         }
@@ -324,6 +374,7 @@ void *runtime_observation_thread(void *opaque_context) {
             was_encounter = true;
             last_encounter_id = observation.encounter_id;
         } else {
+            const bool left_encounter = was_encounter;
             if (was_encounter) {
                 __android_log_print(
                     ANDROID_LOG_INFO,
@@ -342,9 +393,11 @@ void *runtime_observation_thread(void *opaque_context) {
             ++lifecycle_heartbeat_ticks;
             was_encounter = false;
             last_encounter_id = 0U;
+            if (left_encounter) context->active_encounter_id.store(0U);
             sent_initial_state = true;
         }
-        usleep(750000U);
+        if (!send_pending_runtime_throw_events(*context)) break;
+        usleep(100000U);
     }
     context->observation_running.store(false);
     return nullptr;

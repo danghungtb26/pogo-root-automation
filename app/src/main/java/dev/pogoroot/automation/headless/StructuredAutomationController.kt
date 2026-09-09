@@ -21,6 +21,7 @@ import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
+import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
 
 data class StructuredAutomationTick(
     val runtimeSessionId: String?,
@@ -98,6 +99,26 @@ class StructuredAutomationController(
                                     .onSuccess(onMapTarget)
                                     .onFailure { error -> lastError = "map target decode: ${error.message}" }
                             }
+                            processedObservationSeq = event.messageSeq
+                            observationSeq = event.messageSeq
+                            continue
+                        }
+                        if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.THROW_DIAGNOSTIC) {
+                            RuntimeThrowDiagnosticPayloadCodec.decode(event.payload)
+                                .onSuccess { diagnostic ->
+                                    eventSink.publish(
+                                        AutomationEvent(
+                                            AutomationEventType.INFO,
+                                            diagnostic.message(),
+                                        ),
+                                    )
+                                }
+                                .onFailure { error ->
+                                    lastError = "throw diagnostic decode: ${error.message}"
+                                    eventSink.publish(
+                                        AutomationEvent(AutomationEventType.ERROR, lastError!!),
+                                    )
+                                }
                             processedObservationSeq = event.messageSeq
                             observationSeq = event.messageSeq
                             continue

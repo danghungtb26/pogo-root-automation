@@ -12,16 +12,42 @@ bool parse_runtime_catch_command(
     uint32_t payload_version = 0U;
     uint32_t catch_reason = 0U;
     uint8_t lifecycle_present = 0U;
+    uint8_t close_preview_after_caught = 0U;
     if (!read_be32(command, &offset, &message_type) ||
         !read_be64(command, &offset, &parsed->message_seq) ||
         !read_be32(command, &offset, &payload_version) ||
         !read_string(command, &offset, &parsed->session_id) ||
         !read_string(command, &offset, &parsed->command_id) ||
         !read_be32(command, &offset, &parsed->action_tag) ||
-        (parsed->action_tag != 3U && parsed->action_tag != 9U && parsed->action_tag != 12U) ||
+        (parsed->action_tag != 3U && parsed->action_tag != 9U &&
+            parsed->action_tag != 10U && parsed->action_tag != 12U) ||
         !read_string(command, &offset, &parsed->encounter_id) ||
-        !read_be32(command, &offset, &catch_reason) ||
-        !read_be64(command, &offset, &parsed->based_on_observation_seq) ||
+        !read_be32(command, &offset, &catch_reason)) return false;
+
+    if (catch_reason == 0U || catch_reason > 5U) return false;
+    if (parsed->action_tag == 10U) {
+        // BridgeActionCodec writes this byte followed by the versioned
+        // ThrowProfile. Parse it even while execution is disabled so an
+        // unsupported runtime returns a binding error instead of silently
+        // treating an EXCELLENT request as malformed.
+        if (offset >= command.size()) return false;
+        close_preview_after_caught = command[offset++];
+        if (close_preview_after_caught > 1U ||
+            !read_be32(command, &offset, &parsed->throw_quality_wire) ||
+            !read_be32(command, &offset, &parsed->throw_curve_wire) ||
+            !read_be32(command, &offset, &parsed->throw_encounter_mode_wire)) {
+            return false;
+        }
+        if (parsed->throw_quality_wire < 1U || parsed->throw_quality_wire > 4U ||
+            parsed->throw_curve_wire < 1U || parsed->throw_curve_wire > 3U ||
+            parsed->throw_encounter_mode_wire < 1U || parsed->throw_encounter_mode_wire > 2U) {
+            return false;
+        }
+        parsed->close_preview_after_caught = close_preview_after_caught != 0U;
+        parsed->has_throw_profile = true;
+    }
+
+    if (!read_be64(command, &offset, &parsed->based_on_observation_seq) ||
         offset >= command.size()) return false;
 
     lifecycle_present = command[offset++];
@@ -35,9 +61,6 @@ bool parse_runtime_catch_command(
         !read_string(command, &offset, &parsed->package_name) ||
         !read_string(command, &offset, &parsed->build_fingerprint)) return false;
 
-    // The default Catch wire format has no throw profile. Keep the reason
-    // validated without exposing it as an execution parameter in native.
-    if (catch_reason == 0U || catch_reason > 5U) return false;
     return message_type == kBridgeCommandType && payload_version == 1U &&
         parsed->message_seq > 0U && !parsed->session_id.empty() &&
         !parsed->command_id.empty() && !parsed->encounter_id.empty() &&

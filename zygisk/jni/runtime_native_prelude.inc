@@ -28,6 +28,7 @@
 #include "zygisk.hpp"
 #include "runtime_command_protocol.h"
 #include "runtime_observation_protocol.h"
+#include "runtime_throw_events.h"
 
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
@@ -238,6 +239,11 @@ struct RuntimeBinding {
     void *encounter_pokemon = nullptr;
     void *encounter_state = nullptr;
     void *encounter_interaction = nullptr;
+    const void *encounter_interaction_pokeball_in_play = nullptr;
+    const void *pokeball_launch = nullptr, *pokeball_bsuz = nullptr;
+    const void *encounter_attempt_capture = nullptr, *encounter_throw_missed = nullptr;
+    bool throw_hook_binding_verified = false;
+    bool throw_hooks_installed = false;
     void *encounter_gui = nullptr;
     void *pokeball_service = nullptr;
     const void *pokeball_service_throw = nullptr;
@@ -341,6 +347,8 @@ struct ProbeContext {
     Il2CppApi il2cpp_api;
     RuntimeBinding binding;
     std::mutex binding_mutex;
+    RuntimeThrowEventQueue throw_events;
+    std::atomic<uint64_t> active_encounter_id{0U};
     bool il2cpp_api_ready = false;
     std::string last_action_command_id;
     MainThreadBridge main_thread_bridge;
@@ -428,7 +436,17 @@ MainThreadActionOutcome spin_runtime_pokestop_on_main_thread(
 
 bool refresh_runtime_encounter_owners(ProbeContext &context);
 
+bool bind_runtime_throw_methods(
+    const Il2CppApi &api,
+    const Il2CppAssembly **assemblies,
+    size_t assembly_count,
+    RuntimeBinding *binding
+);
+
+bool install_runtime_throw_hooks(ProbeContext &context);
+
 jobject load_controller_bridge_class(JNIEnv *env);
+void *request_main_thread_object(ProbeContext &, const char *, const char *);
 
 void *find_unity_object_on_main_thread(
     ProbeContext &context,
@@ -466,6 +484,11 @@ struct RuntimeActionCommand {
     uint32_t action_tag = 0U;
     std::string encounter_id;
     uint32_t berry_wire = 0U;
+    bool close_preview_after_caught = false;
+    bool has_throw_profile = false;
+    uint32_t throw_quality_wire = 0U;
+    uint32_t throw_curve_wire = 0U;
+    uint32_t throw_encounter_mode_wire = 0U;
     uint64_t based_on_observation_seq = 0U;
     bool expected_lifecycle_present = false;
     uint32_t expected_lifecycle = 0U;

@@ -467,5 +467,23 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
     );
     diagnose_map_runtime_classes(api, assemblies, assembly_count);
     scan_runtime_map_class_names(api, assemblies, assembly_count);
+    RuntimeBinding throw_binding = runtime_binding_snapshot(context);
+    const bool throw_methods_bound = bind_runtime_throw_methods(
+        api, assemblies, assembly_count, &throw_binding
+    );
+    {
+        std::lock_guard<std::mutex> binding_lock(context.binding_mutex);
+        context.binding.pokeball_launch = throw_binding.pokeball_launch;
+        context.binding.pokeball_bsuz = throw_binding.pokeball_bsuz;
+        context.binding.encounter_attempt_capture = throw_binding.encounter_attempt_capture;
+        context.binding.encounter_throw_missed = throw_binding.encounter_throw_missed;
+        context.binding.throw_hook_binding_verified = throw_binding.throw_hook_binding_verified;
+    }
+    __android_log_print(
+        throw_methods_bound ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: throw methods bound=%d",
+        throw_methods_bound ? 1 : 0
+    );
     api.thread_detach(thread); return csharp_image != nullptr;
 }

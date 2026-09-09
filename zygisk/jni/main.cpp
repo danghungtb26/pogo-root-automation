@@ -1,5 +1,6 @@
 // Keep the native runtime in focused units while preserving one translation
 // unit for Zygisk's registration macros and the existing internal linkage.
+#include <sys/mman.h>
 #include "runtime_native_prelude.inc"
 #include "runtime_native_common.inc"
 #include "runtime_bridge_protocol.inc"
@@ -26,6 +27,7 @@
 #include "runtime_map_dictionary.inc"
 #include "runtime_map_forts.inc"
 #include "runtime_probe_map_instance.inc"
+#include "runtime_throw_hooks.inc"
 #include "runtime_observation.inc"
 #include "runtime_map_actions.inc"
 #include "runtime_direct_map_actions.inc"

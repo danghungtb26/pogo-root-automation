@@ -1,5 +1,6 @@
 package dev.pogoroot.automation.overlay
 
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.headless.AutomationConfigRepository
 import dev.pogoroot.automation.headless.BerryMode
@@ -20,7 +21,7 @@ internal object AutomationSettingsCatalog {
             AutomationSettingsCategory(
                 id = "automation",
                 title = "Automation",
-                summary = "Master ${onOff(config.enabled)} · Map walk ${onOff(config.mapTapWalkEnabled)} · Catch ${onOff(config.autoCatch)} · Spin ${onOff(config.autoSpin)}",
+                summary = "Master ${onOff(config.enabled)} · Map walk ${onOff(config.mapTapWalkEnabled)} · Catch ${onOff(config.autoCatch)} · Throw ${throwQualityLabel(config.catchThrowQuality)} · Spin ${onOff(config.autoSpin)}",
             ),
             AutomationSettingsCategory(
                 id = "discard",
@@ -67,6 +68,13 @@ internal object AutomationSettingsCatalog {
         BerryMode.PINAP -> "Pinap Berry"
         BerryMode.GOLDEN_RAZZ -> "Golden Razz Berry"
         BerryMode.SILVER_PINAP -> "Silver Pinap Berry"
+    }
+
+    fun throwQualityLabel(target: ThrowQualityTarget): String = when (target) {
+        ThrowQualityTarget.ANY -> "Any"
+        ThrowQualityTarget.NICE -> "Nice"
+        ThrowQualityTarget.GREAT -> "Great"
+        ThrowQualityTarget.EXCELLENT -> "Excellent"
     }
 
     private fun cooldownModeLabel(mode: TeleportCooldownMode): String = when (mode) {

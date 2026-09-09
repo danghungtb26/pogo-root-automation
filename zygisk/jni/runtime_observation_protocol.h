@@ -23,7 +23,42 @@ constexpr uint32_t kRuntimeEncounterPayloadVersion = 2U;
 constexpr uint32_t kRuntimeEncounterPayloadMagic = 0x504F4745U;  // POGE
 constexpr uint32_t kMapTargetObservationType = 7U;
 constexpr uint32_t kMapTargetPayloadVersion = 1U;
+constexpr uint32_t kThrowDiagnosticObservationType = 8U;
+constexpr uint32_t kThrowDiagnosticPayloadVersion = 1U;
+constexpr uint32_t kRuntimeThrowDiagnosticPayloadMagic = 0x504F4754U;  // POGT
 constexpr uint32_t kMaxObservationStringBytes = 65536U;
+
+enum RuntimeThrowDiagnosticStage : uint32_t {
+    kThrowStateChanged = 1U,
+    kThrowCapturePromiseCreated = 2U,
+    kThrowBallStopped = 3U,
+    kThrowUserLaunch = 4U,
+    kThrowCaptureAttempt = 5U,
+    kThrowMissed = 6U,
+    kThrowDataReceived = 7U,
+};
+
+enum RuntimeThrowDiagnosticFlags : uint32_t {
+    kThrowInteractionInPlay = 1U << 0U,
+    kThrowBallInPlay = 1U << 1U,
+    kThrowDpjx = 1U << 2U,
+    kThrowDpki = 1U << 3U,
+    kThrowDpks = 1U << 4U,
+    kThrowDplt = 1U << 5U,
+    kThrowDplu = 1U << 6U,
+    kThrowHitCollision = 1U << 7U,
+    kThrowCapturePromise = 1U << 8U,
+    kThrowHitBullseye = 1U << 9U,
+    kThrowSpinning = 1U << 10U,
+    kThrowMissedData = 1U << 11U,
+};
+
+struct RuntimeThrowDiagnosticObservation {
+    uint64_t encounter_id = 0U;
+    uint32_t stage = kThrowStateChanged;
+    int32_t ball_type = 0;
+    uint32_t flags = 0U;
+};
 
 struct MapTargetObservation {
     std::string tap_id;
@@ -148,6 +183,27 @@ inline bool valid_runtime_forts_observation(const RuntimeFortsObservation &value
             !std::isfinite(fort.longitude) || fort.longitude < -180.0 ||
             fort.longitude > 180.0) return false;
     }
+    return true;
+}
+
+inline bool valid_runtime_throw_diagnostic(
+    const RuntimeThrowDiagnosticObservation &value
+) {
+    return value.stage >= kThrowStateChanged && value.stage <= kThrowDataReceived &&
+        value.ball_type >= 0;
+}
+
+inline bool encode_runtime_throw_diagnostic_payload(
+    const RuntimeThrowDiagnosticObservation &value,
+    std::vector<uint8_t> *payload
+) {
+    if (payload == nullptr || !valid_runtime_throw_diagnostic(value)) return false;
+    payload->clear();
+    append_u32(payload, kRuntimeThrowDiagnosticPayloadMagic);
+    append_u32(payload, value.stage);
+    append_u64(payload, value.encounter_id);
+    append_u32(payload, static_cast<uint32_t>(value.ball_type));
+    append_u32(payload, value.flags);
     return true;
 }
 
@@ -276,6 +332,26 @@ inline bool encode_runtime_encounter_observation(
     append_u32(envelope, kRuntimeObservationEnvelopeVersion);
     append_u32(envelope, kEncounterObservationType);
     append_u32(envelope, kRuntimeEncounterPayloadVersion);
+    append_u32(envelope, static_cast<uint32_t>(payload.size()));
+    envelope->insert(envelope->end(), payload.begin(), payload.end());
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
+}
+
+inline bool encode_runtime_throw_diagnostic_observation(
+    const RuntimeThrowDiagnosticObservation &value,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr) return false;
+    std::vector<uint8_t> payload;
+    if (!encode_runtime_throw_diagnostic_payload(value, &payload)) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, kThrowDiagnosticObservationType);
+    append_u32(envelope, kThrowDiagnosticPayloadVersion);
     append_u32(envelope, static_cast<uint32_t>(payload.size()));
     envelope->insert(envelope->end(), payload.begin(), payload.end());
     append_u64(envelope, observed_at_epoch_ms);

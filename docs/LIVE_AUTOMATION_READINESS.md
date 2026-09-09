@@ -167,6 +167,13 @@ but the updated route still needs a live Air 1 run after the controller's root
 permission is restored. This keeps `autoCatch` from issuing unsupported
 commands while the runtime binding is still being calibrated.
 
+The bridge/native parser now accepts the structured throw payload, including an
+`EXCELLENT` quality intent, and preserves it through the exact command boundary.
+That parser change does not publish `THROW_CONTROL` or enable encounter catch:
+the runtime still lacks a verified user-throw hook and authoritative catch
+outcome. A completed catch without `CatchOutcome`, or a structured throw without
+`ThrowOutcome`, is converted to `INDETERMINATE` by the core runner.
+
 All other actions still return `binding_not_implemented` or a capability
 rejection. Configuring a berry mode or allowlist entry alone cannot create an
 encounter observation or prove the item result. The structured controller may

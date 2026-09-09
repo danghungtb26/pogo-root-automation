@@ -53,6 +53,8 @@ enum class ObservationType(val wireValue: Int) {
     POKEMON_STORAGE(6),
     /** Version-scoped tap resolved by the Pokémon GO map binding. */
     MAP_TARGET(7),
+    /** Read-only throw-pipeline diagnostics from the verified runtime. */
+    THROW_DIAGNOSTIC(8),
 }
 
 enum class CommandPhase(val wireValue: Int) {

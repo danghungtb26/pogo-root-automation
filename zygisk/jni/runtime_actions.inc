@@ -293,6 +293,7 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
         capabilities.emplace_back("DIRECT_CATCH");
     }
     if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
+    if (binding.throw_hooks_installed) capabilities.emplace_back("OBSERVE_THROW_EVENTS");
     if (capabilities.empty()) return false;
     std::vector<uint8_t> payload;
     append_u32(&payload, 1U);
@@ -326,13 +327,15 @@ void runtime_command_channel_loop(ProbeContext &context) {
             // process. It never publishes a gameplay capability.
             const bool success = run_managed_runtime_diagnostic(context);
             if (success) {
+                const bool throw_hooks_installed = install_runtime_throw_hooks(context);
                 const RuntimeBinding binding = runtime_binding_snapshot(context);
                 const bool capabilities_sent = send_runtime_capability_update(context.fd, binding);
                 __android_log_print(
                     capabilities_sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
-                    "runtime diagnostic capabilities sent=%d berry=%d encounter_read=%d",
+                    "runtime diagnostic capabilities sent=%d throw_hooks=%d berry=%d encounter_read=%d",
                     capabilities_sent ? 1 : 0,
+                    throw_hooks_installed ? 1 : 0,
                     binding.use_berry_verified ? 1 : 0,
                     binding.encounter_read_verified ? 1 : 0
                 );
@@ -431,8 +434,8 @@ void *binding_probe_thread(void *opaque_context) {
             if (api_ready) {
                 context->il2cpp_api = resolved_api;
                 context->il2cpp_api_ready = true;
+                break;
             }
-            break;
         }
         usleep(kProbeDelayUs);
     }

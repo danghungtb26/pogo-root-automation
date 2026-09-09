@@ -203,31 +203,32 @@ class AutomationRunner(
         if (execution.request.runtimeSessionId != identity?.runtimeSessionId) {
             return Result.failure(IllegalStateException("result belongs to an old runtime session"))
         }
-        val resultSeq = execution.runtimeMessageSeq
+        val validatedExecution = execution.validateCatchCompletion()
+        val resultSeq = validatedExecution.runtimeMessageSeq
         if (resultSeq != null && resultSeq <= lastMessageSeq) {
             return Result.failure(IllegalStateException("stale runtime result sequence"))
         }
         if (resultSeq != null) lastMessageSeq = resultSeq
-        if (!isValidTransition(current.phase, execution.phase)) {
+        if (!isValidTransition(current.phase, validatedExecution.phase)) {
             return Result.failure(
-                IllegalStateException("invalid action transition ${current.phase} -> ${execution.phase}"),
+                IllegalStateException("invalid action transition ${current.phase} -> ${validatedExecution.phase}"),
             )
         }
 
-        active = execution
-        if (execution.phase == ActionExecutionPhase.INDETERMINATE) {
+        active = validatedExecution
+        if (validatedExecution.phase == ActionExecutionPhase.INDETERMINATE) {
             suspended = true
             needsResync = true
-            blockedActionAfterIndeterminate = execution.request.action
-            consumeQueuedAction(execution.request.action)
-            lastError = execution.message ?: "action outcome is indeterminate"
-        } else if (execution.phase.isDefinitive) {
-            consumeQueuedAction(execution.request.action)
-            requeueSamePlanAfterSettle = execution.phase == ActionExecutionPhase.COMPLETED &&
-                execution.request.settleDelayNs > 0L
+            blockedActionAfterIndeterminate = validatedExecution.request.action
+            consumeQueuedAction(validatedExecution.request.action)
+            lastError = validatedExecution.message ?: "action outcome is indeterminate"
+        } else if (validatedExecution.phase.isDefinitive) {
+            consumeQueuedAction(validatedExecution.request.action)
+            requeueSamePlanAfterSettle = validatedExecution.phase == ActionExecutionPhase.COMPLETED &&
+                validatedExecution.request.settleDelayNs > 0L
             active = null
-            lastError = execution.message.takeUnless { execution.phase == ActionExecutionPhase.COMPLETED }
-            scheduleSettle(execution.request.settleDelayNs)
+            lastError = validatedExecution.message.takeUnless { validatedExecution.phase == ActionExecutionPhase.COMPLETED }
+            scheduleSettle(validatedExecution.request.settleDelayNs)
         }
         return Result.success(snapshot())
     }

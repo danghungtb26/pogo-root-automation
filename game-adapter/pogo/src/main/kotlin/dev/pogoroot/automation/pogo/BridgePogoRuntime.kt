@@ -286,6 +286,7 @@ class BridgePogoRuntimeSource(
             ObservationType.INVENTORY,
             ObservationType.POKEMON_STORAGE,
             ObservationType.MAP_TARGET,
+            ObservationType.THROW_DIAGNOSTIC,
             -> Unit
         }
         observationStates[event.messageSeq] = CachedRuntimeState(lifecycle, nearby, encounter, forts)

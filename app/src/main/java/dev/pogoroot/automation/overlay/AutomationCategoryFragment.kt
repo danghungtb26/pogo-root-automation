@@ -15,6 +15,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
+import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.headless.BerryMode
 
@@ -64,6 +65,15 @@ class AutomationCategoryFragment : Fragment() {
         val enabled = switch(host, "Enable automation", config.enabled)
         val mapTapWalk = switch(host, "Walk to verified map taps", config.mapTapWalkEnabled)
         val autoCatch = switch(host, "Auto catch", config.autoCatch)
+        val throwQualityGroup = RadioGroup(host).apply { orientation = RadioGroup.VERTICAL }
+        val throwQualityOptions = ThrowQualityTarget.entries.map { target ->
+            target to RadioButton(host).apply {
+                text = AutomationSettingsCatalog.throwQualityLabel(target)
+                id = View.generateViewId()
+                isChecked = target == config.catchThrowQuality
+            }
+        }
+        throwQualityOptions.forEach { (_, option) -> throwQualityGroup.addView(option) }
         val autoCloseCatchPreview = switch(host, "Close catch preview after caught", config.autoCloseCatchPreview)
         val autoSpin = switch(host, "Auto spin", config.autoSpin)
         val autoEncounter = switch(host, "Auto encounter", config.autoEncounter)
@@ -75,6 +85,9 @@ class AutomationCategoryFragment : Fragment() {
             addView(description(host, "Only verified MAP_TARGET observations from the exact runtime binding can start a walk."))
             addView(mapTapWalk)
             addView(autoCatch)
+            addView(description(host, "Auto throw quality is a client-owned request. Excellent is used only when the exact runtime advertises THROW_CONTROL and OBSERVE_THROW_OUTCOME; it is not a guaranteed catch."))
+            addView(throwQualityGroup)
+            addView(description(host, "Guaranteed catch from a user's throw is not available in this runtime: a miss remains a MISSED attempt and is never rewritten as CAUGHT."))
             addView(description(host, "Preview close only activates on a verified runtime that advertises the catch/close binding."))
             addView(autoCloseCatchPreview)
             addView(autoSpin)
@@ -89,6 +102,7 @@ class AutomationCategoryFragment : Fragment() {
                     enabled = enabled.isChecked,
                     mapTapWalkEnabled = mapTapWalk.isChecked,
                     autoCatch = autoCatch.isChecked,
+                    catchThrowQuality = throwQualityOptions.first { it.second.isChecked }.first,
                     autoCloseCatchPreview = autoCloseCatchPreview.isChecked,
                     autoSpin = autoSpin.isChecked,
                     autoEncounter = autoEncounter.isChecked,

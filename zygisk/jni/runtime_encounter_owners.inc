@@ -39,8 +39,30 @@ bool refresh_runtime_encounter_owners(ProbeContext &context) {
             nullptr,
             "refresh ProjectContext.get_Container"
         );
+    void *scene = nullptr;
+    void *scene_container = nullptr;
+    if (context.main_thread_bridge.ready) {
+        scene = request_main_thread_object(
+            context, "Niantic.Holoholo", "MapSceneContext"
+        );
+        if (scene == nullptr) {
+            scene = request_main_thread_object(context, "Zenject", "SceneContext");
+        }
+        if (scene != nullptr && api.object_get_class != nullptr &&
+            api.class_get_method_from_name != nullptr) {
+            Il2CppClass *scene_class = api.object_get_class(scene);
+            scene_container = invoke_runtime_method(
+                api,
+                api.class_get_method_from_name(scene_class, "get_Container", 0),
+                scene,
+                nullptr,
+                "refresh SceneContext.get_Container"
+            );
+        }
+    }
     const void *try_resolve = container_class == nullptr ? nullptr :
         find_runtime_method_with_parameter(api, container_class, "TryResolve", "System.Type");
+    if (container == nullptr) container = scene_container;
     if (container == nullptr || try_resolve == nullptr) {
         api.thread_detach(thread);
         return false;
@@ -50,6 +72,7 @@ bool refresh_runtime_encounter_owners(ProbeContext &context) {
     refreshed.encounter_pokemon = nullptr;
     refreshed.encounter_state = nullptr;
     refreshed.encounter_interaction = nullptr;
+    refreshed.encounter_interaction_pokeball_in_play = nullptr;
     refreshed.encounter_gui = nullptr;
     refreshed.pokeball_service = nullptr;
     refreshed.pokeball_service_throw = nullptr;
@@ -78,6 +101,11 @@ bool refresh_runtime_encounter_owners(ProbeContext &context) {
         void *owner = invoke_runtime_method(
             api, try_resolve, container, arguments, "refresh encounter TryResolve"
         );
+        if (owner == nullptr && scene_container != nullptr && scene_container != container) {
+            owner = invoke_runtime_method(
+                api, try_resolve, scene_container, arguments, "refresh scene TryResolve"
+            );
+        }
         if (strcmp(service.name, "IEncounterPokemon") == 0 && runtime_object_is_exact_class(
                 api, owner, "Niantic.Holoholo.Encounter", "EncounterPokemon")) {
             refreshed.encounter_pokemon = owner;
@@ -91,6 +119,9 @@ bool refresh_runtime_encounter_owners(ProbeContext &context) {
                 api, owner, "Niantic.Holoholo.Encounter", "EncounterInteractionState"
             )) {
             refreshed.encounter_interaction = owner;
+            refreshed.encounter_interaction_pokeball_in_play = api.class_get_method_from_name(
+                api.object_get_class(owner), "get_PokeballInPlay", 0
+            );
             found = true;
         } else if (strcmp(service.name, "IEncounterGuiController") == 0 &&
             runtime_object_is_exact_class(
@@ -130,6 +161,8 @@ bool refresh_runtime_encounter_owners(ProbeContext &context) {
         context.binding.encounter_pokemon = refreshed.encounter_pokemon;
         context.binding.encounter_state = refreshed.encounter_state;
         context.binding.encounter_interaction = refreshed.encounter_interaction;
+        context.binding.encounter_interaction_pokeball_in_play =
+            refreshed.encounter_interaction_pokeball_in_play;
         context.binding.encounter_gui = refreshed.encounter_gui;
         context.binding.pokeball_service = refreshed.pokeball_service;
         context.binding.pokeball_service_throw = refreshed.pokeball_service_throw;

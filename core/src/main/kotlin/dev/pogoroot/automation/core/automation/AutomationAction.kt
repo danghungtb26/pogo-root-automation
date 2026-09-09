@@ -175,6 +175,10 @@ data class ThrowOutcome(
     val quality: ThrowQuality = ThrowQuality.UNKNOWN,
     val curve: CurveOutcome = CurveOutcome.UNKNOWN,
 ) {
+    /** A miss is still a real throw attempt; null means no throw postcondition. */
+    val isAttempt: Boolean
+        get() = hit != null
+
     init {
         require(quality != ThrowQuality.EXCELLENT || hit == true) {
             "a miss cannot report excellent quality"

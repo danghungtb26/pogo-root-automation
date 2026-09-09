@@ -260,7 +260,12 @@ class AutomationRunnerTest {
         val request = first.request!!
         assertEquals(3_500_000_000L, request.settleDelayNs)
         runner.onResult(
-            ActionExecution(request, ActionExecutionPhase.COMPLETED, runtimeMessageSeq = 2L),
+            ActionExecution(
+                request,
+                ActionExecutionPhase.COMPLETED,
+                catchOutcome = CatchOutcome.CAUGHT,
+                runtimeMessageSeq = 2L,
+            ),
         ).getOrThrow()
 
         nowElapsedNs += 3_499_000_000L
@@ -270,6 +275,61 @@ class AutomationRunnerTest {
         nowElapsedNs += 1_000_000L
         assertNotNull(runner.onObservation(observation(4L, 1_002L), policy).getOrThrow().request)
         assertEquals(2, submitted.size)
+    }
+
+    @Test
+    fun `missed encounter throw is a definitive attempt and is not retried`() {
+        val submitted = mutableListOf<ActionRequest>()
+        val identity = RuntimeIdentity(
+            runtimeSessionId = "session-missed-throw",
+            pid = 99,
+            processName = "pogo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified",
+            capabilities = setOf("CATCH"),
+            mutationsAllowed = true,
+        )
+        val runner = AutomationRunner(
+            executor = ActionRequestExecutor { request -> submitted += request; Result.success(Unit) },
+            nowEpochMs = { 1_000L },
+            nowElapsedNs = { 1_000_000L },
+            commandIdFactory = { "missed-throw-command" },
+        )
+        runner.attach(identity).getOrThrow()
+        val observation = AutomationObservation(
+            identity = identity,
+            messageSeq = 1L,
+            observedAtEpochMs = 1_000L,
+            observedAtElapsedNs = 1_000_000L,
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.ENCOUNTER,
+                encounter = dev.pogoroot.automation.core.model.EncounterSnapshot(
+                    encounterId = "encounter-missed",
+                    speciesId = 25,
+                    speciesName = "Pikachu",
+                    observedAtEpochMs = 1_000L,
+                ),
+            ),
+        )
+
+        val request = runner.onObservation(observation, AutomationPolicy(autoCatch = true))
+            .getOrThrow().request!!
+        runner.onResult(
+            ActionExecution(
+                request = request,
+                phase = ActionExecutionPhase.COMPLETED,
+                catchOutcome = CatchOutcome.MISSED,
+                throwOutcome = ThrowOutcome(hit = false, quality = ThrowQuality.NONE),
+                runtimeMessageSeq = 2L,
+            ),
+        ).getOrThrow()
+
+        assertNull(runner.snapshot().activeExecution)
+        assertNull(
+            runner.onObservation(observation.copy(messageSeq = 3L), AutomationPolicy(autoCatch = true))
+                .getOrThrow().request,
+        )
+        assertEquals(1, submitted.size)
     }
 
     @Test
