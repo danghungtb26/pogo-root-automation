@@ -16,6 +16,72 @@ import org.junit.Test
 
 class AutomationRunnerTest {
     @Test
+    fun `definitive rejection is not retried when only observation time changes`() {
+        val submitted = mutableListOf<ActionRequest>()
+        val identity = RuntimeIdentity(
+            runtimeSessionId = "session-rejected",
+            pid = 99,
+            processName = "pogo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified",
+            capabilities = setOf("OPEN_ENCOUNTER"),
+            mutationsAllowed = true,
+        )
+        val runner = AutomationRunner(
+            executor = ActionRequestExecutor { request -> submitted += request; Result.success(Unit) },
+            nowEpochMs = { 1_000L },
+            nowElapsedNs = { 1_000_000L },
+            commandIdFactory = { "rejected-command-${submitted.size + 1}" },
+        )
+        runner.attach(identity).getOrThrow()
+
+        fun observation(seq: Long, observedAtEpochMs: Long) = AutomationObservation(
+            identity = identity,
+            messageSeq = seq,
+            observedAtEpochMs = observedAtEpochMs,
+            observedAtElapsedNs = 1_000_000L,
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.OVERWORLD,
+                nearby = NearbySnapshot(
+                    observedAtEpochMs,
+                    null,
+                    listOf(
+                        NearbySpawn(
+                            "spawn-1",
+                            25,
+                            "Pikachu",
+                            GeoPoint(1.0, 2.0),
+                            observedAtEpochMs,
+                            null,
+                            SpawnExpiryConfidence.UNKNOWN,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        val first = runner.onObservation(observation(1L, 1_000L), AutomationPolicy(autoEncounter = true))
+            .getOrThrow()
+        val request = first.request!!
+        runner.onResult(
+            ActionExecution(
+                request,
+                ActionExecutionPhase.REJECTED,
+                message = "target unavailable",
+                runtimeMessageSeq = 2L,
+            ),
+        ).getOrThrow()
+
+        val duplicate = runner.onObservation(
+            observation(3L, 1_001L),
+            AutomationPolicy(autoEncounter = true),
+        ).getOrThrow()
+        assertNull(duplicate.request)
+        assertTrue(duplicate.reason!!.contains("duplicate"))
+        assertEquals(1, submitted.size)
+    }
+
+    @Test
     fun `submits one mutation and waits for terminal outcome before replanning`() {
         val submitted = mutableListOf<ActionRequest>()
         val identity = RuntimeIdentity(

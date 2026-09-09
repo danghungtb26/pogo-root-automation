@@ -26,6 +26,32 @@ The active manual and harness test target is the BlueStacks instance named
 Android Studio AVD is the test target. For commands that accept `ANDROID_SERIAL`,
 set it explicitly to `127.0.0.1:5565` after confirming with `adb devices -l`.
 
+## Reverse-engineered APK workflow
+
+For version-specific Pokémon GO class, method, field, or RVA questions, read
+the local reverse output in `reverse/pogo-0.427.0/classes/` first. Use the
+full compressed dump files in that directory only when the curated class
+extract is insufficient. Do not begin by enumerating the live process to
+discover names that are already present in the reverse output.
+
+Use the live process only after the reverse pass, to verify instance state,
+dependency owners, object lifetimes, ABI/layout assumptions, lifecycle
+postconditions, and device-specific behavior. Keep the process survey
+read-only unless an exact reverse-derived binding has passed its guards.
+
+Regenerate the local reverse artifacts with:
+
+```bash
+./scripts/reverse-pogo-apk.sh
+```
+
+The inputs are the exact APKs under `pogo-apkm/`; they are read-only and must
+not be modified or committed. Reverse output and the local Il2CppDumper tool
+are generated, ignored artifacts. The current output is pinned to Pokémon GO
+`0.427.0`, version code `2026082702`, arm64-v8a. Keep readable generated text
+files at or below the 500-line project limit; retain any complete oversized
+dump only in compressed form.
+
 ## Gradle usage
 
 The repository includes the Gradle Wrapper. Use it instead of requiring a
@@ -145,6 +171,9 @@ fallbacks. If the runtime binding or camera state is unavailable, fail closed.
 
 ## Change and verification rules
 
+- Keep every non-Markdown source file at or below 500 lines, regardless of
+  language. Split cohesive responsibilities into smaller files and use the
+  language's import/include mechanism when sharing code.
 - Preserve capability checks, runtime identity checks, freshness and fail-closed
   behavior.
 - Keep game-build-specific code behind the adapter/native binding boundary.

@@ -8,3 +8,6 @@ local.properties
 .cxx/
 zygisk/module/libs/
 zygisk/module/obj/
+/pogo-apkm/
+/reverse/
+/tools/il2cppdumper/

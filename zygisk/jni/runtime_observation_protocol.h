@@ -10,6 +10,14 @@ namespace pogo_runtime {
 
 constexpr uint32_t kRuntimeObservationMagic = 0x504F4749U;
 constexpr uint32_t kRuntimeObservationEnvelopeVersion = 1U;
+constexpr uint32_t kLifecycleObservationType = 1U;
+constexpr uint32_t kLifecyclePayloadVersion = 1U;
+constexpr uint32_t kEncounterObservationType = 3U;
+constexpr uint32_t kRuntimeNearbyPayloadVersion = 1U;
+constexpr uint32_t kRuntimeNearbyPayloadMagic = 0x504F474EU;  // POGN
+/** Structured IL2CPP observation; distinct from raw EncounterOutProto v1. */
+constexpr uint32_t kRuntimeEncounterPayloadVersion = 2U;
+constexpr uint32_t kRuntimeEncounterPayloadMagic = 0x504F4745U;  // POGE
 constexpr uint32_t kMapTargetObservationType = 7U;
 constexpr uint32_t kMapTargetPayloadVersion = 1U;
 constexpr uint32_t kMaxObservationStringBytes = 65536U;
@@ -23,6 +31,29 @@ struct MapTargetObservation {
     int32_t viewport_width = 0;
     int32_t viewport_height = 0;
     std::string camera_snapshot_id;
+};
+
+struct RuntimeEncounterObservation {
+    uint64_t encounter_id = 0U;
+    int32_t species_id = 0;
+    int32_t individual_attack = 0;
+    int32_t individual_defense = 0;
+    int32_t individual_stamina = 0;
+    bool shiny = false;
+    bool has_shiny = false;
+    double latitude = 0.0;
+    double longitude = 0.0;
+};
+
+struct RuntimeNearbySpawnObservation {
+    uint64_t spawn_id = 0U;
+    int32_t species_id = 0;
+    double latitude = 0.0;
+    double longitude = 0.0;
+};
+
+struct RuntimeNearbyObservation {
+    std::vector<RuntimeNearbySpawnObservation> spawns;
 };
 
 inline void append_u32(std::vector<uint8_t> *output, uint32_t value) {
@@ -71,6 +102,120 @@ inline bool valid_map_target_observation(const MapTargetObservation &value) {
         value.screen_x >= 0.0F && value.screen_x <= static_cast<float>(value.viewport_width) &&
         value.screen_y >= 0.0F && value.screen_y <= static_cast<float>(value.viewport_height) &&
         value.camera_snapshot_id.size() <= kMaxObservationStringBytes;
+}
+
+inline bool valid_runtime_encounter_observation(const RuntimeEncounterObservation &value) {
+    return value.encounter_id != 0U && value.species_id > 0 &&
+        value.individual_attack >= 0 && value.individual_attack <= 15 &&
+        value.individual_defense >= 0 && value.individual_defense <= 15 &&
+        value.individual_stamina >= 0 && value.individual_stamina <= 15 &&
+        std::isfinite(value.latitude) && value.latitude >= -90.0 && value.latitude <= 90.0 &&
+        std::isfinite(value.longitude) && value.longitude >= -180.0 && value.longitude <= 180.0;
+}
+
+inline bool valid_runtime_nearby_observation(const RuntimeNearbyObservation &value) {
+    if (value.spawns.size() > 512U) return false;
+    for (const RuntimeNearbySpawnObservation &spawn : value.spawns) {
+        if (spawn.spawn_id == 0U || spawn.species_id <= 0 ||
+            !std::isfinite(spawn.latitude) || spawn.latitude < -90.0 ||
+            spawn.latitude > 90.0 || !std::isfinite(spawn.longitude) ||
+            spawn.longitude < -180.0 || spawn.longitude > 180.0) return false;
+    }
+    return true;
+}
+
+inline bool encode_runtime_nearby_payload(
+    const RuntimeNearbyObservation &value,
+    std::vector<uint8_t> *payload
+) {
+    if (payload == nullptr || !valid_runtime_nearby_observation(value)) return false;
+    payload->clear();
+    append_u32(payload, kRuntimeNearbyPayloadMagic);
+    append_u32(payload, static_cast<uint32_t>(value.spawns.size()));
+    for (const RuntimeNearbySpawnObservation &spawn : value.spawns) {
+        append_u64(payload, spawn.spawn_id);
+        append_u32(payload, static_cast<uint32_t>(spawn.species_id));
+        append_f64(payload, spawn.latitude);
+        append_f64(payload, spawn.longitude);
+    }
+    return true;
+}
+
+inline bool encode_runtime_nearby_observation(
+    const RuntimeNearbyObservation &value,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr) return false;
+    std::vector<uint8_t> payload;
+    if (!encode_runtime_nearby_payload(value, &payload)) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, 2U);
+    append_u32(envelope, kRuntimeNearbyPayloadVersion);
+    append_u32(envelope, static_cast<uint32_t>(payload.size()));
+    envelope->insert(envelope->end(), payload.begin(), payload.end());
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
+}
+
+inline bool encode_runtime_encounter_payload(
+    const RuntimeEncounterObservation &value,
+    std::vector<uint8_t> *payload
+) {
+    if (payload == nullptr || !valid_runtime_encounter_observation(value)) return false;
+    payload->clear();
+    append_u32(payload, kRuntimeEncounterPayloadMagic);
+    append_u64(payload, value.encounter_id);
+    append_u32(payload, static_cast<uint32_t>(value.species_id));
+    append_u32(payload, static_cast<uint32_t>(value.individual_attack));
+    append_u32(payload, static_cast<uint32_t>(value.individual_defense));
+    append_u32(payload, static_cast<uint32_t>(value.individual_stamina));
+    payload->push_back(value.has_shiny ? 1U : 0U);
+    if (value.has_shiny) payload->push_back(value.shiny ? 1U : 0U);
+    append_f64(payload, value.latitude);
+    append_f64(payload, value.longitude);
+    return true;
+}
+
+inline bool encode_runtime_lifecycle_observation(
+    uint32_t lifecycle_wire,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr || lifecycle_wire == 0U) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, kLifecycleObservationType);
+    append_u32(envelope, kLifecyclePayloadVersion);
+    append_u32(envelope, 4U);
+    append_u32(envelope, lifecycle_wire);
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
+}
+
+inline bool encode_runtime_encounter_observation(
+    const RuntimeEncounterObservation &value,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr) return false;
+    std::vector<uint8_t> payload;
+    if (!encode_runtime_encounter_payload(value, &payload)) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, kEncounterObservationType);
+    append_u32(envelope, kRuntimeEncounterPayloadVersion);
+    append_u32(envelope, static_cast<uint32_t>(payload.size()));
+    envelope->insert(envelope->end(), payload.begin(), payload.end());
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
 }
 
 /** Encodes the payload consumed by MapTargetPayloadCodec on the Kotlin side. */

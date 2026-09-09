@@ -1,20 +1,14 @@
 package dev.pogoroot.automation.overlay
 
 import android.app.AlertDialog
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.res.Configuration
-import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.view.ContextThemeWrapper
 import android.view.WindowManager
-import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.scan.ScanMatchType
 import dev.pogoroot.automation.core.time.TeleportCooldown
@@ -40,8 +34,6 @@ class JoystickOverlayService : Service() {
         const val ACTION_START = "dev.pogoroot.automation.action.START_JOYSTICK"
         const val ACTION_STOP = "dev.pogoroot.automation.action.STOP_JOYSTICK"
 
-        private const val CHANNEL_ID = "pogo_joystick"
-        private const val NOTIFICATION_ID = 4107
         private const val COOLDOWN_REFRESH_MS = 1_000L
         private const val FOREGROUND_POLL_MS = 750L
     }
@@ -100,7 +92,7 @@ class JoystickOverlayService : Service() {
         latestTeleportCooldown = positionStore.loadCooldown()
         cooldownMode = positionStore.loadCooldownMode()
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
+        startForeground(JOYSTICK_NOTIFICATION_ID, buildNotification())
 
         controller = JoystickLocationController(
             sink = RootMockLocationProvider(this),
@@ -463,42 +455,6 @@ class JoystickOverlayService : Service() {
 
     private fun persistCooldown(cooldown: TeleportCooldown) {
         positionStore.persistCooldown(cooldown)
-    }
-
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(
-            NotificationChannel(
-                CHANNEL_ID,
-                "Built-in joystick",
-                NotificationManager.IMPORTANCE_LOW,
-            ),
-        )
-    }
-
-    private fun buildNotification(): Notification {
-        val launchIntent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Notification.Builder(this, CHANNEL_ID)
-        } else {
-            @Suppress("DEPRECATION")
-            Notification.Builder(this)
-        }
-        return builder
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("PoGo built-in joystick")
-            .setContentText("Overlay appears while Pokémon GO is on screen")
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .build()
     }
 
 }

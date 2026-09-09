@@ -16,6 +16,8 @@ import java.nio.ByteOrder
 object BridgeProtocol {
     const val VERSION = 2
     const val OBSERVATION_PAYLOAD_VERSION = 1
+    const val RUNTIME_ENCOUNTER_PAYLOAD_VERSION = 2
+    const val RUNTIME_NEARBY_PAYLOAD_VERSION = 1
     const val NORMAL_MESSAGE_BYTES = 1 * 1024 * 1024
     const val HARD_MESSAGE_BYTES = 4 * 1024 * 1024
     const val FRAME_HEADER_BYTES = 4 + 2 + 2 + 8

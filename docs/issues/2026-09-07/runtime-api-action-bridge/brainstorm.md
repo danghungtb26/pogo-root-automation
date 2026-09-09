@@ -1456,4 +1456,134 @@ export table, vẫn giữ `RuntimeReady` capability rỗng và không gọi IL2C
 managed nào. Sau khi cài recovery ZIP và restart Air 1, Pokémon GO giữ process
 sống và controller trở về `runtimeLifecycle=STARTING`, không còn
 `runtime bridge: Connection refused`. Managed survey chỉ được phép quay lại
-sau khi có lifecycle hook post-initialization được verify trên exact build.
+Sau khi có lifecycle hook post-initialization được verify trên exact build.
+
+## 19. Kế hoạch tiếp tục để thực thi action thật trên build `0.427.0`
+
+### 19.1. Mục tiêu và lợi ích
+
+Mục tiêu tiếp theo là biến bridge từ trạng thái `binding_not_implemented` thành
+một binding client-owned có thể thực thi **một action đầu tiên có kiểm chứng**
+trong Pokémon GO, sau đó mới mở rộng sang catch/spin/berry. Lợi ích là
+automation gửi intent qua runtime của chính game, giữ đúng session/backend của
+client và có outcome rõ để runner không retry mù.
+
+Scope test vẫn là non-teleport trên `BlueStacks Air 1`, ADB serial hiện tại
+`127.0.0.1:5565`; `pogo-apkm/` chỉ là input phân tích local và không được
+commit.
+
+### 19.2. Quyết định kỹ thuật
+
+1. Chọn exact binding theo package, version code/name, ABI, native BuildID,
+   metadata hash và translation layer. Metadata string hoặc tên method đơn lẻ
+   không đủ để enable mutation.
+2. Tách `post-init runtime gate` khỏi probe lúc process vừa load. Không gọi
+   `il2cpp_domain_get`, `il2cpp_thread_attach`, class enumeration hoặc
+   `il2cpp_runtime_invoke` trong thời gian `il2cpp_init` còn chạy; incident
+   `SIGSEGV/SIGABRT` trên Air 1 là regression blocker.
+3. Bước đầu phải là command/diagnostic read-only được gửi sau khi controller
+   đã kết nối và game đã ổn định. Diagnostic phải xác nhận managed domain,
+   target class, method signature, object instance và exception path trước khi
+   cho phép invoker.
+4. Invoker thật chỉ nhận object do client sở hữu; không `object_new` một
+   service gameplay, không đoán singleton offset, không gọi method chỉ vì tên
+   khớp metadata. Async task/RPC phải có hook outcome hoặc state transition
+   tương ứng.
+5. Capability publication là kết quả của exact binding + device verification,
+   không phải kết quả của việc resolver nhìn thấy export. Khi chưa đủ evidence,
+   `RuntimeReady.capabilities=[]`, `strongIdentityVerified=false` và command
+   bị reject là trạng thái đúng.
+
+### 19.3. Thứ tự triển khai
+
+```text
+exact identity
+  -> explicit post-init diagnostic
+  -> managed class/method signature inspection
+  -> client-owned object acquisition
+  -> read-only invocation proof
+  -> one action invoker + definitive outcome
+  -> publish exactly one capability
+  -> device harness on Air 1
+```
+
+Ứng viên mutation không được chọn chỉ từ `IItemBag.UseItemOnPokemon`,
+`IPokemonBag.ReleasePokemon` hoặc `PokemonHomeRpcService.TransferPokemon`:
+đây là method instance/server flow và còn thiếu object lifetime, parameter
+types, lifecycle, idempotency và outcome. `discard`/`transfer` tiếp tục bị khóa
+cho tới khi có storage/inventory revision proof. Nếu binding đầu tiên chưa có
+outcome rõ, chỉ hoàn thành read-only diagnostic và không giả lập
+`COMPLETED`.
+
+### 19.4. Edge cases và guard
+
+- bridge reconnect hoặc PID mới làm object pointer cũ vô hiệu;
+- game đang ở `il2cpp_init`, loading, background hoặc sai lifecycle;
+- method overload/generic/async không khớp signature;
+- `il2cpp_runtime_invoke` trả exception hoặc task bị faulted;
+- command hết hạn, duplicate command id hoặc command đã `STARTED` nhưng mất
+  socket;
+- object bị destroy giữa lúc resolve và invoke;
+- game update làm BuildID/metadata thay đổi dù version name vẫn giống.
+
+Mỗi trường hợp phải reject/fail/indeterminate đúng phase, invalidate binding
+và suspend mutation; không fallback sang screenshot, ADB input hoặc retry tự
+động khi outcome không rõ.
+
+### 19.5. Acceptance Criteria (inferred — needs BA confirm)
+
+| ID | Tiêu chí | Kỳ vọng |
+|---|---|---|
+| AC-46 | Exact runtime identity | Runtime nhận diện đúng `0.427.0`, `2026082702`, arm64, BuildID và metadata hash; mismatch không invoke |
+| AC-47 | Post-init safety | Diagnostic chỉ chạy sau gate post-init đã chứng minh; cold start không crash Pokémon GO |
+| AC-48 | Signature proof | Target class, method overload, instance/static, param/return type và calling convention được log/fixture hóa |
+| AC-49 | Object ownership | Instance đến từ object/service client đang sở hữu; không tạo object gameplay hoặc dùng pointer stale |
+| AC-50 | Read-only proof | Có ít nhất một managed read-only call thành công và không làm thay đổi inventory/storage |
+| AC-51 | Action outcome | Action đầu tiên trả phase terminal đúng và có state transition/outcome quan sát được; không báo thành công khi chỉ enqueue |
+| AC-52 | Capability gate | Chỉ publish capability sau AC-46…AC-51; trước đó `[]` và mutation permission false |
+| AC-53 | Recovery | Process restart, bridge loss, exception, timeout hoặc build mismatch đều fail closed và reconnect được |
+| AC-54 | Regression | Native/JVM/Gradle checks và device harness Air 1 pass; không test teleport/destructive storage khi chưa được verify |
+
+### 19.6. Open questions cập nhật
+
+- Có lifecycle callback post-`il2cpp_init` ổn định nào trong exact build để
+  dùng làm gate, hay phải tạo command diagnostic do người dùng gọi sau khi UI
+  đã vào overworld?
+- Object owner nào expose `ItemBagImpl`/`PokemonBagImpl` hoặc action service
+  trong scene hiện tại, và cách chứng minh pointer đó còn sống qua một command?
+- Action đầu tiên được phép trên account test là read-only inventory count,
+  `OPEN_ENCOUNTER`, hay `SPIN`? Cần quyết định trước khi mở mutation.
+- Outcome nào là definitive cho action đã chọn: method return, task completion,
+  event callback, hay revision của structured state?
+
+### 19.7. Synthesis
+
+Phần còn thiếu không phải là encode thêm tag action ở Kotlin; target process
+đã có bridge transport nhưng chưa có binding thực thi. Hướng đúng là dựng
+diagnostic post-init có kiểm soát, giải quyết object ownership và signature
+trên đúng artifact, rồi triển khai một invoker/outcome hook duy nhất. Nếu chưa
+chứng minh được ba phần đó, tiếp tục giữ probe read-only để tránh lặp lại crash
+do managed call quá sớm trên Air 1.
+
+### 19.8. Kết quả triển khai tiếp theo trên Air 1
+
+Diagnostic hậu khởi động trên build `0.427.0` đã xác nhận:
+
+- `libil2cpp` BuildID khớp artifact đã pin;
+- `Zenject.ProjectContext.get_Instance → get_Container → DiContainer.TryResolve(System.Type)` trả về object game-owned;
+- `IItemBag` trả về `Niantic.Holoholo.Internal.ItemBagImpl`;
+- method chính xác là `UseItemOnPokemon(Holoholo.Rpc.Item, System.UInt64)` và trả Promise.
+
+Đã publish capability `USE_BERRY` bằng `RuntimeReady` update cùng session; app
+đã nhận dynamic update và hiển thị `runtimeStrongIdentityVerified=true` cùng
+`runtimeCapabilities=[USE_BERRY]`. Native action path hiện validate identity,
+allowlist, lifecycle `ENCOUNTER`, expiry, numeric encounter id và duplicate
+command trước khi gọi `il2cpp_runtime_invoke` với item enum value. Sau lời gọi,
+Promise non-null được báo `INDETERMINATE`, không giả lập `COMPLETED` và không
+retry khi mất outcome.
+
+Chưa invoke berry trong live game vì harness hiện chưa nhận được structured
+encounter observation/encounter id trên phiên overworld; allowlist vẫn để trống
+và `runtimeMutationPermissionGranted=false`. Việc cần làm tiếp theo là thêm
+observation/outcome hook đúng version rồi mới chạy một action test có account
+test và item test phù hợp.

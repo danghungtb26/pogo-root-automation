@@ -6,11 +6,16 @@ The runtime loads in app specialization, detects the supported Pokémon GO
 processes, probes IL2CPP, and starts a companion-owned persistent bridge after
 the probe completes. The bridge publishes a versioned `RuntimeReady` message
 and safely rejects commands while no verified client-owned binding/capability
-is installed. It does **not** invent game method offsets or invoke gameplay
-methods yet.
+is installed. For the pinned BlueStacks Air 1 build, the post-init diagnostic
+now verifies the lifecycle/encounter reader and the berry method
+`ItemBagImpl.UseItemOnPokemon(Item, UInt64)`. The reader observes client-owned
+encounter state; the berry command is still reported `INDETERMINATE` until its
+asynchronous Promise outcome is observed. No screen-coordinate fallback is
+used.
 
-The current target build can therefore expose lifecycle/probe status only. In
-`il2cpp_mapped_only` mode, without a verified build-specific binding, command
+The current target build can therefore expose lifecycle, encounter
+observations, and the verified berry command only. In `il2cpp_mapped_only` mode,
+without a verified build-specific binding, command
 payloads are rejected as `binding_not_implemented`; setting an automation flag
 in the controller cannot turn this into a live game action. The binding must
 publish each capability only after its structured observation, client-owned

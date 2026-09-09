@@ -15,6 +15,9 @@ import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 class AutomationControlServer(
     private val configRepository: AutomationConfigRepository,
     private val engine: HeadlessAutomationEngine,
+    private val runtimeDiagnostic: () -> Result<Unit> = {
+        Result.failure(UnsupportedOperationException("runtime diagnostic is unavailable"))
+    },
     private val port: Int = DEFAULT_PORT,
 ) {
     private val running = AtomicBoolean(false)
@@ -77,6 +80,12 @@ class AutomationControlServer(
     private fun route(method: String, path: String, params: Map<String, String>): ApiResponse = when {
         method == "GET" && (path == "/health" || path == "/v1/health") -> ApiResponse(200, "{\"ok\":true}")
         method == "GET" && path == "/v1/status" -> ApiResponse(200, statusJson(engine.snapshot(), configRepository.read()))
+        method == "POST" && path == "/v1/runtime/diagnostic" -> {
+            runtimeDiagnostic().fold(
+                onSuccess = { ApiResponse(202, "{\"ok\":true,\"queued\":true}") },
+                onFailure = { error -> ApiResponse(409, jsonError(error.message ?: "runtime diagnostic unavailable")) },
+            )
+        }
         method == "POST" && path == "/v1/start" -> {
             val config = configRepository.update { current -> applyParams(current, params).copy(enabled = true) }
             engine.start()
@@ -166,7 +175,9 @@ class AutomationControlServer(
     private fun respond(socket: Socket, status: Int, body: String) {
         val statusText = when (status) {
             200 -> "OK"
+            202 -> "Accepted"
             400 -> "Bad Request"
+            409 -> "Conflict"
             404 -> "Not Found"
             else -> "Internal Server Error"
         }

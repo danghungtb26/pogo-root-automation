@@ -7,6 +7,7 @@ import dev.pogoroot.automation.bridge.ObservationType
 import dev.pogoroot.automation.bridge.RuntimeBridge
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class BridgePogoRuntimeSourceTest {
@@ -37,6 +38,34 @@ class BridgePogoRuntimeSourceTest {
         source.clearObservationSelection()
         source.selectObservation(11L).getOrThrow()
         assertEquals(GameLifecycleState.ENCOUNTER, source.lifecycleState())
+    }
+
+    @Test
+    fun `accepts post-init runtime capability update for the same session`() {
+        val bridge = FakeRuntimeBridge(
+            incoming = listOf(
+                BridgeEvent.RuntimeReady(
+                    runtimeSessionId = SESSION_ID,
+                    messageSeq = 2L,
+                    pid = PID,
+                    processName = PROCESS_NAME,
+                    packageName = PACKAGE_NAME,
+                    buildFingerprint = "verified-runtime-build",
+                    strongIdentityVerified = true,
+                    capabilities = setOf("USE_BERRY"),
+                ),
+            ),
+        )
+        val source = BridgePogoRuntimeSource(bridge)
+
+        source.connect().getOrThrow()
+        source.refresh().getOrThrow()
+
+        val ready = source.runtimeMetadata?.ready
+        assertEquals("verified-runtime-build", ready?.buildFingerprint)
+        assertTrue(ready?.strongIdentityVerified == true)
+        assertEquals(setOf("USE_BERRY"), ready?.capabilities)
+        assertTrue(source.drainEvents().getOrThrow().isEmpty())
     }
 
     private fun lifecycleObservation(seq: Long, state: GameLifecycleState) =

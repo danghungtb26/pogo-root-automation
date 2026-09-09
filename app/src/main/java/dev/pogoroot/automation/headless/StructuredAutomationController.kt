@@ -77,7 +77,8 @@ class StructuredAutomationController(
         syncSafetyConfig()
         ensureConnected()
         source.refresh().getOrThrow()
-        source.runtimeMetadata ?: error("runtime session disappeared")
+        val runtimeMetadata = source.runtimeMetadata ?: error("runtime session disappeared")
+        syncRuntimeIdentity(runtimeMetadata.ready)
 
         var submitted = false
         var observationSeq: Long? = null
@@ -207,6 +208,15 @@ class StructuredAutomationController(
         runner.updateMutationPermission(sessionManager.mutationsAllowed)
     }
 
+    private fun syncRuntimeIdentity(ready: BridgeEvent.RuntimeReady) {
+        if (sessionManager.current != ready) {
+            sessionManager.accept(ready).getOrThrow()
+            runner.updateRuntimeIdentity(ready.toRuntimeIdentity(sessionManager.mutationsAllowed)).getOrThrow()
+        } else {
+            runner.updateMutationPermission(sessionManager.mutationsAllowed)
+        }
+    }
+
     private fun currentAllowedBuildFingerprints(): Set<String> =
         allowedBuildFingerprintsProvider?.invoke()?.toSet() ?: configuredAllowedBuildFingerprints
 
@@ -319,4 +329,5 @@ class StructuredAutomationController(
 
     private fun dev.pogoroot.automation.pogo.PogoRuntimeMetadata.identity() =
         ready.toRuntimeIdentity(sessionManager.mutationsAllowed)
+
 }

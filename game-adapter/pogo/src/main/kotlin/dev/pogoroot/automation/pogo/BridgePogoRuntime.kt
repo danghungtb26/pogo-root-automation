@@ -163,6 +163,14 @@ class BridgePogoRuntimeSource(
 
     private fun consume(event: BridgeEvent) {
         when (event) {
+            is BridgeEvent.RuntimeReady -> {
+                // The broker first announces a conservative probe-only
+                // identity, then may publish a stronger identity/capability
+                // update after its post-init managed binding check.
+                ready = event
+                lifecycle = GameLifecycleState.STARTING
+                lastError = null
+            }
             is BridgeEvent.ObservationEvent -> consumeObservation(event)
             is BridgeEvent.BindingLost -> {
                 lifecycle = GameLifecycleState.DISCONNECTED
@@ -193,7 +201,12 @@ class BridgePogoRuntimeSource(
         lastObservationSeq = event.messageSeq
         lastObservationEpochMs = event.observedAtEpochMs
         lastObservationElapsedNs = event.observedAtElapsedNs
-        if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION) {
+        val structuredEncounter = event.observationType == ObservationType.ENCOUNTER &&
+            event.payloadVersion == BridgeProtocol.RUNTIME_ENCOUNTER_PAYLOAD_VERSION
+        val structuredNearby = event.observationType == ObservationType.NEARBY &&
+            event.payloadVersion == BridgeProtocol.RUNTIME_NEARBY_PAYLOAD_VERSION
+        if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION &&
+            !structuredEncounter && !structuredNearby) {
             lastError = "unsupported observation payload version ${event.payloadVersion}"
             return
         }
@@ -203,12 +216,19 @@ class BridgePogoRuntimeSource(
         }
         when (event.observationType) {
             ObservationType.LIFECYCLE -> Unit
-            ObservationType.NEARBY -> decoder.decodeMapObjects(
-                payload = event.payload,
-                observedAtEpochMs = event.observedAtEpochMs,
-                playerLatitude = event.playerLatitude,
-                playerLongitude = event.playerLongitude,
-            ).onSuccess {
+            ObservationType.NEARBY -> (if (structuredNearby) {
+                RuntimeNearbyPayloadCodec.decode(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                )
+            } else {
+                decoder.decodeMapObjects(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                    playerLatitude = event.playerLatitude,
+                    playerLongitude = event.playerLongitude,
+                )
+            }).onSuccess {
                 nearby = it
                 if (event.lifecycleState == null && lifecycle != GameLifecycleState.ENCOUNTER) {
                     lifecycle = GameLifecycleState.OVERWORLD
@@ -217,10 +237,17 @@ class BridgePogoRuntimeSource(
                 nearby = null
                 lastError = it.message
             }
-            ObservationType.ENCOUNTER -> decoder.decodeEncounter(
-                payload = event.payload,
-                observedAtEpochMs = event.observedAtEpochMs,
-            ).onSuccess {
+            ObservationType.ENCOUNTER -> (if (structuredEncounter) {
+                RuntimeEncounterPayloadCodec.decode(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                )
+            } else {
+                decoder.decodeEncounter(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                )
+            }).onSuccess {
                 encounter = it
                 lifecycle = GameLifecycleState.ENCOUNTER
             }.onFailure {

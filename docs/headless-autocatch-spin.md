@@ -88,9 +88,10 @@ Throw settings are client-owned intents: `throwQuality` accepts `any`, `nice`,
 `arPlus=true` requests Pokémon GO's AR+ encounter mode. `autoSnapshot=true`
 requests a GO Snapshot while the encounter is active, and `snapshotArPlus=true`
 requests that snapshot in AR+ mode. These settings are persisted and serialized
-through the bridge, but the current probe-only runtime advertises none of the
-required mutation capabilities, so it remains read-only and rejects them until
-an exact build-scoped binding is installed.
+through the bridge. On BlueStacks Air 1, the verified runtime currently
+advertises lifecycle/encounter reading and `USE_BERRY`; catch, spin, snapshot,
+discard, transfer, and close-preview mutations remain rejected until their
+build-scoped bindings and outcome observations are verified.
 
 `spinSettleDelayMs` and `catchSettleDelayMs` are controller-side waits after a
 definitive `Spin`/`Catch` result and before planning another mutation. They are

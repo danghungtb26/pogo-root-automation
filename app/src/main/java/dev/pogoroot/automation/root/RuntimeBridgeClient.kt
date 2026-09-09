@@ -3,6 +3,7 @@ package dev.pogoroot.automation.root
 import android.net.LocalSocket
 import android.net.LocalSocketAddress
 import android.os.Process
+import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.BridgeFrame
 import dev.pogoroot.automation.bridge.BridgeFrameCodec
@@ -10,6 +11,8 @@ import dev.pogoroot.automation.bridge.BridgeMessageType
 import dev.pogoroot.automation.bridge.BridgePayloadCodec
 import dev.pogoroot.automation.bridge.BridgeProtocol
 import dev.pogoroot.automation.bridge.RuntimeBridge
+import dev.pogoroot.automation.core.automation.AlertKind
+import dev.pogoroot.automation.core.automation.AutomationAction
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -29,6 +32,7 @@ class RuntimeBridgeClient(
     private val events = ConcurrentLinkedQueue<BridgeEvent>()
     private val outputLock = Any()
     @Volatile private var socket: LocalSocket? = null
+    @Volatile private var runtimeReady: BridgeEvent.RuntimeReady? = null
     @Volatile private var readerError: Throwable? = null
     @Volatile private var readerExecutor: ExecutorService? = null
 
@@ -54,7 +58,10 @@ class RuntimeBridgeClient(
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(connectTimeoutMs)
         while (System.nanoTime() < deadline) {
             val ready = events.findAndRemove { it is BridgeEvent.RuntimeReady }
-            if (ready is BridgeEvent.RuntimeReady) return@runCatching ready
+            if (ready is BridgeEvent.RuntimeReady) {
+                runtimeReady = ready
+                return@runCatching ready
+            }
             readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
             Thread.sleep(10L)
         }
@@ -85,9 +92,34 @@ class RuntimeBridgeClient(
         }
     }
 
+    /**
+     * Requests the explicit post-init read-only inspector in the injected
+     * process. This bypasses gameplay capability gates by design: the payload
+     * is a reserved Alert marker and the native side never publishes a
+     * mutation capability for it.
+     */
+    fun requestRuntimeDiagnostic(): Result<Unit> = runCatching {
+        val ready = runtimeReady ?: error("runtime bridge is not connected")
+        send(
+            BridgeEvent.AutomationCommand(
+                runtimeSessionId = ready.runtimeSessionId,
+                commandId = "runtime-diagnostic-${System.nanoTime()}",
+                action = AutomationAction.Alert(AlertKind.SHUNDO, RUNTIME_DIAGNOSTIC_MESSAGE),
+                basedOnObservationSeq = ready.messageSeq,
+                expectedLifecycle = null,
+                expiresAtElapsedNs = System.nanoTime() + DIAGNOSTIC_TIMEOUT_NS,
+                pid = ready.pid,
+                processName = ready.processName,
+                packageName = ready.packageName,
+                buildFingerprint = ready.buildFingerprint,
+            ),
+        ).getOrThrow()
+    }
+
     override fun disconnect() {
         val oldSocket = socket
         socket = null
+        runtimeReady = null
         readerError = null
         runCatching { oldSocket?.close() }
         readerExecutor?.shutdownNow()
@@ -99,11 +131,43 @@ class RuntimeBridgeClient(
         try {
             while (socket === current && current.isConnected) {
                 val frame = BridgeFrameCodec.read(current.inputStream).getOrThrow()
-                val event = BridgePayloadCodec.decode(frame.messageType, frame.payload).getOrThrow()
+                val event = BridgePayloadCodec.decode(frame.messageType, frame.payload).getOrElse { error ->
+                    Log.w(
+                        LOG_TAG,
+                        "runtime bridge payload decode failed type=${frame.messageType} " +
+                            "seq=${frame.messageSeq} bytes=${frame.payload.size}",
+                        error,
+                    )
+                    throw error
+                }
+                if (event is BridgeEvent.RuntimeReady) {
+                    Log.i(
+                        LOG_TAG,
+                        "runtime ready seq=${event.messageSeq} strong=${event.strongIdentityVerified} " +
+                            "capabilities=${event.capabilities.sorted()}",
+                    )
+                } else if (event is BridgeEvent.ObservationEvent) {
+                    Log.i(
+                        LOG_TAG,
+                        "runtime observation received seq=${event.messageSeq} " +
+                            "type=${event.observationType} lifecycle=${event.lifecycleState} " +
+                            "payload=${event.payload.size}",
+                    )
+                } else if (event is BridgeEvent.AutomationCommandResult) {
+                    Log.i(
+                        LOG_TAG,
+                        "runtime command result received seq=${event.messageSeq} " +
+                            "command=${event.commandId} phase=${event.phase} " +
+                            "error=${event.errorCode}",
+                    )
+                }
                 events.add(event)
             }
         } catch (error: Throwable) {
-            if (socket === current) readerError = error
+            if (socket === current) {
+                readerError = error
+                Log.w(LOG_TAG, "runtime bridge reader failed", error)
+            }
         }
     }
 
@@ -126,5 +190,8 @@ class RuntimeBridgeClient(
         private const val BROKER_DIRECTORY = "/data/adb/pogo_root_automation"
         private const val CONTROLLER_UID_FILE = "$BROKER_DIRECTORY/controller.uids"
         const val DEFAULT_SOCKET_NAME = "pogo_root_automation_runtime"
+        private const val RUNTIME_DIAGNOSTIC_MESSAGE = "__runtime_diagnostic_v1__"
+        private const val DIAGNOSTIC_TIMEOUT_NS = 30_000_000_000L
+        private const val LOG_TAG = "PogoRootAutomation"
     }
 }

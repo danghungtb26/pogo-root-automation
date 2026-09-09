@@ -22,8 +22,9 @@ class AutomationRunner(
 ) {
     private var identity: RuntimeIdentity? = null
     private var lastObservation: AutomationObservation? = null
-    private var lastPlannedSnapshot: AutomationSnapshot? = null
+    private var lastPlannedMutationPlan: List<AutomationAction>? = null
     private val terminalActionsForSnapshot = linkedSetOf<AutomationAction>()
+    private val repeatableActionsAfterSettle = linkedSetOf<AutomationAction>()
     private var active: ActionExecution? = null
     private var suspended = false
     private var needsResync = false
@@ -43,8 +44,9 @@ class AutomationRunner(
         // into it, even if the PID happens to be reused.
         if (replacingSession || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
         lastObservation = null
-        lastPlannedSnapshot = null
+        lastPlannedMutationPlan = null
         terminalActionsForSnapshot.clear()
+        repeatableActionsAfterSettle.clear()
         lastMessageSeq = 0L
         nextMutationAllowedAtElapsedNs = 0L
         suspended = preserveRecovery
@@ -59,6 +61,26 @@ class AutomationRunner(
     @Synchronized
     fun updateMutationPermission(allowed: Boolean) {
         identity = identity?.copy(mutationsAllowed = allowed)
+    }
+
+    /**
+     * Applies a stronger runtime announcement for the same process session
+     * without clearing observation/recovery state.
+     */
+    @Synchronized
+    fun updateRuntimeIdentity(runtime: RuntimeIdentity): Result<Unit> = runCatching {
+        val current = identity ?: error("runner is not attached")
+        require(current.runtimeSessionId == runtime.runtimeSessionId) {
+            "runtime identity update belongs to another session"
+        }
+        require(current.pid == runtime.pid) { "runtime identity update PID mismatch" }
+        require(current.processName == runtime.processName) {
+            "runtime identity update process mismatch"
+        }
+        require(current.packageName == runtime.packageName) {
+            "runtime identity update package mismatch"
+        }
+        identity = runtime
     }
 
     @Synchronized
@@ -83,16 +105,23 @@ class AutomationRunner(
         if (nowElapsedNs() < nextMutationAllowedAtElapsedNs) {
             return Result.success(RunnerDispatch())
         }
+        if (repeatableActionsAfterSettle.isNotEmpty()) {
+            terminalActionsForSnapshot.removeAll(repeatableActionsAfterSettle)
+            repeatableActionsAfterSettle.clear()
+        }
 
         val actions = coordinator.plan(observation.snapshot, policy)
         val alerts = actions.filterIsInstance<AutomationAction.Alert>()
-        if (observation.snapshot != lastPlannedSnapshot) terminalActionsForSnapshot.clear()
         val plannedMutations = actions.filter { it.isMutation }
+        if (plannedMutations != lastPlannedMutationPlan) {
+            terminalActionsForSnapshot.clear()
+            repeatableActionsAfterSettle.clear()
+        }
         val mutation = plannedMutations.firstOrNull {
             it !in terminalActionsForSnapshot && it != blockedActionAfterIndeterminate
         }
         if (mutation == null) {
-            lastPlannedSnapshot = observation.snapshot
+            lastPlannedMutationPlan = plannedMutations
             return Result.success(
                 RunnerDispatch(
                     alerts = alerts,
@@ -143,7 +172,7 @@ class AutomationRunner(
             packageName = runtime.packageName,
             buildFingerprint = runtime.buildFingerprint,
         )
-        lastPlannedSnapshot = observation.snapshot
+        lastPlannedMutationPlan = plannedMutations
 
         val submission = runCatching { executor.submit(request) }
         if (submission.isFailure) {
@@ -196,6 +225,11 @@ class AutomationRunner(
             lastError = execution.message ?: "action outcome is indeterminate"
         } else if (execution.phase.isDefinitive) {
             terminalActionsForSnapshot += execution.request.action
+            if (execution.phase == ActionExecutionPhase.COMPLETED &&
+                execution.request.settleDelayNs > 0L
+            ) {
+                repeatableActionsAfterSettle += execution.request.action
+            }
             active = null
             lastError = execution.message.takeUnless { execution.phase == ActionExecutionPhase.COMPLETED }
             scheduleSettle(execution.request.settleDelayNs)
@@ -237,7 +271,6 @@ class AutomationRunner(
         }
         lastObservation = observation
         lastMessageSeq = observation.messageSeq
-        lastPlannedSnapshot = observation.snapshot
         return Result.success(Unit)
     }
 
@@ -257,6 +290,7 @@ class AutomationRunner(
         nextMutationAllowedAtElapsedNs = 0L
         lastError = null
         terminalActionsForSnapshot.clear()
+        repeatableActionsAfterSettle.clear()
         // Do not automatically retry the mutation whose outcome was unknown.
         // Other intents from the same fresh snapshot may still be considered.
         if (indeterminateAction != null) terminalActionsForSnapshot += indeterminateAction

@@ -1,6 +1,6 @@
 # Live automation readiness
 
-Updated: 2026-09-08
+Updated: 2026-09-09
 
 This document records the boundary between the automation pipeline and live
 Pokémon GO gameplay actions. Configuration flags are policy intents. A live
@@ -37,32 +37,52 @@ no verified metadata/code-registration resolver for this build. Presence of the
 metadata file is evidence for a future binding analysis; it is not evidence
 that a method can be invoked safely.
 
-The lifecycle bridge passed its reconnect test and the Android structured
-pipeline started successfully. The runtime advertised no capabilities, so the
-result is read-only. No teleport/map-target test and no destructive item or
-Pokémon operation were run.
+The initial lifecycle bridge capture passed its reconnect test and the Android
+structured pipeline started successfully. At that point the runtime advertised
+no capabilities, so that result was read-only. No teleport/map-target test and
+no destructive item or Pokémon operation were run.
 
 The active test target is now the BlueStacks instance `BlueStacks Air 1`,
-normally connected as `127.0.0.1:5565`. Its read-only native probe resolved the
-exact build's exported IL2CPP symbols through the loaded ELF table after the
-Android linker namespace hid them from `dlsym`:
+normally connected as `127.0.0.1:5565`. Its native probe resolved the exact
+build's exported IL2CPP symbols through the loaded ELF table after the Android
+linker namespace hid them from `dlsym`:
 
 ```text
 IL2CPP API resolved through loaded ELF exports
 symbols=16
 ```
 
-This only proves export discovery. It does not prove game-class ownership,
-method signatures, object lifetime, action outcomes, or mutation permission.
-The runtime therefore remains capability-empty and fail-closed.
+After Pokémon GO reached a stable overworld, the explicit post-init diagnostic
+also resolved the managed domain and the client-owned Zenject services:
+
+```text
+expected libil2cpp build id match=1
+IItemBag -> Niantic.Holoholo.Internal.ItemBagImpl
+IPokemonBag -> Niantic.Holoholo.Internal.PokemonBagImpl
+ILocationProvider -> Niantic.Holoholo.Map.NativeLocationProvider
+UseItemOnPokemon(Holoholo.Rpc.Item, System.UInt64)
+```
+
+The broker then published a stronger `RuntimeReady` update with
+`READ_LIFECYCLE`, `ENCOUNTER`, `OPEN_ENCOUNTER`, and `USE_BERRY`. This proves
+binding identity, owner resolution, encounter field signatures, the dynamic
+tappable contract, and the item method signature; it does not yet prove a live
+berry Promise outcome or a live catch outcome.
+
+Encounter owners are refreshed periodically after the diagnostic. This allows
+the reader to discover the short-lived `EncounterPokemon` and
+`EncounterInteractionState` instances when the operator enters an encounter,
+without enumerating Unity objects from a worker thread. The refresh and the
+observation/action readers share a binding lock so a transition cannot expose
+half-updated managed pointers.
 
 An earlier experimental probe called managed IL2CPP domain/assembly APIs from
 the Zygisk thread during `il2cpp_init`; Air 1 reproduced a SIGSEGV/SIGABRT in
 `libil2cpp.so` immediately after the export-discovery log. That survey path is
-now disabled. The recovery module performs ELF export discovery only and
-defers all managed calls until a verified post-initialization lifecycle hook
-exists. After reinstall/restart, Pokémon GO remained alive and the controller
-returned to `runtimeLifecycle=STARTING` with no new runtime error.
+now disabled. The recovery module performs ELF export discovery during startup;
+managed calls are deferred to the explicit post-initialization diagnostic after
+the game is stable. After reinstall/restart, Pokémon GO remained alive and the
+controller returned to `runtimeLifecycle=STARTING` with no new runtime error.
 
 `autoEncounter`, `autoCatch`, `autoSpin`, `autoDiscard`, and `autoTransfer` in
 `/v1/status` describe the requested policy, not confirmed execution. The
@@ -73,15 +93,21 @@ status response now also exposes:
 - `runtimeMutationPermissionGranted`: identity plus build-allowlist gate;
 - `runtimeLifecycle`, `observationSeq`, `lastAction`, and `lastError`.
 
-For the current device, the expected live-action fields are:
+For the current device after the diagnostic, the observed fields are:
 
 ```json
 {
-  "runtimeCapabilities": [],
+  "runtimeCapabilities": ["ENCOUNTER", "OPEN_ENCOUNTER", "READ_LIFECYCLE", "USE_BERRY"],
+  "strongIdentityVerified": true,
   "runtimeMutationPermissionGranted": false,
-  "runtimeLifecycle": "STARTING"
+  "runtimeLifecycle": "OVERWORLD"
 }
 ```
+
+Mutation permission is still false because the exact fingerprint is not
+configured in the controller allowlist. No berry command was invoked: this
+run had no structured encounter observation, so there was no valid encounter
+ID to send to the game.
 
 ## Action capability matrix
 
@@ -91,7 +117,7 @@ For the current device, the expected live-action fields are:
 | catch | `CATCH` | fresh encounter observation and definitive outcome |
 | close catch preview | `CATCH_AND_CLOSE_PREVIEW` | `CAUGHT` confirmed before close |
 | throw quality/curve | `THROW_CONTROL`, `OBSERVE_THROW_OUTCOME` | client-owned throw result |
-| berry | `USE_BERRY` | fresh encounter and item result |
+| berry | `USE_BERRY` | fresh encounter and item result; current binding returns `INDETERMINATE` until Promise outcome observation is added |
 | snapshot | `SNAPSHOT_DURING_ENCOUNTER` | encounter-active snapshot result |
 | AR+ mode | `AR_ENCOUNTER` | AR+ mode validated by the client |
 | spin | `SPIN` | fresh fort observation and spin result |
@@ -102,16 +128,34 @@ The core already plans and serializes these actions. The missing component is
 the version-scoped client-owned binding inside the target process that reads
 the relevant game objects, invokes the client method, and reports the outcome.
 
-## Why a config-only change cannot enable this build
+## Current action boundary
 
-The injected native component currently performs process/lifecycle detection,
-IL2CPP probing, bridge transport, and safe command rejection. It does not know
-the Pokémon GO classes, method signatures, object ownership, or outcome hooks
-for build `0.427.0`. In `il2cpp_mapped_only` mode the required IL2CPP exports are
-not available either. Guessing offsets or calling methods by name would break
-the fail-closed boundary and can crash the game or produce an unverified
-action. Therefore the native runtime deliberately returns
-`binding_not_implemented` until a verified binding is installed.
+The injected native component now has one version-scoped client-owned invoker:
+`ItemBagImpl.UseItemOnPokemon(Item, UInt64)`. It is posted to the Unity main
+thread and is reachable only through the authenticated bridge after the exact
+BuildID/owner/signature checks pass. The invoker reports `INDETERMINATE` after a
+non-null Promise because the current runtime does not yet observe the
+asynchronous server/result transition. It must not claim `COMPLETED` or retry
+automatically in that state.
+
+The encounter reader also resolves `IEncounterPokemon` and
+`IEncounterState` dynamically and emits a structured encounter observation when
+their `MapPokemon` backing object is valid. A `PokeballService.Throw` contract
+has been identified and is implemented behind a disabled gate, but `CATCH` is
+not advertised: no live throw postcondition has been verified yet. The earlier
+`MapPokemon.OnTap` probe invoked without opening an encounter and remains
+disabled. The open-encounter resolver now uses the build's exact
+`MapEntityCell.GetMapPokemon(UInt64)`/`GetMapTappable(UInt64)` methods before
+reading the verified `WildMapPokemon.egwu` tappable field. The code is compiled,
+but the updated route still needs a live Air 1 run after the controller's root
+permission is restored. This keeps `autoCatch` from issuing unsupported
+commands while the runtime binding is still being calibrated.
+
+All other actions still return `binding_not_implemented` or a capability
+rejection. Configuring a berry mode or allowlist entry alone cannot create an
+encounter observation or prove the item result. The structured controller may
+plan an action, but the runtime capability and strong identity remain the
+authority for whether it can be sent.
 
 ## Required implementation sequence
 
@@ -124,8 +168,9 @@ action. Therefore the native runtime deliberately returns
 4. Add client-owned invokers and outcome hooks for one action at a time. Each
    command must validate session, observation freshness, capability, and
    idempotency before invocation.
-5. Verify outcomes on-device, then publish only the capabilities that passed
-   those tests and add the exact fingerprint to the mutation allowlist.
+5. Verify outcomes on-device, then add Promise/state-transition observation and
+   publish only capabilities that passed those tests. Add the exact fingerprint
+   to the mutation allowlist only for an intentional live test.
 
 Until these steps are complete, the correct behavior is read-only plus an
 explicit rejection; enabling the policy flags alone must not trigger gameplay.

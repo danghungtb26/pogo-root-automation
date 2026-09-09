@@ -57,7 +57,14 @@ class HeadlessAutomationService : Service() {
             structuredController = structuredController,
             eventSink = ToastAutomationEventSink(this, configRepository),
         )
-        apiServer = AutomationControlServer(configRepository, engine)
+        apiServer = AutomationControlServer(
+            configRepository = configRepository,
+            engine = engine,
+            runtimeDiagnostic = {
+                runtimeBridge?.requestRuntimeDiagnostic()
+                    ?: Result.failure(IllegalStateException("runtime bridge is not initialized"))
+            },
+        )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(this)
 
         createNotificationChannel()
