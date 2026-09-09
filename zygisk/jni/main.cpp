@@ -28,7 +28,14 @@
 #include "runtime_map_forts.inc"
 #include "runtime_probe_map_instance.inc"
 #include "runtime_throw_hooks.inc"
+#include "runtime_observation_policy.inc"
+// Keep throw-event dispatch responsive while rate-limiting only the expensive
+// Unity-main-thread map walk and owner rediscovery performed by the observer.
+#define request_main_thread_map_snapshot request_main_thread_map_snapshot_throttled
+#define refresh_runtime_encounter_owners refresh_runtime_encounter_owners_throttled
 #include "runtime_observation.inc"
+#undef refresh_runtime_encounter_owners
+#undef request_main_thread_map_snapshot
 #include "runtime_map_actions.inc"
 #include "runtime_direct_map_actions.inc"
 #include "runtime_encounter_actions.inc"
