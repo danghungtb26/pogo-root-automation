@@ -1,15 +1,16 @@
 package dev.pogoroot.automation.core.automation
 
+import java.util.ArrayDeque
 import java.util.concurrent.TimeUnit
 
 /**
  * Controller-side execution state machine.
  *
  * It accepts observations from one runtime session, plans from the pure
- * coordinator, and submits at most one mutation. A new observation is required
- * after every definitive result, so actions are never bulk-queued from a stale
- * snapshot. Catch and spin may also hold a controller-side settle gate before
- * the next mutation is eligible.
+ * coordinator, and submits at most one mutation from a FIFO queue. A new
+ * observation is required after every result, so queued actions are never
+ * dispatched concurrently or without a fresh state check. Catch and spin may
+ * also hold a controller-side settle gate before the next mutation is eligible.
  */
 class AutomationRunner(
     private val executor: ActionRequestExecutor,
@@ -22,9 +23,10 @@ class AutomationRunner(
 ) {
     private var identity: RuntimeIdentity? = null
     private var lastObservation: AutomationObservation? = null
-    private var lastPlannedMutationPlan: List<AutomationAction>? = null
-    private val terminalActionsForSnapshot = linkedSetOf<AutomationAction>()
-    private val repeatableActionsAfterSettle = linkedSetOf<AutomationAction>()
+    private var queuedMutationPlan: List<AutomationAction>? = null
+    private val pendingMutationQueue = ArrayDeque<AutomationAction>()
+    private val completedQueuedActions = linkedSetOf<AutomationAction>()
+    private var requeueSamePlanAfterSettle = false
     private var active: ActionExecution? = null
     private var suspended = false
     private var needsResync = false
@@ -37,16 +39,20 @@ class AutomationRunner(
     fun attach(runtime: RuntimeIdentity): Result<Unit> {
         val replacingSession = identity?.runtimeSessionId != runtime.runtimeSessionId
         if (identity != null && replacingSession) disconnect("runtime session replaced")
-        val preserveRecovery = suspended && needsResync && blockedActionAfterIndeterminate != null
+        // Recovery state belongs to the session that produced the unknown
+        // result. A newly attached runtime session has a new authority and
+        // must not inherit a stale blocked action from the previous session.
+        val preserveRecovery = !replacingSession &&
+            suspended &&
+            needsResync &&
+            blockedActionAfterIndeterminate != null
 
         identity = runtime
         // A new runtime session is a new authority. Never carry an old command
         // into it, even if the PID happens to be reused.
         if (replacingSession || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
         lastObservation = null
-        lastPlannedMutationPlan = null
-        terminalActionsForSnapshot.clear()
-        repeatableActionsAfterSettle.clear()
+        clearMutationQueue()
         lastMessageSeq = 0L
         nextMutationAllowedAtElapsedNs = 0L
         suspended = preserveRecovery
@@ -110,27 +116,18 @@ class AutomationRunner(
         if (nowElapsedNs() < nextMutationAllowedAtElapsedNs) {
             return Result.success(RunnerDispatch())
         }
-        if (repeatableActionsAfterSettle.isNotEmpty()) {
-            terminalActionsForSnapshot.removeAll(repeatableActionsAfterSettle)
-            repeatableActionsAfterSettle.clear()
-        }
 
         val actions = coordinator.plan(observation.snapshot, policy)
         val alerts = actions.filterIsInstance<AutomationAction.Alert>()
         val plannedMutations = actions.filter { it.isMutation }
-        if (plannedMutations != lastPlannedMutationPlan) {
-            terminalActionsForSnapshot.clear()
-            repeatableActionsAfterSettle.clear()
-        }
-        val mutation = plannedMutations.firstOrNull {
-            it !in terminalActionsForSnapshot && it != blockedActionAfterIndeterminate
-        }
+        syncMutationQueue(plannedMutations)
+        val mutation = pendingMutationQueue.peekFirst()
         if (mutation == null) {
-            lastPlannedMutationPlan = plannedMutations
             return Result.success(
                 RunnerDispatch(
                     alerts = alerts,
-                    reason = "duplicate mutation suppressed".takeIf { plannedMutations.isNotEmpty() },
+                    reason = "duplicate mutation suppressed; mutation queue drained"
+                        .takeIf { plannedMutations.isNotEmpty() },
                 ),
             )
         }
@@ -154,10 +151,6 @@ class AutomationRunner(
             return Result.success(RunnerDispatch(alerts = alerts, reason = lastError))
         }
 
-        // Do not repeat a completed/definitively failed mutation when a runtime
-        // emits an identical snapshot. Other actions from the same plan may
-        // still proceed on a later observation (UseBerry -> Catch is one case).
-
         val createdAtElapsedNs = nowElapsedNs()
         val settleDelayNs = TimeUnit.MILLISECONDS.toNanos(
             policy.timing.settleDelayMsFor(mutation),
@@ -177,8 +170,6 @@ class AutomationRunner(
             packageName = runtime.packageName,
             buildFingerprint = runtime.buildFingerprint,
         )
-        lastPlannedMutationPlan = plannedMutations
-
         val submission = runCatching { executor.submit(request) }
         if (submission.isFailure) {
             // A failed write does not prove that the broker did not receive the
@@ -193,6 +184,7 @@ class AutomationRunner(
             suspended = true
             needsResync = true
             blockedActionAfterIndeterminate = request.action
+            consumeQueuedAction(request.action)
             lastError = execution.message
             return Result.success(RunnerDispatch(alerts = alerts, reason = lastError))
         }
@@ -227,14 +219,12 @@ class AutomationRunner(
             suspended = true
             needsResync = true
             blockedActionAfterIndeterminate = execution.request.action
+            consumeQueuedAction(execution.request.action)
             lastError = execution.message ?: "action outcome is indeterminate"
         } else if (execution.phase.isDefinitive) {
-            terminalActionsForSnapshot += execution.request.action
-            if (execution.phase == ActionExecutionPhase.COMPLETED &&
+            consumeQueuedAction(execution.request.action)
+            requeueSamePlanAfterSettle = execution.phase == ActionExecutionPhase.COMPLETED &&
                 execution.request.settleDelayNs > 0L
-            ) {
-                repeatableActionsAfterSettle += execution.request.action
-            }
             active = null
             lastError = execution.message.takeUnless { execution.phase == ActionExecutionPhase.COMPLETED }
             scheduleSettle(execution.request.settleDelayNs)
@@ -256,11 +246,13 @@ class AutomationRunner(
                 )
             }
             blockedActionAfterIndeterminate = active?.request?.action
+            active?.request?.action?.let(::consumeQueuedAction)
         }
         if (current != null) lastError = reason
         identity = null
         suspended = true
         needsResync = true
+        clearMutationQueue()
         nextMutationAllowedAtElapsedNs = 0L
         return active
     }
@@ -294,11 +286,9 @@ class AutomationRunner(
         needsResync = false
         nextMutationAllowedAtElapsedNs = 0L
         lastError = null
-        terminalActionsForSnapshot.clear()
-        repeatableActionsAfterSettle.clear()
         // Do not automatically retry the mutation whose outcome was unknown.
         // Other intents from the same fresh snapshot may still be considered.
-        if (indeterminateAction != null) terminalActionsForSnapshot += indeterminateAction
+        if (indeterminateAction != null) consumeQueuedAction(indeterminateAction)
         blockedActionAfterIndeterminate = null
         return Result.success(Unit)
     }
@@ -316,7 +306,8 @@ class AutomationRunner(
             return Result.failure(IllegalStateException("safe timeout is only valid before acceptance"))
         }
         active = null
-        terminalActionsForSnapshot += current.request.action
+        consumeQueuedAction(current.request.action)
+        requeueSamePlanAfterSettle = false
         lastError = message
         scheduleSettle(current.request.settleDelayNs)
         return Result.success(snapshot())
@@ -338,6 +329,7 @@ class AutomationRunner(
         suspended = true
         needsResync = true
         blockedActionAfterIndeterminate = active?.request?.action
+        active?.request?.action?.let(::consumeQueuedAction)
         lastError = active?.message
         return Result.success(snapshot())
     }
@@ -376,7 +368,7 @@ class AutomationRunner(
         }
         if (!postconditionObserved) return false
 
-        terminalActionsForSnapshot += action
+        consumeQueuedAction(action)
         active = null
         suspended = false
         needsResync = false
@@ -384,6 +376,52 @@ class AutomationRunner(
         lastError = null
         scheduleSettle(execution.request.settleDelayNs)
         return true
+    }
+
+    /**
+     * Reconciles the pending FIFO with the latest plan. Already consumed
+     * actions are not re-added merely because another observation arrived;
+     * they become eligible again only after a completed action's settle gate.
+     * Actions that disappeared from the fresh plan are discarded as stale.
+     */
+    private fun syncMutationQueue(plannedMutations: List<AutomationAction>) {
+        if (plannedMutations.isEmpty()) {
+            clearMutationQueue()
+            queuedMutationPlan = emptyList()
+            return
+        }
+
+        val planChanged = queuedMutationPlan != plannedMutations
+        if (planChanged) {
+            queuedMutationPlan = plannedMutations
+            val plannedSet = plannedMutations.toSet()
+            pendingMutationQueue.removeIf { it !in plannedSet }
+            completedQueuedActions.retainAll(plannedSet)
+            plannedMutations.forEach { action ->
+                if (action !in pendingMutationQueue && action !in completedQueuedActions) {
+                    pendingMutationQueue.addLast(action)
+                }
+            }
+            requeueSamePlanAfterSettle = false
+        }
+
+        if (pendingMutationQueue.isEmpty() && requeueSamePlanAfterSettle) {
+            pendingMutationQueue.addAll(plannedMutations)
+            completedQueuedActions.clear()
+            requeueSamePlanAfterSettle = false
+        }
+    }
+
+    private fun consumeQueuedAction(action: AutomationAction) {
+        pendingMutationQueue.removeFirstOccurrence(action)
+        completedQueuedActions += action
+    }
+
+    private fun clearMutationQueue() {
+        queuedMutationPlan = null
+        pendingMutationQueue.clear()
+        completedQueuedActions.clear()
+        requeueSamePlanAfterSettle = false
     }
 
     private fun validateObservation(

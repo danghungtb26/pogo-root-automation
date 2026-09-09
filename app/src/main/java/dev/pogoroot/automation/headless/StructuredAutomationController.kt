@@ -114,36 +114,35 @@ class StructuredAutomationController(
                             observedAtElapsedNs = event.observedAtElapsedNs,
                             snapshot = snapshot,
                         )
-                        val resyncing = runner.snapshot().needsResync
-                        if (resyncing) {
-                            runner.acceptResync(automationObservation).getOrThrow()
-                            runner.resumeAfterResync().getOrThrow()
-                        } else {
-                            val policy = config.toCorePolicy().let { configured ->
-                                if (configured.autoCloseCatchPreview &&
-                                    GameCapability.CATCH_AND_CLOSE_PREVIEW !in adapter.capabilities
-                                ) {
-                                    lastError = "catch preview close unavailable; using normal catch"
-                                    configured.copy(autoCloseCatchPreview = false)
-                                } else {
-                                    configured
-                                }
+                        val policy = config.toCorePolicy().let { configured ->
+                            if (configured.autoCloseCatchPreview &&
+                                GameCapability.CATCH_AND_CLOSE_PREVIEW !in adapter.capabilities
+                            ) {
+                                lastError = "catch preview close unavailable; using normal catch"
+                                configured.copy(autoCloseCatchPreview = false)
+                            } else {
+                                configured
                             }
-                            val dispatch = runner.onObservation(
-                                automationObservation,
-                                policy,
-                            ).getOrThrow()
-                            dispatch.alerts.forEach { alert ->
-                                eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
-                            }
-                            dispatch.reason?.let {
-                                lastError = it
-                                eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
-                            }
-                            dispatch.request?.let {
-                                submitted = true
-                                lastAction = it.action::class.simpleName
-                            }
+                        }
+                        // A fresh observation is also the evidence used to
+                        // resolve an indeterminate direct-map catch. Do not
+                        // call resumeAfterResync() unconditionally: doing so
+                        // would let the queue advance while the catch target
+                        // was still present on the map.
+                        val dispatch = runner.onObservation(
+                            automationObservation,
+                            policy,
+                        ).getOrThrow()
+                        dispatch.alerts.forEach { alert ->
+                            eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
+                        }
+                        dispatch.reason?.let {
+                            lastError = it
+                            eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
+                        }
+                        dispatch.request?.let {
+                            submitted = true
+                            lastAction = it.action::class.simpleName
                         }
                         processedObservationSeq = event.messageSeq
                         observationSeq = event.messageSeq

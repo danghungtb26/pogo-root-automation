@@ -127,6 +127,14 @@ The native side returns `INDETERMINATE` after invocation. The runner resumes
 only when a fresh nearby observation confirms that target has left the map;
 otherwise it stays suspended and will not retry the same command blindly.
 
+When direct map catch and spin are enabled together, `AutomationRunner` keeps a
+FIFO mutation queue. The queue dispatches one action at a time, waits for its
+runtime result, applies the action-specific settle delay, and requires a newer
+observation before dispatching the next action. Direct map catch is placed
+before the spin candidates so an expiring spawn is handled first. An
+`INDETERMINATE` catch pauses the entire queue until its map-removal
+postcondition is observed; spin is never sent while that catch is unresolved.
+
 When `autoSpin=true`, the planner consumes a fresh `FORTS` observation, skips
 cooling-down forts, and submits one `Spin` action at a time. The runtime resolves
 the exact PokéStop ID, starts its interactive mode, obtains `ItemSpinner`, and

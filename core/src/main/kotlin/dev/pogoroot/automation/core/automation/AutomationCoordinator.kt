@@ -47,13 +47,6 @@ class AutomationCoordinator(
             }
         }
 
-        if (policy.autoSpin) {
-            snapshot.forts?.forts
-                ?.asSequence()
-                ?.filter { it.spinAvailable }
-                ?.forEach { actions += AutomationAction.Spin(it.fortId) }
-        }
-
         if (policy.autoCatch && policy.catchPolicy.catchAll) {
             val nearby = snapshot.nearby
             val target = nearby?.spawns
@@ -73,6 +66,13 @@ class AutomationCoordinator(
                     mode = CatchMode.DIRECT_MAP,
                 )
             }
+        }
+
+        if (policy.autoSpin) {
+            snapshot.forts?.forts
+                ?.asSequence()
+                ?.filter { it.spinAvailable }
+                ?.forEach { actions += AutomationAction.Spin(it.fortId) }
         }
 
         if (policy.autoEncounter && !(policy.autoCatch && policy.catchPolicy.catchAll)) {
