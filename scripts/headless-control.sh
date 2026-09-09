@@ -24,7 +24,7 @@ Usage:
   bash scripts/headless-control.sh start
   bash scripts/headless-control.sh stop
   bash scripts/headless-control.sh diagnostic
-  bash scripts/headless-control.sh config 'autoEncounter=true&autoCatch=true&autoSpin=true&spinSettleDelayMs=1000&catchSettleDelayMs=3500&loopIntervalMs=900'
+  bash scripts/headless-control.sh config 'autoEncounter=false&autoCatch=true&autoSpin=true&spinSettleDelayMs=1000&catchSettleDelayMs=3500&loopIntervalMs=900'
   bash scripts/headless-control.sh game
 
 Environment:
@@ -86,7 +86,7 @@ case "$command" in
     ;;
   start)
     ensure_api
-    request POST '/v1/start?autoEncounter=true&catch=true&spin=true'
+    request POST '/v1/start?autoEncounter=false&catch=true&spin=true'
     ;;
   stop)
     ensure_api

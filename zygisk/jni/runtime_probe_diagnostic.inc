@@ -384,6 +384,10 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
         discover_runtime_owners(api, assemblies, assembly_count, context.il2cpp_path, &context.binding);
     }
     discover_scene_runtime_owners(context);
+    {
+        std::lock_guard<std::mutex> binding_lock(context.binding_mutex);
+        discover_direct_map_bindings(api, assemblies, assembly_count, &context.binding);
+    }
     diagnose_map_pokemon_instance(context);
     diagnose_tap_gesture_class(api, assemblies, assembly_count);
     const RuntimeBinding diagnostic_binding = runtime_binding_snapshot(context);

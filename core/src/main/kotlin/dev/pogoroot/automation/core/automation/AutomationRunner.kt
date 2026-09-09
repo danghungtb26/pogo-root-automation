@@ -94,6 +94,11 @@ class AutomationRunner(
         lastObservation = observation
         lastMessageSeq = observation.messageSeq
 
+        if (suspended && resolveIndeterminateMapAction(observation)) {
+            // The client-side invocation is now corroborated by a fresh map
+            // state. Continue planning from this observation without retrying
+            // the command that had an unknown server response.
+        }
         if (suspended || active != null) {
             return Result.success(
                 RunnerDispatch(
@@ -358,6 +363,27 @@ class AutomationRunner(
         } else {
             now + delayNs
         }
+    }
+
+    private fun resolveIndeterminateMapAction(observation: AutomationObservation): Boolean {
+        val execution = active?.takeIf { it.phase == ActionExecutionPhase.INDETERMINATE } ?: return false
+        val action = execution.request.action
+        val postconditionObserved = when (action) {
+            is AutomationAction.Catch -> action.mode == CatchMode.DIRECT_MAP &&
+                execution.errorCode == "direct_catch_outcome_unavailable" &&
+                observation.snapshot.nearby?.spawns?.none { it.spawnId == action.encounterId } == true
+            else -> false
+        }
+        if (!postconditionObserved) return false
+
+        terminalActionsForSnapshot += action
+        active = null
+        suspended = false
+        needsResync = false
+        blockedActionAfterIndeterminate = null
+        lastError = null
+        scheduleSettle(execution.request.settleDelayNs)
+        return true
     }
 
     private fun validateObservation(

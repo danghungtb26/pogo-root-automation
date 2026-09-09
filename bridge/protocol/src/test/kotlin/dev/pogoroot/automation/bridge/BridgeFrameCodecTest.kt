@@ -4,6 +4,7 @@ import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.automation.CatchReason
+import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.automation.CurveOutcome
 import dev.pogoroot.automation.core.automation.CurvePreference
 import dev.pogoroot.automation.core.automation.EncounterMode
@@ -183,6 +184,33 @@ class BridgeFrameCodecTest {
             BridgePayloadCodec.encode(snapshotCommand).getOrThrow(),
         ).getOrThrow()
         assertEquals(snapshotCommand, decodedSnapshot)
+    }
+
+    @Test
+    fun `round trips direct map catch command`() {
+        val command = BridgeEvent.AutomationCommand(
+            runtimeSessionId = "session-a",
+            commandId = "command-direct-catch",
+            action = AutomationAction.Catch(
+                encounterId = "map-spawn-1",
+                reason = CatchReason.CATCH_ALL,
+                mode = CatchMode.DIRECT_MAP,
+            ),
+            basedOnObservationSeq = 7L,
+            expectedLifecycle = GameLifecycleState.OVERWORLD,
+            expiresAtElapsedNs = 99L,
+            pid = 1234,
+            processName = "com.nianticlabs.pokemongo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified-build",
+        )
+
+        val decoded = BridgePayloadCodec.decode(
+            BridgeMessageType.COMMAND,
+            BridgePayloadCodec.encode(command).getOrThrow(),
+        ).getOrThrow()
+
+        assertEquals(command, decoded)
     }
 
     @Test

@@ -54,7 +54,28 @@ class AutomationCoordinator(
                 ?.forEach { actions += AutomationAction.Spin(it.fortId) }
         }
 
-        if (policy.autoEncounter) {
+        if (policy.autoCatch && policy.catchPolicy.catchAll) {
+            val nearby = snapshot.nearby
+            val target = nearby?.spawns
+                ?.asSequence()
+                ?.filter { spawn ->
+                    val expiresAt = spawn.expiresAtEpochMs
+                    expiresAt == null || expiresAt > nearby.observedAtEpochMs
+                }
+                ?.minByOrNull { it.expiresAtEpochMs ?: Long.MAX_VALUE }
+            if (target != null) {
+                // Nearby map state has no IV/shiny metadata. Direct catch is
+                // therefore limited to catch-all until encounter metadata is
+                // intentionally requested by a separate policy path.
+                actions += AutomationAction.Catch(
+                    encounterId = target.spawnId,
+                    reason = CatchReason.CATCH_ALL,
+                    mode = CatchMode.DIRECT_MAP,
+                )
+            }
+        }
+
+        if (policy.autoEncounter && !(policy.autoCatch && policy.catchPolicy.catchAll)) {
             val nearby = snapshot.nearby
             val target = nearby?.spawns
                 ?.asSequence()

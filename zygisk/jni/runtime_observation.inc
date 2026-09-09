@@ -213,6 +213,28 @@ bool send_runtime_nearby_payload(
     return sent;
 }
 
+bool send_runtime_forts_payload(
+    ProbeContext &context,
+    const pogo_runtime::RuntimeFortsObservation &observation
+) {
+    std::vector<uint8_t> envelope;
+    if (!pogo_runtime::encode_runtime_forts_observation(
+            observation,
+            static_cast<uint64_t>(now_epoch_millis()),
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            &envelope
+        )) return false;
+    const bool sent = send_internal_message(context.fd, pogo_runtime::kRuntimeObservationMagic, envelope);
+    __android_log_print(
+        sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "runtime observation forts=%zu sent=%d",
+        observation.forts.size(),
+        sent ? 1 : 0
+    );
+    return sent;
+}
+
 bool send_runtime_lifecycle(
     ProbeContext &context,
     uint32_t lifecycle_wire
@@ -258,8 +280,13 @@ void *runtime_observation_thread(void *opaque_context) {
         if (binding.map_entity_read_verified &&
             context->main_thread_bridge.ready && nearby_ticks >= 2U) {
             pogo_runtime::RuntimeNearbyObservation nearby_observation;
-            if (request_main_thread_map_snapshot(*context, &nearby_observation) &&
-                !send_runtime_nearby_payload(*context, nearby_observation)) break;
+            pogo_runtime::RuntimeFortsObservation forts_observation;
+            if (request_main_thread_map_snapshot(
+                    *context, &nearby_observation, &forts_observation)) {
+                if (!send_runtime_nearby_payload(*context, nearby_observation) ||
+                    (binding.forts_read_verified &&
+                        !send_runtime_forts_payload(*context, forts_observation))) break;
+            }
             nearby_ticks = 0U;
         }
         ++nearby_ticks;

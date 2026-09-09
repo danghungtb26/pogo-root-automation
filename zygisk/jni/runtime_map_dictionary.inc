@@ -78,6 +78,7 @@ bool enumerate_map_dictionary(
         auto *entry = data + static_cast<size_t>(index) * layout.element_size;
         MapDictionaryEntry value;
         memcpy(&value.key, entry + layout.key_offset, sizeof(value.key));
+        memcpy(&value.key_object, entry + layout.key_offset, sizeof(value.key_object));
         memcpy(&value.value, entry + layout.value_offset, sizeof(value.value));
         if (!is_probable_managed_pointer(value.value)) continue;
         entries->push_back(value);

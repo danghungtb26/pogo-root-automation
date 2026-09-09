@@ -305,4 +305,68 @@ class AutomationRunnerTest {
         assertTrue(runner.snapshot().suspended)
         assertTrue(runner.snapshot().needsResync)
     }
+
+    @Test
+    fun `direct catch resumes after fresh map observation removes target`() {
+        val submitted = mutableListOf<ActionRequest>()
+        val identity = RuntimeIdentity(
+            runtimeSessionId = "session-direct-catch",
+            pid = 99,
+            processName = "pogo",
+            packageName = "com.nianticlabs.pokemongo",
+            buildFingerprint = "verified",
+            capabilities = setOf("DIRECT_CATCH"),
+            mutationsAllowed = true,
+        )
+        val runner = AutomationRunner(
+            executor = ActionRequestExecutor { request -> submitted += request; Result.success(Unit) },
+            nowEpochMs = { 1_000L },
+            nowElapsedNs = { 1_000_000L },
+            commandIdFactory = { "direct-catch-command" },
+        )
+        runner.attach(identity).getOrThrow()
+        val position = GeoPoint(1.0, 2.0)
+        fun observation(seq: Long, spawns: List<NearbySpawn>) = AutomationObservation(
+            identity = identity,
+            messageSeq = seq,
+            observedAtEpochMs = 1_000L,
+            observedAtElapsedNs = 1_000_000L,
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.OVERWORLD,
+                nearby = NearbySnapshot(1_000L, position, spawns),
+            ),
+        )
+        val spawn = NearbySpawn(
+            spawnId = "spawn-1",
+            speciesId = 25,
+            speciesName = "Pikachu",
+            position = position,
+            firstSeenAtEpochMs = 1_000L,
+            expiresAtEpochMs = null,
+            expiryConfidence = SpawnExpiryConfidence.UNKNOWN,
+        )
+
+        val request = runner.onObservation(
+            observation(1L, listOf(spawn)),
+            AutomationPolicy(autoCatch = true, catchPolicy = CatchPolicy(catchAll = true)),
+        ).getOrThrow().request!!
+        runner.onResult(
+            ActionExecution(
+                request = request,
+                phase = ActionExecutionPhase.INDETERMINATE,
+                errorCode = "direct_catch_outcome_unavailable",
+                runtimeMessageSeq = 2L,
+            ),
+        ).getOrThrow()
+        assertTrue(runner.snapshot().suspended)
+
+        runner.onObservation(
+            observation(3L, emptyList()),
+            AutomationPolicy(autoCatch = true, catchPolicy = CatchPolicy(catchAll = true)),
+        ).getOrThrow()
+
+        assertEquals(1, submitted.size)
+        assertTrue(!runner.snapshot().suspended)
+        assertNull(runner.snapshot().activeExecution)
+    }
 }

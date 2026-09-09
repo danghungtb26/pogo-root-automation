@@ -280,6 +280,8 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
         capabilities.emplace_back("READ_LIFECYCLE");
         capabilities.emplace_back("ENCOUNTER");
     }
+    if (binding.map_entity_read_verified) capabilities.emplace_back("READ_NEARBY");
+    if (binding.forts_read_verified) capabilities.emplace_back("READ_FORTS");
     if (kOpenEncounterExecutionEnabled && binding.dynamic_tappables_service != nullptr &&
         binding.dynamic_tappables_tap != nullptr) {
         capabilities.emplace_back("OPEN_ENCOUNTER");
@@ -287,6 +289,10 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
     if (kCatchExecutionEnabled && binding.catch_throw_verified) {
         capabilities.emplace_back("CATCH");
     }
+    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified) {
+        capabilities.emplace_back("DIRECT_CATCH");
+    }
+    if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
     if (capabilities.empty()) return false;
     std::vector<uint8_t> payload;
     append_u32(&payload, 1U);
@@ -338,6 +344,17 @@ void runtime_command_channel_loop(ProbeContext &context) {
         RuntimeActionCommand action;
         if (parse_runtime_catch_command(command, &action)) {
             const RuntimeActionResult result = execute_runtime_catch(context, action);
+            if (!send_runtime_result(
+                    context.fd,
+                    action.command_id.c_str(),
+                    result.phase,
+                    result.error_code,
+                    result.message
+                )) break;
+            continue;
+        }
+        if (parse_runtime_spin_command(command, &action)) {
+            const RuntimeActionResult result = execute_runtime_spin(context, action);
             if (!send_runtime_result(
                     context.fd,
                     action.command_id.c_str(),

@@ -27,8 +27,23 @@ sealed interface AutomationAction {
          * the requested quality or curve will be returned by the game.
          */
         val throwProfile: ThrowProfile = ThrowProfile(),
+        /**
+         * Selects whether the runtime should use the encounter throw flow or
+         * the verified map-object TryCapture flow.
+         */
+        val mode: CatchMode = CatchMode.ENCOUNTER,
     ) : AutomationAction {
-        init { require(encounterId.isNotBlank()) { "encounterId must not be blank" } }
+        init {
+            require(encounterId.isNotBlank()) { "encounterId must not be blank" }
+            if (mode == CatchMode.DIRECT_MAP) {
+                require(!closePreviewAfterCaught) {
+                    "direct map catch cannot close an encounter preview"
+                }
+                require(throwProfile.isDefault) {
+                    "direct map catch does not accept an encounter throw profile"
+                }
+            }
+        }
     }
 
     /** Trigger Pokémon GO's own Snapshot flow while an encounter is active. */
@@ -85,6 +100,11 @@ enum class CatchReason {
     HUNDO,
     IV_THRESHOLD,
     CATCH_ALL,
+}
+
+enum class CatchMode {
+    ENCOUNTER,
+    DIRECT_MAP,
 }
 
 /** Semantic result emitted by a client-owned catch binding. */

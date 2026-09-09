@@ -88,7 +88,12 @@ class MainActivity : Activity() {
             addView(Button(context).apply {
                 text = "Enable auto catch + auto spin"
                 setOnClickListener {
-                    HeadlessAutomationService.enable(context, autoCatch = true, autoSpin = true)
+                    HeadlessAutomationService.enable(
+                        context,
+                        autoCatch = true,
+                        autoSpin = true,
+                        autoEncounter = false,
+                    )
                     Toast.makeText(context, "Headless automation enabled", Toast.LENGTH_SHORT).show()
                     renderStatus()
                 }
@@ -111,7 +116,7 @@ class MainActivity : Activity() {
             })
 
             addView(TextView(context).apply {
-                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?autoEncounter=true&catch=true&spin=true&autoCloseCatchPreview=true\nPOST /v1/config?mapTapWalk=true\nPOST /v1/stop\nPOST /v1/config?..."
+                text = "127.0.0.1:${AutomationControlServer.DEFAULT_PORT}\nGET /v1/status\nPOST /v1/start?autoEncounter=false&catch=true&spin=true\nPOST /v1/config?mapTapWalk=true\nPOST /v1/stop\nPOST /v1/config?..."
                 textSize = 14f
                 typeface = Typeface.MONOSPACE
                 setPadding(0, 0, 0, padding / 2)

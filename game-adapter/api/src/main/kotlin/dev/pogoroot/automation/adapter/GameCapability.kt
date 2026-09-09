@@ -10,6 +10,8 @@ enum class GameCapability {
     READ_POKEMON_STORAGE,
     ENCOUNTER,
     CATCH,
+    /** Runtime can invoke the map object's TryCapture without opening UI. */
+    DIRECT_CATCH,
     /** Runtime can execute a client-owned throw profile and report its outcome. */
     THROW_CONTROL,
     OBSERVE_THROW_OUTCOME,

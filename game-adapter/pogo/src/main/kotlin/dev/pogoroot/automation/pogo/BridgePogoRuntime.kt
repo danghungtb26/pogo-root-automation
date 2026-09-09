@@ -9,6 +9,7 @@ import dev.pogoroot.automation.core.automation.ActionRequest
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.AutomationActionResult
 import dev.pogoroot.automation.core.automation.BerryType
+import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.model.GameLifecycleState
 
 data class PogoRuntimeMetadata(
@@ -23,6 +24,7 @@ private data class CachedRuntimeState(
     val lifecycle: GameLifecycleState,
     val nearby: RawNearbyObservation?,
     val encounter: RawEncounterObservation?,
+    val forts: RawFortObservation?,
 )
 
 /**
@@ -41,6 +43,7 @@ class BridgePogoRuntimeSource(
     private var lifecycle = GameLifecycleState.DISCONNECTED
     private var nearby: RawNearbyObservation? = null
     private var encounter: RawEncounterObservation? = null
+    private var forts: RawFortObservation? = null
     private var lastError: String? = null
     private val pendingEvents = ArrayDeque<BridgeEvent>()
     private val observationStates = LinkedHashMap<Long, CachedRuntimeState>()
@@ -73,6 +76,7 @@ class BridgePogoRuntimeSource(
         lifecycle = GameLifecycleState.STARTING
         nearby = null
         encounter = null
+        forts = null
         lastError = null
         pendingEvents.clear()
         observationStates.clear()
@@ -89,6 +93,7 @@ class BridgePogoRuntimeSource(
         lifecycle = GameLifecycleState.DISCONNECTED
         nearby = null
         encounter = null
+        forts = null
         pendingEvents.clear()
         observationStates.clear()
         selectedObservationState = null
@@ -114,6 +119,15 @@ class BridgePogoRuntimeSource(
             null
         } else {
             encounter ?: error(lastError ?: "no encounter observation received")
+        }
+    }
+
+    override fun readForts(): Result<RawFortObservation> = runCatching {
+        val state = selectedObservationState
+        if (state != null) {
+            state.forts ?: error(lastError ?: "no forts observation in selected observation state")
+        } else {
+            forts ?: error(lastError ?: "no forts observation received")
         }
     }
 
@@ -205,8 +219,10 @@ class BridgePogoRuntimeSource(
             event.payloadVersion == BridgeProtocol.RUNTIME_ENCOUNTER_PAYLOAD_VERSION
         val structuredNearby = event.observationType == ObservationType.NEARBY &&
             event.payloadVersion == BridgeProtocol.RUNTIME_NEARBY_PAYLOAD_VERSION
+        val structuredForts = event.observationType == ObservationType.FORTS &&
+            event.payloadVersion == BridgeProtocol.RUNTIME_FORTS_PAYLOAD_VERSION
         if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION &&
-            !structuredEncounter && !structuredNearby) {
+            !structuredEncounter && !structuredNearby && !structuredForts) {
             lastError = "unsupported observation payload version ${event.payloadVersion}"
             return
         }
@@ -254,13 +270,25 @@ class BridgePogoRuntimeSource(
                 encounter = null
                 lastError = it.message
             }
-            ObservationType.FORTS,
+            ObservationType.FORTS -> if (
+                event.payloadVersion == BridgeProtocol.RUNTIME_FORTS_PAYLOAD_VERSION
+            ) {
+                RuntimeFortsPayloadCodec.decode(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                ).onSuccess {
+                    forts = it
+                }.onFailure {
+                    forts = null
+                    lastError = it.message
+                }
+            }
             ObservationType.INVENTORY,
             ObservationType.POKEMON_STORAGE,
             ObservationType.MAP_TARGET,
             -> Unit
         }
-        observationStates[event.messageSeq] = CachedRuntimeState(lifecycle, nearby, encounter)
+        observationStates[event.messageSeq] = CachedRuntimeState(lifecycle, nearby, encounter, forts)
         while (observationStates.size > MAX_OBSERVATION_STATES) {
             observationStates.remove(observationStates.entries.first().key)
         }
@@ -357,19 +385,23 @@ class BridgeBackedPogoActionExecutor(
         is AutomationAction.MoveTo -> setOf(GameCapability.MOVE)
         is AutomationAction.OpenEncounter -> setOf(GameCapability.OPEN_ENCOUNTER)
         is AutomationAction.Catch -> buildSet {
-            add(if (action.closePreviewAfterCaught) {
-                GameCapability.CATCH_AND_CLOSE_PREVIEW
+            if (action.mode == CatchMode.DIRECT_MAP) {
+                add(GameCapability.DIRECT_CATCH)
             } else {
-                GameCapability.CATCH
-            })
-            if (!action.throwProfile.isDefault) {
-                add(GameCapability.THROW_CONTROL)
-                if (action.throwProfile.requiresStructuredOutcome) {
-                    add(GameCapability.OBSERVE_THROW_OUTCOME)
+                add(if (action.closePreviewAfterCaught) {
+                    GameCapability.CATCH_AND_CLOSE_PREVIEW
+                } else {
+                    GameCapability.CATCH
+                })
+                if (!action.throwProfile.isDefault) {
+                    add(GameCapability.THROW_CONTROL)
+                    if (action.throwProfile.requiresStructuredOutcome) {
+                        add(GameCapability.OBSERVE_THROW_OUTCOME)
+                    }
                 }
-            }
-            if (action.throwProfile.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
-                add(GameCapability.AR_ENCOUNTER)
+                if (action.throwProfile.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
+                    add(GameCapability.AR_ENCOUNTER)
+                }
             }
         }
         is AutomationAction.TakeEncounterSnapshot -> buildSet {
@@ -386,7 +418,11 @@ class BridgeBackedPogoActionExecutor(
     }
 
     private fun expectedLifecycle(action: AutomationAction): GameLifecycleState? = when (action) {
-        is AutomationAction.Catch,
+        is AutomationAction.Catch -> if (action.mode == CatchMode.DIRECT_MAP) {
+            GameLifecycleState.OVERWORLD
+        } else {
+            GameLifecycleState.ENCOUNTER
+        }
         is AutomationAction.TakeEncounterSnapshot,
         is AutomationAction.UseBerry,
         -> GameLifecycleState.ENCOUNTER

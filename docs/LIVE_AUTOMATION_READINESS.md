@@ -109,24 +109,31 @@ configured in the controller allowlist. No berry command was invoked: this
 run had no structured encounter observation, so there was no valid encounter
 ID to send to the game.
 
+The direct map catch and PokéStop spin bindings were added after this baseline
+capture. The native code compiles for both supported ABIs, but no new Air 1
+live invocation has been recorded yet. Until that run verifies target lookup,
+client state changes, and the asynchronous result boundary, treat the new
+capabilities as implementation-ready but unverified on device.
+
 ## Action capability matrix
 
 | Policy action | Required runtime capability | Additional evidence |
 |---|---|---|
 | auto-encounter | `OPEN_ENCOUNTER` | fresh nearby observation and target id |
 | catch | `CATCH` | fresh encounter observation and definitive outcome |
+| direct map catch | `DIRECT_CATCH` | fresh nearby observation, live `WildMapPokemon`, and catch result transition; no encounter UI |
 | close catch preview | `CATCH_AND_CLOSE_PREVIEW` | `CAUGHT` confirmed before close |
 | throw quality/curve | `THROW_CONTROL`, `OBSERVE_THROW_OUTCOME` | client-owned throw result |
 | berry | `USE_BERRY` | fresh encounter and item result; current binding returns `INDETERMINATE` until Promise outcome observation is added |
 | snapshot | `SNAPSHOT_DURING_ENCOUNTER` | encounter-active snapshot result |
 | AR+ mode | `AR_ENCOUNTER` | AR+ mode validated by the client |
-| spin | `SPIN` | fresh fort observation and spin result |
+| spin | `SPIN` | fresh `FORTS` observation, non-cooling PokéStop, and spin result |
 | discard | `DISCARD_ITEM` | inventory revision and item result |
 | transfer | `TRANSFER_POKEMON` | storage revision and transfer result |
 
-The core already plans and serializes these actions. The missing component is
-the version-scoped client-owned binding inside the target process that reads
-the relevant game objects, invokes the client method, and reports the outcome.
+The core already plans and serializes these actions. Direct map catch and spin
+now have version-scoped client-owned bindings inside the target process; their
+remaining gate is live Air 1 verification of object lookup and postconditions.
 
 ## Current action boundary
 
@@ -138,13 +145,22 @@ non-null Promise because the current runtime does not yet observe the
 asynchronous server/result transition. It must not claim `COMPLETED` or retry
 automatically in that state.
 
+It also has a separate direct-map path for `MapPokemon.TryCapture` and a
+PokéStop path for `MapPlaceDirectoryService.GetPokestop` →
+`MapPokestop.StartInteractiveMode` → `PoiItemSpinner.Spin`. The map reader
+publishes nearby spawns and structured fort IDs/cooldown state as independent
+observations. `DIRECT_CATCH` is only planned for catch-all map spawns, and the
+path does not call the encounter opener. Both action gates require the exact
+build identity, an overworld lifecycle, a fresh observation, and idempotency;
+direct catch remains indeterminate until its asynchronous result is observed.
+
 The encounter reader also resolves `IEncounterPokemon` and
 `IEncounterState` dynamically and emits a structured encounter observation when
 their `MapPokemon` backing object is valid. A `PokeballService.Throw` contract
 has been identified and is implemented behind a disabled gate, but `CATCH` is
 not advertised: no live throw postcondition has been verified yet. The earlier
 `MapPokemon.OnTap` probe invoked without opening an encounter and remains
-disabled. The open-encounter resolver now uses the build's exact
+disabled for direct catch. The open-encounter resolver now uses the build's exact
 `MapEntityCell.GetMapPokemon(UInt64)`/`GetMapTappable(UInt64)` methods before
 reading the verified `WildMapPokemon.egwu` tappable field. The code is compiled,
 but the updated route still needs a live Air 1 run after the controller's root
@@ -172,8 +188,9 @@ authority for whether it can be sent.
    publish only capabilities that passed those tests. Add the exact fingerprint
    to the mutation allowlist only for an intentional live test.
 
-Until these steps are complete, the correct behavior is read-only plus an
-explicit rejection; enabling the policy flags alone must not trigger gameplay.
+Until the new direct paths have passed the Air 1 live run, the correct behavior
+is capability-gated execution with explicit indeterminate handling; enabling
+the policy flags alone must not bypass identity, freshness, or binding checks.
 
 ## Verification commands
 

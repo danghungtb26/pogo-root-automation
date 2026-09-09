@@ -182,7 +182,9 @@ using Il2CppClassGetType = const Il2CppType *(*)(Il2CppClass *);
 using Il2CppTypeGetObject = void *(*)(const Il2CppType *);
 using Il2CppObjectNew = void *(*)(Il2CppClass *);
 using Il2CppRuntimeObjectInit = void (*)(void *);
+using Il2CppRuntimeClassInit = void (*)(Il2CppClass *);
 using Il2CppRuntimeInvoke = void *(*)(const void *, void *, void **, void **);
+using Il2CppStringNew = void *(*)(const char *);
 
 struct Il2CppApi {
     void *handle = nullptr;
@@ -225,7 +227,9 @@ struct Il2CppApi {
     Il2CppTypeGetObject type_get_object = nullptr;
     Il2CppObjectNew object_new = nullptr;
     Il2CppRuntimeObjectInit runtime_object_init = nullptr;
+    Il2CppRuntimeClassInit runtime_class_init = nullptr;
     Il2CppRuntimeInvoke runtime_invoke = nullptr;
+    Il2CppStringNew string_new = nullptr;
 };
 
 struct RuntimeBinding {
@@ -240,6 +244,20 @@ struct RuntimeBinding {
     void *map_entity_service = nullptr;
     void *map_entity_cells = nullptr;
     const void *map_entity_get_cells = nullptr;
+    void *map_place_directory_service = nullptr;
+    void *map_place_directory_pokestops = nullptr;
+    const void *map_place_directory_get_active_pokestops = nullptr;
+    const void *map_place_directory_get_pokestop = nullptr;
+    const void *map_pokestop_get_id = nullptr;
+    const void *map_pokestop_get_location = nullptr;
+    const void *map_pokestop_get_is_cooling_down = nullptr;
+    const void *map_pokestop_start_interactive = nullptr;
+    const void *map_pokestop_interactive_item_spinner = nullptr;
+    const void *poi_item_spinner_spin = nullptr;
+    const void *map_pokemon_try_capture = nullptr;
+    const void *map_pokemon_get_spawn_point_id = nullptr;
+    Il2CppClass *ar_plus_encounter_values_class = nullptr;
+    Il2CppClass *catch_pokemon_proto_class = nullptr;
     const void *map_pokemon_on_tapped = nullptr;
     const void *unity_find_objects_of_type = nullptr;
     void *map_scene_view_service = nullptr;
@@ -251,6 +269,9 @@ struct RuntimeBinding {
     bool map_entity_read_verified = false;
     bool encounter_read_verified = false;
     bool catch_throw_verified = false;
+    bool direct_catch_verified = false;
+    bool forts_read_verified = false;
+    bool spin_verified = false;
     bool exact_build_verified = false;
 };
 
@@ -260,6 +281,8 @@ enum class MainThreadTaskType : uint32_t {
     kOpenEncounter = 3U,
     kCatch = 4U,
     kUseBerry = 5U,
+    kDirectCatch = 6U,
+    kSpin = 7U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -281,8 +304,10 @@ struct MainThreadBridge {
     std::string pending_class_name;
     void *pending_result = nullptr;
     uint64_t pending_encounter_id = 0U;
+    std::string pending_fort_id;
     int32_t pending_item_id = 0;
     pogo_runtime::RuntimeNearbyObservation pending_nearby;
+    pogo_runtime::RuntimeFortsObservation pending_forts;
     bool pending_done = false;
     bool pending_success = false;
     MainThreadActionOutcome pending_action_outcome = MainThreadActionOutcome::kRejected;
@@ -291,6 +316,7 @@ struct MainThreadBridge {
 
 struct MapDictionaryEntry {
     uint64_t key = 0U;
+    void *key_object = nullptr;
     void *value = nullptr;
 };
 
@@ -330,7 +356,21 @@ RuntimeBinding runtime_binding_snapshot(ProbeContext &context) {
 
 bool read_runtime_map_snapshot_on_main_thread(
     ProbeContext &context,
-    pogo_runtime::RuntimeNearbyObservation *observation
+    pogo_runtime::RuntimeNearbyObservation *observation,
+    pogo_runtime::RuntimeFortsObservation *forts
+);
+
+bool read_runtime_map_forts(
+    const Il2CppApi &api,
+    const RuntimeBinding &binding,
+    pogo_runtime::RuntimeFortsObservation *observation
+);
+
+void discover_direct_map_bindings(
+    const Il2CppApi &api,
+    const Il2CppAssembly **assemblies,
+    size_t assembly_count,
+    RuntimeBinding *binding
 );
 
 bool read_encounter_from_wild_map_pokemon(
@@ -360,10 +400,30 @@ MainThreadActionOutcome request_main_thread_use_berry(
     int32_t item_id
 );
 
+MainThreadActionOutcome request_main_thread_direct_catch(
+    ProbeContext &context,
+    uint64_t encounter_id
+);
+
+MainThreadActionOutcome request_main_thread_spin(
+    ProbeContext &context,
+    const std::string &fort_id
+);
+
 MainThreadActionOutcome use_runtime_berry_on_main_thread(
     ProbeContext &context,
     uint64_t encounter_id,
     int32_t item_id
+);
+
+MainThreadActionOutcome direct_catch_runtime_on_main_thread(
+    ProbeContext &context,
+    uint64_t encounter_id
+);
+
+MainThreadActionOutcome spin_runtime_pokestop_on_main_thread(
+    ProbeContext &context,
+    const std::string &fort_id
 );
 
 bool refresh_runtime_encounter_owners(ProbeContext &context);

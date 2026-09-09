@@ -4,6 +4,7 @@ import dev.pogoroot.automation.core.automation.AlertKind
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.CatchReason
+import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.automation.CurvePreference
 import dev.pogoroot.automation.core.automation.EncounterMode
 import dev.pogoroot.automation.core.automation.ThrowProfile
@@ -29,7 +30,11 @@ internal object BridgeActionCodec {
                 codec.writeString(output, action.spawnId)
             }
             is AutomationAction.Catch -> {
-                if (action.throwProfile.isDefault) {
+                if (action.mode == CatchMode.DIRECT_MAP) {
+                    output.writeInt(12)
+                    codec.writeString(output, action.encounterId)
+                    output.writeInt(action.reason.wireValue())
+                } else if (action.throwProfile.isDefault) {
                     output.writeInt(if (action.closePreviewAfterCaught) 9 else 3)
                     codec.writeString(output, action.encounterId)
                     output.writeInt(action.reason.wireValue())
@@ -80,6 +85,12 @@ internal object BridgeActionCodec {
         2 -> AutomationAction.OpenEncounter(codec.readString(input))
         3 -> readCatch(input, closePreviewAfterCaught = false, hasThrowProfile = false)
         9 -> readCatch(input, closePreviewAfterCaught = true, hasThrowProfile = false)
+        12 -> readCatch(
+            input,
+            closePreviewAfterCaught = false,
+            hasThrowProfile = false,
+            mode = CatchMode.DIRECT_MAP,
+        )
         10 -> {
             val encounterId = codec.readString(input)
             val reason = codec.readEnum(input, CatchReason.entries) { it.wireValue() }
@@ -116,11 +127,13 @@ internal object BridgeActionCodec {
         input: DataInputStream,
         closePreviewAfterCaught: Boolean,
         hasThrowProfile: Boolean,
+        mode: CatchMode = CatchMode.ENCOUNTER,
     ): AutomationAction.Catch = AutomationAction.Catch(
         encounterId = codec.readString(input),
         reason = codec.readEnum(input, CatchReason.entries) { it.wireValue() },
         closePreviewAfterCaught = closePreviewAfterCaught,
         throwProfile = if (hasThrowProfile) readThrowProfile(input) else ThrowProfile(),
+        mode = mode,
     )
 
     private fun writeThrowProfile(output: DataOutputStream, value: ThrowProfile) {

@@ -87,6 +87,8 @@ class HeadlessAutomationService : Service() {
                         enabled = true,
                         autoCatch = intent.booleanExtraOrNull(EXTRA_AUTO_CATCH) ?: current.autoCatch,
                         autoSpin = intent.booleanExtraOrNull(EXTRA_AUTO_SPIN) ?: current.autoSpin,
+                        autoEncounter = intent.booleanExtraOrNull(EXTRA_AUTO_ENCOUNTER)
+                            ?: current.autoEncounter,
                     )
                 }
                 engine.start()
@@ -176,6 +178,7 @@ class HeadlessAutomationService : Service() {
         const val ACTION_STOP_SERVICE = "dev.pogoroot.automation.action.STOP_HEADLESS_SERVICE"
         const val EXTRA_AUTO_CATCH = "autoCatch"
         const val EXTRA_AUTO_SPIN = "autoSpin"
+        const val EXTRA_AUTO_ENCOUNTER = "autoEncounter"
 
         private const val JOYSTICK_AUTO_START_POLL_MS = 750L
         private const val CHANNEL_ID = "pogo_headless_automation"
@@ -187,12 +190,18 @@ class HeadlessAutomationService : Service() {
             )
         }
 
-        fun enable(context: Context, autoCatch: Boolean = true, autoSpin: Boolean = true) {
+        fun enable(
+            context: Context,
+            autoCatch: Boolean = true,
+            autoSpin: Boolean = true,
+            autoEncounter: Boolean = false,
+        ) {
             context.startForegroundService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_ENABLE)
                     .putExtra(EXTRA_AUTO_CATCH, autoCatch)
-                    .putExtra(EXTRA_AUTO_SPIN, autoSpin),
+                    .putExtra(EXTRA_AUTO_SPIN, autoSpin)
+                    .putExtra(EXTRA_AUTO_ENCOUNTER, autoEncounter),
             )
         }
 

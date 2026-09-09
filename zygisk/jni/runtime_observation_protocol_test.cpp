@@ -36,5 +36,18 @@ int main() {
 
     observation.screen_x = 1081.0F;
     assert(!pogo_runtime::encode_map_target_payload(observation, &payload));
+
+    pogo_runtime::RuntimeFortsObservation forts;
+    forts.forts.push_back({"fort-1", 0, 21.0, 105.0, true});
+    std::vector<uint8_t> forts_envelope;
+    assert(pogo_runtime::encode_runtime_forts_observation(
+        forts, 33U, 44U, &forts_envelope
+    ));
+    assert(read_u32(forts_envelope, 0U) == pogo_runtime::kRuntimeObservationEnvelopeVersion);
+    assert(read_u32(forts_envelope, 4U) == pogo_runtime::kFortsObservationType);
+    assert(read_u32(forts_envelope, 8U) == pogo_runtime::kRuntimeFortsPayloadVersion);
+
+    forts.forts.front().type = 2;
+    assert(!pogo_runtime::encode_runtime_forts_payload(forts, &payload));
     return 0;
 }

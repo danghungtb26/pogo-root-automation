@@ -13,8 +13,11 @@ constexpr uint32_t kRuntimeObservationEnvelopeVersion = 1U;
 constexpr uint32_t kLifecycleObservationType = 1U;
 constexpr uint32_t kLifecyclePayloadVersion = 1U;
 constexpr uint32_t kEncounterObservationType = 3U;
+constexpr uint32_t kFortsObservationType = 4U;
 constexpr uint32_t kRuntimeNearbyPayloadVersion = 1U;
 constexpr uint32_t kRuntimeNearbyPayloadMagic = 0x504F474EU;  // POGN
+constexpr uint32_t kRuntimeFortsPayloadVersion = 1U;
+constexpr uint32_t kRuntimeFortsPayloadMagic = 0x504F4746U;  // POGF
 /** Structured IL2CPP observation; distinct from raw EncounterOutProto v1. */
 constexpr uint32_t kRuntimeEncounterPayloadVersion = 2U;
 constexpr uint32_t kRuntimeEncounterPayloadMagic = 0x504F4745U;  // POGE
@@ -54,6 +57,18 @@ struct RuntimeNearbySpawnObservation {
 
 struct RuntimeNearbyObservation {
     std::vector<RuntimeNearbySpawnObservation> spawns;
+};
+
+struct RuntimeFortObservation {
+    std::string fort_id;
+    int32_t type = 0;
+    double latitude = 0.0;
+    double longitude = 0.0;
+    bool spin_available = false;
+};
+
+struct RuntimeFortsObservation {
+    std::vector<RuntimeFortObservation> forts;
 };
 
 inline void append_u32(std::vector<uint8_t> *output, uint32_t value) {
@@ -124,6 +139,18 @@ inline bool valid_runtime_nearby_observation(const RuntimeNearbyObservation &val
     return true;
 }
 
+inline bool valid_runtime_forts_observation(const RuntimeFortsObservation &value) {
+    if (value.forts.size() > 512U) return false;
+    for (const RuntimeFortObservation &fort : value.forts) {
+        if (fort.fort_id.empty() || fort.fort_id.size() > kMaxObservationStringBytes ||
+            fort.type < 0 || fort.type > 1 || !std::isfinite(fort.latitude) ||
+            fort.latitude < -90.0 || fort.latitude > 90.0 ||
+            !std::isfinite(fort.longitude) || fort.longitude < -180.0 ||
+            fort.longitude > 180.0) return false;
+    }
+    return true;
+}
+
 inline bool encode_runtime_nearby_payload(
     const RuntimeNearbyObservation &value,
     std::vector<uint8_t> *payload
@@ -141,6 +168,24 @@ inline bool encode_runtime_nearby_payload(
     return true;
 }
 
+inline bool encode_runtime_forts_payload(
+    const RuntimeFortsObservation &value,
+    std::vector<uint8_t> *payload
+) {
+    if (payload == nullptr || !valid_runtime_forts_observation(value)) return false;
+    payload->clear();
+    append_u32(payload, kRuntimeFortsPayloadMagic);
+    append_u32(payload, static_cast<uint32_t>(value.forts.size()));
+    for (const RuntimeFortObservation &fort : value.forts) {
+        if (!append_string(payload, fort.fort_id)) return false;
+        append_u32(payload, static_cast<uint32_t>(fort.type));
+        append_f64(payload, fort.latitude);
+        append_f64(payload, fort.longitude);
+        payload->push_back(fort.spin_available ? 1U : 0U);
+    }
+    return true;
+}
+
 inline bool encode_runtime_nearby_observation(
     const RuntimeNearbyObservation &value,
     uint64_t observed_at_epoch_ms,
@@ -154,6 +199,26 @@ inline bool encode_runtime_nearby_observation(
     append_u32(envelope, kRuntimeObservationEnvelopeVersion);
     append_u32(envelope, 2U);
     append_u32(envelope, kRuntimeNearbyPayloadVersion);
+    append_u32(envelope, static_cast<uint32_t>(payload.size()));
+    envelope->insert(envelope->end(), payload.begin(), payload.end());
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
+}
+
+inline bool encode_runtime_forts_observation(
+    const RuntimeFortsObservation &value,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr) return false;
+    std::vector<uint8_t> payload;
+    if (!encode_runtime_forts_payload(value, &payload)) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, kFortsObservationType);
+    append_u32(envelope, kRuntimeFortsPayloadVersion);
     append_u32(envelope, static_cast<uint32_t>(payload.size()));
     envelope->insert(envelope->end(), payload.begin(), payload.end());
     append_u64(envelope, observed_at_epoch_ms);

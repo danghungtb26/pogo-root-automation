@@ -189,18 +189,21 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     }
     void *result = nullptr;
     pogo_runtime::RuntimeNearbyObservation nearby;
+    pogo_runtime::RuntimeFortsObservation forts;
     bool task_success = false;
     MainThreadActionOutcome action_outcome = MainThreadActionOutcome::kRejected;
     uint64_t encounter_id = 0U;
+    std::string fort_id;
     {
         std::lock_guard<std::mutex> lock(context->main_thread_bridge.mutex);
         encounter_id = context->main_thread_bridge.pending_encounter_id;
+        fort_id = context->main_thread_bridge.pending_fort_id;
     }
     if (task_type == MainThreadTaskType::kFindObject) {
         result = find_unity_object_on_main_thread(*context, name_space.c_str(), class_name.c_str());
         task_success = result != nullptr;
     } else if (task_type == MainThreadTaskType::kReadMap) {
-        task_success = read_runtime_map_snapshot_on_main_thread(*context, &nearby);
+        task_success = read_runtime_map_snapshot_on_main_thread(*context, &nearby, &forts);
     } else if (task_type == MainThreadTaskType::kOpenEncounter) {
         action_outcome = open_runtime_encounter_on_main_thread(*context, encounter_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
@@ -215,17 +218,24 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         }
         action_outcome = use_runtime_berry_on_main_thread(*context, encounter_id, item_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
+    } else if (task_type == MainThreadTaskType::kDirectCatch) {
+        action_outcome = direct_catch_runtime_on_main_thread(*context, encounter_id);
+        task_success = action_outcome == MainThreadActionOutcome::kInvoked;
+    } else if (task_type == MainThreadTaskType::kSpin) {
+        action_outcome = spin_runtime_pokestop_on_main_thread(*context, fort_id);
+        task_success = action_outcome == MainThreadActionOutcome::kInvoked;
     }
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu",
+        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu",
         static_cast<unsigned>(task_type),
         name_space.c_str(),
         class_name.c_str(),
         task_success ? 1 : 0,
         result,
-        nearby.spawns.size()
+        nearby.spawns.size(),
+        forts.forts.size()
     );
     __android_log_print(
         current_thread == nullptr ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
@@ -243,6 +253,7 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         context->main_thread_bridge.pending_result = result;
         if (task_type == MainThreadTaskType::kReadMap) {
             context->main_thread_bridge.pending_nearby = std::move(nearby);
+            context->main_thread_bridge.pending_forts = std::move(forts);
         }
         context->main_thread_bridge.pending_success = task_success;
         context->main_thread_bridge.pending_action_outcome = action_outcome;
@@ -315,6 +326,7 @@ void shutdown_main_thread_bridge(ProbeContext &context) {
         context.main_thread_bridge.pending_token = 0U;
         context.main_thread_bridge.pending_done = true;
         context.main_thread_bridge.pending_item_id = 0;
+        context.main_thread_bridge.pending_forts.forts.clear();
     }
     context.main_thread_bridge.condition.notify_all();
     if (g_main_thread_context == &context) g_main_thread_context = nullptr;
@@ -402,9 +414,10 @@ void *request_main_thread_object(
 
 bool request_main_thread_map_snapshot(
     ProbeContext &context,
-    pogo_runtime::RuntimeNearbyObservation *observation
+    pogo_runtime::RuntimeNearbyObservation *observation,
+    pogo_runtime::RuntimeFortsObservation *forts
 ) {
-    if (observation == nullptr || !context.main_thread_bridge.ready ||
+    if (observation == nullptr || forts == nullptr || !context.main_thread_bridge.ready ||
         context.main_thread_bridge.java_vm == nullptr) return false;
     std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
     if (context.main_thread_bridge.pending_token != 0U) return false;
@@ -415,6 +428,7 @@ bool request_main_thread_map_snapshot(
     context.main_thread_bridge.pending_class_name.clear();
     context.main_thread_bridge.pending_result = nullptr;
     context.main_thread_bridge.pending_nearby.spawns.clear();
+    context.main_thread_bridge.pending_forts.forts.clear();
     context.main_thread_bridge.pending_done = false;
     context.main_thread_bridge.pending_success = false;
     JNIEnv *env = nullptr;
@@ -453,6 +467,7 @@ bool request_main_thread_map_snapshot(
         return false;
     }
     *observation = context.main_thread_bridge.pending_nearby;
+    *forts = context.main_thread_bridge.pending_forts;
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;
     return true;

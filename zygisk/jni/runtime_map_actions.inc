@@ -172,12 +172,50 @@ void *find_active_map_tappable_by_id(ProbeContext &context, uint64_t encounter_i
     return nullptr;
 }
 
+void *find_map_pokemon_from_cells_by_id(ProbeContext &context, uint64_t encounter_id) {
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    const Il2CppApi &api = context.il2cpp_api;
+    if (encounter_id == 0U || binding.map_entity_cells == nullptr ||
+        !has_core_il2cpp_api(api)) return nullptr;
+    std::vector<MapDictionaryEntry> cell_entries;
+    if (!enumerate_map_dictionary(api, binding.map_entity_cells, &cell_entries)) return nullptr;
+    for (const MapDictionaryEntry &cell_entry : cell_entries) {
+        void *wild_dictionary = nullptr;
+        if (!read_runtime_field(api, cell_entry.value, "eghw", &wild_dictionary) ||
+            !is_probable_managed_pointer(wild_dictionary)) continue;
+        std::vector<MapDictionaryEntry> wild_entries;
+        if (!enumerate_map_dictionary(api, wild_dictionary, &wild_entries)) continue;
+        for (const MapDictionaryEntry &wild_entry : wild_entries) {
+            void *wild = wild_entry.value;
+            if (!runtime_object_is_exact_class(
+                    api, wild, "Niantic.Holoholo.Map", "WildMapPokemon")) continue;
+            uint64_t candidate_id = 0U;
+            if (read_map_pokemon_id(api, wild, &candidate_id) && candidate_id == encounter_id) {
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "runtime action target matched via map cells id=%llu cell_key=%llu wild_key=%llu object=%p",
+                    static_cast<unsigned long long>(encounter_id),
+                    static_cast<unsigned long long>(cell_entry.key),
+                    static_cast<unsigned long long>(wild_entry.key),
+                    wild
+                );
+                return wild;
+            }
+        }
+    }
+    return nullptr;
+}
+
 void *find_active_map_pokemon_by_id(ProbeContext &context, uint64_t encounter_id) {
     const Il2CppApi &api = context.il2cpp_api;
     if (encounter_id == 0U || !ensure_main_thread_bridge(context) ||
         api.domain_get_assemblies == nullptr || api.array_length == nullptr ||
         api.array_get_byte_length == nullptr || api.class_get_type == nullptr ||
         api.type_get_object == nullptr) return nullptr;
+    if (void *map_pokemon = find_map_pokemon_from_cells_by_id(context, encounter_id)) {
+        return map_pokemon;
+    }
     Il2CppDomain *domain = api.domain_get == nullptr ? nullptr : api.domain_get();
     size_t assembly_count = 0U;
     const Il2CppAssembly **assemblies = domain == nullptr

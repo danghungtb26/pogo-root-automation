@@ -174,6 +174,9 @@ fallbacks. If the runtime binding or camera state is unavailable, fail closed.
 - Keep every non-Markdown source file at or below 500 lines, regardless of
   language. Split cohesive responsibilities into smaller files and use the
   language's import/include mechanism when sharing code.
+- If ADB does not find the configured emulator, run `adb kill-server` followed
+  by `adb start-server`, reconnect the emulator, and check `adb devices` again
+  before continuing device tests.
 - Preserve capability checks, runtime identity checks, freshness and fail-closed
   behavior.
 - Keep game-build-specific code behind the adapter/native binding boundary.

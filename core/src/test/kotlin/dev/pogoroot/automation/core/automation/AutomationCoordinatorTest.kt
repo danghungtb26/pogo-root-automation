@@ -82,6 +82,81 @@ class AutomationCoordinatorTest {
     }
 
     @Test
+    fun `direct map catch is planned from overworld nearby state`() {
+        val now = 10_000L
+        val position = GeoPoint(21.0, 105.0)
+        val actions = coordinator.plan(
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.OVERWORLD,
+                nearby = NearbySnapshot(
+                    observedAtEpochMs = now,
+                    playerPosition = position,
+                    spawns = listOf(
+                        NearbySpawn(
+                            spawnId = "map-spawn",
+                            speciesId = 25,
+                            speciesName = "Pikachu",
+                            position = position,
+                            firstSeenAtEpochMs = now,
+                            expiresAtEpochMs = null,
+                            expiryConfidence = SpawnExpiryConfidence.UNKNOWN,
+                        ),
+                    ),
+                ),
+            ),
+            policy = AutomationPolicy(
+                autoCatch = true,
+                catchPolicy = CatchPolicy(catchAll = true),
+            ),
+        )
+
+        assertEquals(
+            listOf(
+                AutomationAction.Catch(
+                    encounterId = "map-spawn",
+                    reason = CatchReason.CATCH_ALL,
+                    mode = CatchMode.DIRECT_MAP,
+                ),
+            ),
+            actions,
+        )
+    }
+
+    @Test
+    fun `direct map catch does not enqueue encounter fallback`() {
+        val position = GeoPoint(21.0, 105.0)
+        val actions = coordinator.plan(
+            snapshot = AutomationSnapshot(
+                lifecycleState = GameLifecycleState.OVERWORLD,
+                nearby = NearbySnapshot(
+                    observedAtEpochMs = 10_000L,
+                    playerPosition = position,
+                    spawns = listOf(
+                        NearbySpawn(
+                            spawnId = "map-spawn",
+                            speciesId = 25,
+                            speciesName = "Pikachu",
+                            position = position,
+                            firstSeenAtEpochMs = 10_000L,
+                            expiresAtEpochMs = null,
+                            expiryConfidence = SpawnExpiryConfidence.UNKNOWN,
+                        ),
+                    ),
+                ),
+            ),
+            policy = AutomationPolicy(
+                autoEncounter = true,
+                autoCatch = true,
+                catchPolicy = CatchPolicy(catchAll = true),
+            ),
+        )
+
+        assertEquals(1, actions.size)
+        assertTrue(actions.single() is AutomationAction.Catch)
+        assertEquals(CatchMode.DIRECT_MAP, (actions.single() as AutomationAction.Catch).mode)
+    }
+
+    @Test
     fun `berry is a separate action before catch`() {
         val actions = coordinator.plan(
             snapshot = AutomationSnapshot(

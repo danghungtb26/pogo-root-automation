@@ -1,4 +1,5 @@
 constexpr bool kCatchExecutionEnabled = false;
+constexpr bool kDirectCatchExecutionEnabled = true;
 
 bool parse_runtime_catch_command(
     const std::vector<uint8_t> &command,
@@ -17,7 +18,7 @@ bool parse_runtime_catch_command(
         !read_string(command, &offset, &parsed->session_id) ||
         !read_string(command, &offset, &parsed->command_id) ||
         !read_be32(command, &offset, &parsed->action_tag) ||
-        (parsed->action_tag != 3U && parsed->action_tag != 9U) ||
+        (parsed->action_tag != 3U && parsed->action_tag != 9U && parsed->action_tag != 12U) ||
         !read_string(command, &offset, &parsed->encounter_id) ||
         !read_be32(command, &offset, &catch_reason) ||
         !read_be64(command, &offset, &parsed->based_on_observation_seq) ||
@@ -47,6 +48,67 @@ RuntimeActionResult execute_runtime_catch(
     ProbeContext &context,
     const RuntimeActionCommand &command
 ) {
+    if (command.action_tag == 12U) {
+        RuntimeActionResult direct_result{};
+        const RuntimeBinding direct_binding = runtime_binding_snapshot(context);
+        if (!kDirectCatchExecutionEnabled || !direct_binding.exact_build_verified ||
+            !direct_binding.direct_catch_verified ||
+            direct_binding.map_pokemon_try_capture == nullptr) {
+            direct_result.error_code = "binding_unavailable";
+            direct_result.message = "direct map catch is unavailable for this verified build";
+            return direct_result;
+        }
+        if (command.pid != static_cast<uint32_t>(context.pid) ||
+            command.process_name != context.process_name ||
+            command.package_name != context.process_name) {
+            direct_result.error_code = "runtime_identity_mismatch";
+            direct_result.message = "command identity does not match target process";
+            return direct_result;
+        }
+        if (command.build_fingerprint != kVerifiedBuildFingerprint) {
+            direct_result.error_code = "build_fingerprint_mismatch";
+            direct_result.message = "command build fingerprint is not the verified binding build";
+            return direct_result;
+        }
+        if (!command.expected_lifecycle_present || command.expected_lifecycle != 4U) {
+            direct_result.error_code = "lifecycle_guard_failed";
+            direct_result.message = "direct map catch requires the OVERWORLD lifecycle";
+            return direct_result;
+        }
+        if (command.expires_at_elapsed_ns <= static_cast<uint64_t>(now_elapsed_nanos())) {
+            direct_result.error_code = "command_expired";
+            direct_result.message = "command expired before direct map catch invocation";
+            return direct_result;
+        }
+        if (command.command_id == context.last_action_command_id) {
+            direct_result.error_code = "duplicate_command";
+            direct_result.message = "command was already attempted in this runtime session";
+            return direct_result;
+        }
+        uint64_t encounter_id = 0U;
+        if (!parse_decimal_u64(command.encounter_id, &encounter_id)) {
+            direct_result.error_code = "invalid_catch_command";
+            direct_result.message = "map spawn id is invalid";
+            return direct_result;
+        }
+        context.last_action_command_id = command.command_id;
+        const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
+            context, encounter_id
+        );
+        if (outcome == MainThreadActionOutcome::kInvoked) {
+            direct_result.phase = kCommandPhaseIndeterminate;
+            direct_result.error_code = "direct_catch_outcome_unavailable";
+            direct_result.message = "MapPokemon.TryCapture was invoked; server catch outcome is not yet observed";
+        } else if (outcome == MainThreadActionOutcome::kIndeterminate) {
+            direct_result.phase = kCommandPhaseIndeterminate;
+            direct_result.error_code = "invoke_outcome_indeterminate";
+            direct_result.message = "MapPokemon.TryCapture may have run but the main-thread result was lost";
+        } else {
+            direct_result.error_code = "catch_target_unavailable";
+            direct_result.message = "the requested map Pokémon is no longer available";
+        }
+        return direct_result;
+    }
     RuntimeActionResult result{};
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     if (!kCatchExecutionEnabled || !binding.exact_build_verified ||

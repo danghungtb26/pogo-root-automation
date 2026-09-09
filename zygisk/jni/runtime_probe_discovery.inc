@@ -493,4 +493,5 @@ void discover_runtime_owners(
         binding->map_pokemon_on_tapped,
         binding->unity_find_objects_of_type
     );
+    discover_direct_map_bindings(api, assemblies, assembly_count, binding);
 }

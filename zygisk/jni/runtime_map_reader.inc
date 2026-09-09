@@ -210,7 +210,8 @@ bool read_map_wild_pokemon(
 
 bool read_runtime_map_snapshot_on_main_thread(
     ProbeContext &context,
-    pogo_runtime::RuntimeNearbyObservation *observation
+    pogo_runtime::RuntimeNearbyObservation *observation,
+    pogo_runtime::RuntimeFortsObservation *forts
 ) {
     // Keep the collection walk staged until each IL2CPP call has passed the
     // live build smoke test. Stage 3 uses dictionary keys and never treats the
@@ -218,7 +219,7 @@ bool read_runtime_map_snapshot_on_main_thread(
     constexpr int kMapReaderStage = 5;
     if (kMapReaderStage == 0) return false;
     const RuntimeBinding binding = runtime_binding_snapshot(context);
-    if (observation == nullptr || !binding.map_entity_read_verified ||
+    if (observation == nullptr || forts == nullptr || !binding.map_entity_read_verified ||
         binding.map_entity_service == nullptr ||
         binding.map_entity_get_cells == nullptr ||
         !has_core_il2cpp_api(context.il2cpp_api)) return false;
@@ -232,6 +233,7 @@ bool read_runtime_map_snapshot_on_main_thread(
     if (cells == nullptr) return false;
     if (kMapReaderStage == 1) return true;
     observation->spawns.clear();
+    forts->forts.clear();
     if (kMapReaderStage == 2) {
         count_map_collection(context.il2cpp_api, cells);
         return true;
@@ -261,5 +263,13 @@ bool read_runtime_map_snapshot_on_main_thread(
         cell_entries.size(),
         observation->spawns.size()
     );
+    if (binding.forts_read_verified && !read_runtime_map_forts(
+            context.il2cpp_api, binding, forts)) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime map reader could not enumerate active PokéStops"
+        );
+    }
     return pogo_runtime::valid_runtime_nearby_observation(*observation);
 }

@@ -263,7 +263,9 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(type_get_object, Il2CppTypeGetObject, "il2cpp_type_get_object");
     RESOLVE(object_new, Il2CppObjectNew, "il2cpp_object_new");
     RESOLVE(runtime_object_init, Il2CppRuntimeObjectInit, "il2cpp_runtime_object_init");
+    RESOLVE(runtime_class_init, Il2CppRuntimeClassInit, "il2cpp_runtime_class_init");
     RESOLVE(runtime_invoke, Il2CppRuntimeInvoke, "il2cpp_runtime_invoke");
+    RESOLVE(string_new, Il2CppStringNew, "il2cpp_string_new");
 #undef RESOLVE
 
     const bool available = has_core_il2cpp_api(*api);
