@@ -92,9 +92,10 @@ Item names are not sent; the Kotlin mapper fills `#<id>` when blank.
 The executor is written and wired but gated off, mirroring the encounter catch
 path (`kCatchExecutionEnabled = false`):
 
-- `modules/discard/discard.inc` — `parse_runtime_discard_command` (action tag 5,
-  reads `itemId`/`amount` from the frame `BridgeActionCodec` already produces) and
-  `execute_runtime_discard`, dispatched in `runtime_control.inc`.
+- `modules/discard/parse.inc` — `parse_runtime_discard_command` (action tag 5,
+  reads `itemId`/`amount` from the frame `BridgeActionCodec` already produces).
+- `modules/discard/execute.inc` — `execute_runtime_discard` + `recycle_runtime_item`
+  and the `kDiscardExecutionEnabled` gate; dispatched in `runtime_control.inc`.
 - Binding: `IItemBag.RecycleItem(ItemData, int, ISet<Item>)` + the `ItemData`
   class are resolved in `runtime_probe_discovery.inc`, setting `discard_verified`.
 - `recycle_runtime_item` constructs `ItemData` via `object_new` + field writes
