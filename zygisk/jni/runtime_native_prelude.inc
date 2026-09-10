@@ -284,6 +284,24 @@ struct RuntimeBinding {
     bool forts_read_verified = false;
     bool spin_verified = false;
     bool exact_build_verified = false;
+    // Mode B: true once the map-query batch callback is inline-hooked so it marks
+    // the world dirty. While false, the observer uses a periodic dirty-tick
+    // fallback (mode-C cadence). Installing the hook needs a build-specific
+    // prologue captured from the live libil2cpp.so; see docs/architecture.
+    bool map_query_hook_installed = false;
+    // Player position (Niantic.Holoholo.ILocationProvider -> LocationProviderAdapter).
+    // get_CurrentLocation returns a Niantic.Platform.Ditto.Geo.Location value
+    // struct exposing LatitudeDeg/LongitudeDeg (double).
+    void *location_provider = nullptr;
+    const void *location_get_current = nullptr;
+    const void *location_get_latitude = nullptr;
+    const void *location_get_longitude = nullptr;
+    bool location_read_verified = false;
+    // Map-query batch callback (Niantic.Platform.GameMapObject.Map.MapQueryManager
+    // .OnMapQueryResponse) used as the mode-B dirty trigger. Resolved to a method
+    // for inline hooking; see modules/catch_spin/map_hooks.inc.
+    const void *map_query_on_response = nullptr;
+    bool map_query_hook_binding_verified = false;
 };
 
 enum class MainThreadTaskType : uint32_t {
@@ -374,6 +392,10 @@ struct ProbeContext {
     std::atomic<bool> observation_running{false};
     pthread_t observation_thread{};
     bool observation_thread_started = false;
+    // Mode B (dirty-flag) observation: set when a map-change signal indicates the
+    // world may have changed. The observer re-reads the map only when this is set
+    // (plus a rare reconcile). Starts true so the first cycle always reads.
+    std::atomic<bool> world_dirty{true};
 };
 
 RuntimeBinding runtime_binding_snapshot(ProbeContext &context) {
@@ -393,6 +415,13 @@ bool read_runtime_map_forts(
     const Il2CppApi &api,
     const RuntimeBinding &binding,
     pogo_runtime::RuntimeFortsObservation *observation
+);
+
+bool read_runtime_player_position(
+    const Il2CppApi &api,
+    const RuntimeBinding &binding,
+    double *latitude,
+    double *longitude
 );
 
 void discover_direct_map_bindings(

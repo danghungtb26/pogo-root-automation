@@ -357,6 +357,34 @@ void discover_runtime_owners(
             runtime_object_is_exact_class(api, owner, "Niantic.Holoholo.Encounter", "EncounterGuiController")) {
             binding->encounter_gui = owner;
         }
+        if (strcmp(service.label, "ILocationProvider") == 0 && owner != nullptr &&
+            api.object_get_class != nullptr && api.class_get_method_from_name != nullptr) {
+            Il2CppClass *owner_class = api.object_get_class(owner);
+            const void *get_current = owner_class == nullptr ? nullptr
+                : api.class_get_method_from_name(owner_class, "get_CurrentLocation", 0);
+            Il2CppClass *location_class = find_runtime_class(
+                api, assemblies, assembly_count,
+                "Niantic.Platform.Ditto.Geo", "Location", nullptr
+            );
+            const void *get_lat = location_class == nullptr ? nullptr
+                : api.class_get_method_from_name(location_class, "get_LatitudeDeg", 0);
+            const void *get_lng = location_class == nullptr ? nullptr
+                : api.class_get_method_from_name(location_class, "get_LongitudeDeg", 0);
+            if (get_current != nullptr && get_lat != nullptr && get_lng != nullptr) {
+                binding->location_provider = owner;
+                binding->location_get_current = get_current;
+                binding->location_get_latitude = get_lat;
+                binding->location_get_longitude = get_lng;
+                binding->location_read_verified = true;
+            }
+            __android_log_print(
+                binding->location_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                kLogTag,
+                "managed diagnostic: location provider verified=%d owner=%p current=%p lat=%p lng=%p",
+                binding->location_read_verified ? 1 : 0,
+                owner, get_current, get_lat, get_lng
+            );
+        }
         if (strcmp(service.label, "IPokeballService") == 0 && owner != nullptr &&
             runtime_object_is_exact_class(api, owner, "Niantic.Holoholo.Services", "PokeballService")) {
             binding->pokeball_service = owner;
@@ -478,6 +506,27 @@ void discover_runtime_owners(
         api.class_get_field_from_name(pokemon_proto_class, "pokemonDisplay_") != nullptr &&
         api.class_get_field_from_name(pokemon_display_class, "Shiny") != nullptr;
     binding->encounter_read_verified = encounter_fields_verified;
+    // Mode B: resolve the map-query batch callback for inline hooking. The
+    // 2-parameter overload (int rpcId, byte[] response) fires once per server
+    // map response. Only the MethodInfo is captured here; installing the hook
+    // (and capturing its prologue from live memory) happens in map_hooks.inc.
+    Il2CppClass *map_query_manager_class = find_runtime_class(
+        api, assemblies, assembly_count,
+        "Niantic.Platform.GameMapObject.Map", "MapQueryManager", nullptr
+    );
+    if (map_query_manager_class != nullptr && api.class_get_method_from_name != nullptr) {
+        binding->map_query_on_response = api.class_get_method_from_name(
+            map_query_manager_class, "OnMapQueryResponse", 2
+        );
+    }
+    binding->map_query_hook_binding_verified = binding->map_query_on_response != nullptr;
+    __android_log_print(
+        binding->map_query_hook_binding_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: map query hook binding verified=%d method=%p",
+        binding->map_query_hook_binding_verified ? 1 : 0,
+        binding->map_query_on_response
+    );
     __android_log_print(
         encounter_fields_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,

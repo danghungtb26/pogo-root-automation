@@ -303,15 +303,29 @@ bool send_pending_runtime_throw_events(ProbeContext &context) {
     return true;
 }
 
+// Mode B seam: mark the observed world as changed so the next observer cycle
+// re-reads it. Called by the periodic fallback today and by the map-query batch
+// callback hook once that is installed.
+void mark_world_dirty(ProbeContext &context) {
+    context.world_dirty.store(true, std::memory_order_relaxed);
+}
+
 void *runtime_observation_thread(void *opaque_context) {
     auto *context = static_cast<ProbeContext *>(opaque_context);
     if (context == nullptr) return nullptr;
+
+    // Tick is ~100 ms (see usleep below). Fallback poll keeps the pre-refactor
+    // cadence; reconcile is a rare full re-read that recovers from any missed
+    // dirty signal once the hook is driving updates.
+    constexpr uint32_t kFallbackPollTicks = 2U;   // ~200 ms
+    constexpr uint32_t kReconcileTicks = 300U;    // ~30 s
 
     bool was_encounter = false;
     bool sent_initial_state = false;
     uint64_t last_encounter_id = 0U;
     uint32_t lifecycle_heartbeat_ticks = 0U;
     uint32_t nearby_ticks = 0U;
+    uint32_t reconcile_ticks = 0U;
     uint32_t encounter_owner_refresh_ticks = 0U;
     while (context->observation_running.load() && kill(getpid(), 0) == 0) {
         if (!send_pending_runtime_throw_events(*context)) break;
@@ -324,19 +338,38 @@ void *runtime_observation_thread(void *opaque_context) {
         }
         ++encounter_owner_refresh_ticks;
         const RuntimeBinding binding = runtime_binding_snapshot(*context);
-        if (binding.map_entity_read_verified &&
-            context->main_thread_bridge.ready && nearby_ticks >= 2U) {
-            pogo_runtime::RuntimeNearbyObservation nearby_observation;
-            pogo_runtime::RuntimeFortsObservation forts_observation;
-            if (request_main_thread_map_snapshot(
-                    *context, &nearby_observation, &forts_observation)) {
-                if (!send_runtime_nearby_payload(*context, nearby_observation) ||
-                    (binding.forts_read_verified &&
-                        !send_runtime_forts_payload(*context, forts_observation))) break;
+        // Mode B: re-read the world only when a map-change signal marked it dirty,
+        // plus a rare reconcile re-read for recovery. Forts do not depend on the
+        // cell traversal, so either reader source is enough; each payload is still
+        // published only under its own flag.
+        const bool observe_source =
+            binding.map_entity_read_verified || binding.forts_read_verified;
+        if (observe_source && context->main_thread_bridge.ready) {
+            // Until the map-query batch callback is inline-hooked (it needs a
+            // build-specific prologue from the live libil2cpp.so), a periodic tick
+            // marks the world dirty so observation keeps running at the mode-C
+            // cadence. Once the hook is installed it becomes the dirty source and
+            // this fallback is skipped.
+            if (!binding.map_query_hook_installed && nearby_ticks >= kFallbackPollTicks) {
+                mark_world_dirty(*context);
+                nearby_ticks = 0U;
             }
-            nearby_ticks = 0U;
+            const bool reconcile_due = reconcile_ticks >= kReconcileTicks;
+            if (context->world_dirty.exchange(false) || reconcile_due) {
+                pogo_runtime::RuntimeNearbyObservation nearby_observation;
+                pogo_runtime::RuntimeFortsObservation forts_observation;
+                if (request_main_thread_map_snapshot(
+                        *context, &nearby_observation, &forts_observation)) {
+                    if (binding.map_entity_read_verified &&
+                        !send_runtime_nearby_payload(*context, nearby_observation)) break;
+                    if (binding.forts_read_verified &&
+                        !send_runtime_forts_payload(*context, forts_observation)) break;
+                }
+                reconcile_ticks = 0U;
+            }
         }
         ++nearby_ticks;
+        ++reconcile_ticks;
         if (context->il2cpp_api_ready && binding.encounter_read_verified &&
             api.domain_get != nullptr && api.thread_attach != nullptr &&
             api.thread_detach != nullptr &&
@@ -404,7 +437,19 @@ void *runtime_observation_thread(void *opaque_context) {
 }
 
 bool start_runtime_observation(ProbeContext &context) {
-    if (!runtime_binding_snapshot(context).encounter_read_verified) return false;
+    // Start the shared observer if ANY observation source is verified. Nearby
+    // pokemon reads require encounter_read_verified (the shared wild/encounter
+    // proto field schema), but fort reads depend only on forts_read_verified.
+    // Gating solely on encounter_read_verified would kill fort/spin observation
+    // whenever the pokemon proto fields fail to bind. Each loop section
+    // self-gates on its own flag, so a loosened start gate is safe.
+    const RuntimeBinding start_binding = runtime_binding_snapshot(context);
+    if (!start_binding.encounter_read_verified && !start_binding.forts_read_verified) {
+        return false;
+    }
+    // Guarantee the first observer cycle performs a full read (the flag may retain
+    // a stale value across a stop/restart of the observer thread).
+    context.world_dirty.store(true, std::memory_order_relaxed);
     if (context.observation_thread_started) {
         if (context.observation_running.load()) return false;
         pthread_join(context.observation_thread, nullptr);

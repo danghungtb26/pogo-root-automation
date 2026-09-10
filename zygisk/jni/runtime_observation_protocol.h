@@ -14,7 +14,7 @@ constexpr uint32_t kLifecycleObservationType = 1U;
 constexpr uint32_t kLifecyclePayloadVersion = 1U;
 constexpr uint32_t kEncounterObservationType = 3U;
 constexpr uint32_t kFortsObservationType = 4U;
-constexpr uint32_t kRuntimeNearbyPayloadVersion = 1U;
+constexpr uint32_t kRuntimeNearbyPayloadVersion = 2U;
 constexpr uint32_t kRuntimeNearbyPayloadMagic = 0x504F474EU;  // POGN
 constexpr uint32_t kRuntimeFortsPayloadVersion = 1U;
 constexpr uint32_t kRuntimeFortsPayloadMagic = 0x504F4746U;  // POGF
@@ -93,6 +93,11 @@ struct RuntimeNearbySpawnObservation {
 struct RuntimeNearbyObservation {
     std::vector<RuntimeNearbySpawnObservation> spawns;
     bool is_complete = true;
+    // Player position at observation time. Optional: only present when the
+    // ILocationProvider binding resolved. Kotlin computes distance-to-target.
+    bool has_player_position = false;
+    double player_latitude = 0.0;
+    double player_longitude = 0.0;
 };
 
 struct RuntimeFortObservation {
@@ -223,6 +228,15 @@ inline bool encode_runtime_nearby_payload(
         append_f64(payload, spawn.longitude);
     }
     payload->push_back(value.is_complete ? 1U : 0U);
+    // Optional trailing player-position block (payload version >= 2). Present
+    // flag + two f64 when known; a single 0 byte when unknown.
+    if (value.has_player_position) {
+        payload->push_back(1U);
+        append_f64(payload, value.player_latitude);
+        append_f64(payload, value.player_longitude);
+    } else {
+        payload->push_back(0U);
+    }
     return true;
 }
 

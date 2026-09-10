@@ -219,10 +219,25 @@ bool read_runtime_map_snapshot_on_main_thread(
     constexpr int kMapReaderStage = 5;
     if (kMapReaderStage == 0) return false;
     const RuntimeBinding binding = runtime_binding_snapshot(context);
-    if (observation == nullptr || forts == nullptr || !binding.map_entity_read_verified ||
-        binding.map_entity_service == nullptr ||
-        binding.map_entity_get_cells == nullptr ||
+    if (observation == nullptr || forts == nullptr ||
         !has_core_il2cpp_api(context.il2cpp_api)) return false;
+
+    // Fort reading does not depend on the map-entity cell traversal. When the
+    // pokemon cell reader is unavailable but the fort directory is verified,
+    // still publish forts so fort/spin observation keeps working on its own.
+    if (!binding.map_entity_read_verified ||
+        binding.map_entity_service == nullptr ||
+        binding.map_entity_get_cells == nullptr) {
+        if (!binding.forts_read_verified) return false;
+        observation->spawns.clear();
+        observation->is_complete = true;
+        forts->forts.clear();
+        observation->has_player_position = read_runtime_player_position(
+            context.il2cpp_api, binding,
+            &observation->player_latitude, &observation->player_longitude
+        );
+        return read_runtime_map_forts(context.il2cpp_api, binding, forts);
+    }
     void *cells = invoke_runtime_method(
         context.il2cpp_api,
         binding.map_entity_get_cells,
@@ -275,5 +290,9 @@ bool read_runtime_map_snapshot_on_main_thread(
             "runtime map reader could not enumerate active PokéStops"
         );
     }
+    observation->has_player_position = read_runtime_player_position(
+        context.il2cpp_api, binding,
+        &observation->player_latitude, &observation->player_longitude
+    );
     return pogo_runtime::valid_runtime_nearby_observation(*observation);
 }

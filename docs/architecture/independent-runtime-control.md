@@ -308,6 +308,87 @@ CATCH_SPIN native module
 
 This gives the service ownership of **intent** and native ownership of **mechanism**.
 
+### Observation mechanism (mode B: dirty-flag)
+
+The native observer produces `NearbyObservation`/`FortsObservation` on a background
+thread (`runtime_observation_thread`, ~100 ms tick). It uses a **dirty-flag**
+model rather than an unconditional per-tick full scan:
+
+```text
+map-change signal  --marks-->  ProbeContext.world_dirty = true
+observer tick:
+    if world_dirty (or reconcile due) and an observe source is verified:
+        read map snapshot on the Unity main thread
+        publish NearbyObservation / FortsObservation
+        clear world_dirty
+```
+
+Design intent and rationale:
+
+- **Mode C (unconditional poll) is the prior model and remains the fallback.**
+  Until the map-query batch callback is inline-hooked, a periodic tick
+  (`kFallbackPollTicks`) marks the world dirty, so observation runs at the old
+  cadence with no regression.
+- **Mode B (target)** installs an inline hook on the game's map-query batch
+  callback (`OnMapQueryResponseReceived` / `ProcessCellsFromResponse`, in
+  `Niantic.Platform.GameMapObject`). The hook does the minimum — call
+  `mark_world_dirty()` and return — so a server map update triggers exactly one
+  bounded read instead of continuous polling. This is preferred over raw
+  per-entity (mode A) hooks, which fire in bursts (dozens of entity callbacks in
+  one frame) and risk a visible hitch.
+- **Reconcile** (`kReconcileTicks`, ~30 s) forces a periodic full re-read so a
+  missed dirty signal cannot leave the cache permanently stale.
+- **Player position is a separate concern.** "In range of a stationary fort"
+  changes when the player moves, with no map-change signal, so player location
+  (`ILocationProvider`) is observed/published independently of `world_dirty`.
+
+Seams already in place (`refactor/independent-runtime-control`):
+
+| Seam | Location | State |
+| --- | --- | --- |
+| `ProbeContext.world_dirty` (atomic) | `runtime_native_prelude.inc` | done |
+| `mark_world_dirty()` | `runtime_observation.inc` | done (called by fallback; call site for the hook is TODO) |
+| `RuntimeBinding.map_query_hook_installed` | `runtime_native_prelude.inc` | done (always false until the hook lands) |
+| dirty-driven observer loop + reconcile | `runtime_observation.inc` | done |
+| `RuntimeBinding.map_query_on_response` + `map_query_hook_binding_verified` (resolved in probe) | `runtime_probe_discovery.inc` | done |
+| map-query batch callback inline hook + prologue diagnostic | `modules/catch_spin/map_hooks.inc` (`install_runtime_map_query_hook`, `log_map_query_prologue`, hook → `mark_world_dirty`) | scaffolded, **gated off until the prologue constant is filled** |
+| hook install/detach wiring | `CatchSpinModule::on_enable/on_disable` | done (best-effort install; enabling still succeeds via poll fallback) |
+| player position wired to Kotlin | `ILocationProvider` binding + `read_runtime_player_position` + nearby payload v2 + `RuntimeNearbyPayloadCodec` | done (needs device verify of the value-struct invoke) |
+
+Target (resolved from the full IL2CPP dump, build 0.427.0):
+
+- Class `Niantic.Platform.GameMapObject.Map.MapQueryManager`.
+- Method `OnMapQueryResponse(int rpcId, byte[] response)` — RVA `0x9994F4C`
+  (alternative: `ProcessCellsFromResponse(IEnumerable<MapS2Cell>)` RVA `0x9995900`).
+
+Remaining work to complete mode B (steps 1 and 3 are done; only the device-only
+prologue capture and on-device verification remain):
+
+1. ~~Resolve the method + take its code pointer.~~ Done: `map_query_on_response`
+   is resolved in `runtime_probe_discovery.inc` and the code pointer is taken via
+   `throw_method_code_pointer` in `map_hooks.inc`.
+2. **Obtain the 16-byte ARM64 prologue (device-only).** `libil2cpp.so` is not
+   available offline, but it is mapped in the game process at runtime.
+   `install_runtime_map_query_hook` already calls `log_map_query_prologue`, which
+   logs the live 16 bytes at the resolved code pointer on every enable. Run once
+   on device, read the logged `bytes={0x..,0x..,0x..,0x..}`, and replace the
+   placeholder `on_map_query_response_prologue[4]` in `map_hooks.inc`. The
+   exact-build gate still rejects drift.
+3. ~~Add the hook callback and install/detach it from the module.~~ Done:
+   `hooked_on_map_query_response` marks the world dirty and calls the original;
+   `CatchSpinModule::on_enable` installs best-effort and sets
+   `map_query_hook_installed` on success (which makes the observer skip the poll
+   fallback).
+4. Runtime-verify on device that the callback fires once per server map update
+   and not per frame, then the poll fallback can be retired.
+
+Until step 2 is done, `install_inline_hook`'s prologue `memcmp` fails (placeholder
+is all-zero), the hook safely does not install, and observation keeps running on
+the poll fallback — no regression.
+
+Constraints: inline hooks are aarch64-only and pinned to the exact build; a
+prologue/address mismatch must fall back to the poll, never crash.
+
 ## Pokémon target selection
 
 Nearby Pokémon observations are used as candidate discovery data. The service may apply policy such as:

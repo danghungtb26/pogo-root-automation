@@ -49,6 +49,7 @@
 #include "modules/catch_spin/catch.inc"
 #include "modules/catch_spin/spin.inc"
 #include "modules/catch_spin/open_encounter.inc"
+#include "modules/catch_spin/map_hooks.inc"
 #include "modules/throw_assist/berry.inc"
 
 // Host publication/routing comes after feature implementations so capability
