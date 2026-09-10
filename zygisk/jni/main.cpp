@@ -33,6 +33,7 @@
 // the shared observer drains module-owned throw diagnostics when armed.
 #include "modules/throw_assist/throw_hooks.inc"
 #include "runtime_observation_policy.inc"
+#include "runtime_observation_senders.inc"
 #define request_main_thread_map_snapshot request_main_thread_map_snapshot_throttled
 #define refresh_runtime_encounter_owners refresh_runtime_encounter_owners_throttled
 #include "runtime_observation.inc"
