@@ -1,4 +1,4 @@
-#include "runtime_control_protocol.h"
+#include "../../bridge_kotlin/runtime_control_protocol.h"
 
 std::atomic<bool> g_runtime_active{false};
 constexpr uint32_t kRuntimeControlCompletedPhase = 3U;  // CommandPhase.COMPLETED

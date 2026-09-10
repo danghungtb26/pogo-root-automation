@@ -26,10 +26,10 @@ private:
     std::atomic<bool> enabled_{false};
 };
 
-#include "../modules/catch_spin/module.inc"
-#include "../modules/discard/module.inc"
-#include "../modules/transfer/module.inc"
-#include "../modules/encounter/module.inc"
+#include "../../../modules/catch_spin/module.inc"
+#include "../../../modules/discard/module.inc"
+#include "../../../modules/transfer/module.inc"
+#include "../../../modules/encounter/module.inc"
 
 constexpr size_t kMaxRuntimeFeatureModules = 8U;
 constexpr uint32_t kModuleLoadCompletedPhase = 3U;

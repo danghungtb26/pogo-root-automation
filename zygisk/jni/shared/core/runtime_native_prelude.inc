@@ -26,9 +26,9 @@
 #include <string>
 
 #include "zygisk.hpp"
-#include "runtime_command_protocol.h"
-#include "runtime_observation_protocol.h"
-#include "runtime_throw_events.h"
+#include "../bridge_kotlin/runtime_command_protocol.h"
+#include "../bridge_kotlin/runtime_observation_protocol.h"
+#include "../bridge_appproc/runtime_throw_events.h"
 namespace {
 constexpr const char *kLogTag = "PogoRootAutomation";
 constexpr const char *kGooglePlayProcess = "com.nianticlabs.pokemongo";

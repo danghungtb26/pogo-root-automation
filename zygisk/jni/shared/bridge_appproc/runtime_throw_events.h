@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <mutex>
 
-#include "runtime_observation_protocol.h"
+#include "../bridge_kotlin/runtime_observation_protocol.h"
 
 struct RuntimeThrowEventRecord {
     pogo_runtime::RuntimeThrowDiagnosticObservation diagnostic;
