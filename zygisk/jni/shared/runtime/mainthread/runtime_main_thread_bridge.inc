@@ -190,10 +190,13 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     void *result = nullptr;
     pogo_runtime::RuntimeNearbyObservation nearby;
     pogo_runtime::RuntimeFortsObservation forts;
+    pogo_runtime::RuntimeInventoryObservation inventory;
     bool task_success = false;
     MainThreadActionOutcome action_outcome = MainThreadActionOutcome::kRejected;
     uint64_t encounter_id = 0U;
     std::string fort_id;
+    double player_latitude = 0.0;
+    double player_longitude = 0.0;
     {
         std::lock_guard<std::mutex> lock(context->main_thread_bridge.mutex);
         encounter_id = context->main_thread_bridge.pending_encounter_id;
@@ -204,6 +207,17 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         task_success = result != nullptr;
     } else if (task_type == MainThreadTaskType::kReadMap) {
         task_success = read_runtime_map_snapshot_on_main_thread(*context, &nearby, &forts);
+    } else if (task_type == MainThreadTaskType::kReadInventory) {
+        const RuntimeBinding binding = runtime_binding_snapshot(*context);
+        task_success = read_runtime_inventory(context->il2cpp_api, binding, &inventory);
+    } else if (task_type == MainThreadTaskType::kReadPlayerPosition) {
+        const RuntimeBinding binding = runtime_binding_snapshot(*context);
+        task_success = read_runtime_player_position(
+            context->il2cpp_api,
+            binding,
+            &player_latitude,
+            &player_longitude
+        );
     } else if (task_type == MainThreadTaskType::kOpenEncounter) {
         action_outcome = open_runtime_encounter_on_main_thread(*context, encounter_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
@@ -228,14 +242,15 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu",
+        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu inventory=%zu",
         static_cast<unsigned>(task_type),
         name_space.c_str(),
         class_name.c_str(),
         task_success ? 1 : 0,
         result,
         nearby.spawns.size(),
-        forts.forts.size()
+        forts.forts.size(),
+        inventory.items.size()
     );
     __android_log_print(
         current_thread == nullptr ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
@@ -254,6 +269,12 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         if (task_type == MainThreadTaskType::kReadMap) {
             context->main_thread_bridge.pending_nearby = std::move(nearby);
             context->main_thread_bridge.pending_forts = std::move(forts);
+        } else if (task_type == MainThreadTaskType::kReadInventory) {
+            context->main_thread_bridge.pending_inventory = std::move(inventory);
+        } else if (task_type == MainThreadTaskType::kReadPlayerPosition) {
+            context->main_thread_bridge.pending_has_player_position = task_success;
+            context->main_thread_bridge.pending_player_latitude = player_latitude;
+            context->main_thread_bridge.pending_player_longitude = player_longitude;
         }
         context->main_thread_bridge.pending_success = task_success;
         context->main_thread_bridge.pending_action_outcome = action_outcome;
@@ -327,6 +348,7 @@ void shutdown_main_thread_bridge(ProbeContext &context) {
         context.main_thread_bridge.pending_done = true;
         context.main_thread_bridge.pending_item_id = 0;
         context.main_thread_bridge.pending_forts.forts.clear();
+        context.main_thread_bridge.pending_inventory.items.clear();
     }
     context.main_thread_bridge.condition.notify_all();
     if (g_main_thread_context == &context) g_main_thread_context = nullptr;

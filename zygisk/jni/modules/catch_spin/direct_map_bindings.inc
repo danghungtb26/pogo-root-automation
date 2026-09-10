@@ -93,8 +93,6 @@ void discover_direct_map_bindings(
         api, wild_map_pokemon_class, "get_SpawnPointId", 0U
     );
     binding->direct_catch_verified = binding->map_pokemon_try_capture != nullptr &&
-        binding->ar_plus_encounter_values_class != nullptr &&
-        binding->catch_pokemon_proto_class != nullptr &&
         binding->map_pokemon_get_spawn_point_id != nullptr;
     // The current binding has no verified way to observe the returned
     // IPromise/CatchPokemon result. Keep invocation evidence separate from the

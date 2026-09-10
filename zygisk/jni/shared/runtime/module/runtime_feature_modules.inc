@@ -104,6 +104,11 @@ bool any_enabled() {
 bool ensure_observer_for_enabled_modules(ProbeContext &context) {
     if (!any_enabled()) return true;
     if (context.observation_running.load()) return true;
+    if (!runtime_binding_snapshot(context).map_entity_read_verified) {
+        // Give late-created map services one safe main-thread discovery pass
+        // before the observer owns the binding for the module session.
+        discover_scene_runtime_owners(context);
+    }
     return start_runtime_observation(context);
 }
 

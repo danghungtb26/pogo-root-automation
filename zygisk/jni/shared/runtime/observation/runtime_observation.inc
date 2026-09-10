@@ -218,7 +218,8 @@ void *runtime_observation_thread(void *opaque_context) {
         // cell traversal, so either reader source is enough; each payload is still
         // published only under its own flag.
         const bool observe_source =
-            binding.map_entity_read_verified || binding.forts_read_verified;
+            !g_runtime_explicit_snapshot_mode.load() &&
+            (binding.map_entity_read_verified || binding.forts_read_verified);
         if (observe_source && context->main_thread_bridge.ready) {
             // Until the map-query batch callback is inline-hooked (it needs a
             // build-specific prologue from the live libil2cpp.so), a periodic tick
@@ -235,10 +236,10 @@ void *runtime_observation_thread(void *opaque_context) {
                 pogo_runtime::RuntimeFortsObservation forts_observation;
                 if (request_main_thread_map_snapshot(
                         *context, &nearby_observation, &forts_observation)) {
-                    if (binding.map_entity_read_verified &&
-                        !send_runtime_nearby_payload(*context, nearby_observation)) break;
                     if (binding.forts_read_verified &&
                         !send_runtime_forts_payload(*context, forts_observation)) break;
+                    if (binding.map_entity_read_verified &&
+                        !send_runtime_nearby_payload(*context, nearby_observation)) break;
                 }
                 reconcile_ticks = 0U;
             }

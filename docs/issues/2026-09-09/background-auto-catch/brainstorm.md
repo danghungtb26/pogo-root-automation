@@ -259,6 +259,41 @@ Liên kết yêu cầu → tiêu chí: phát hiện xung quanh → BG-01; không
 - `scripts/build-magisk.sh` đã build pass cả `arm64-v8a` và `x86_64`, tạo `build/pogo-root-automation-magisk-multiabi.zip`.
 - Đã xác nhận emulator Air 1 là `127.0.0.1:5565` và push ZIP thành công. Bước này mới upload ZIP, chưa chạy install/reboot hoặc gọi live catch.
 
+## 12. Hợp nhất automation scan thành một transaction `SCAN_MAP`
+
+### Vấn đề hiện tại
+
+Luồng hiện tại gọi `SNAPSHOT` nhưng native phát lại `INVENTORY`, `FORTS` và `NEARBY` thành các observation độc lập. Kotlin phải ghép state qua cache và chọn một observation làm trigger. Vì `nearby` đang là trigger chính, còn `forts` bị coi là auxiliary, log/filter có thể trông như bị đứng dù native đã đọc được một phần dữ liệu. Cách này cũng không có correlation rõ ràng giữa một lần scan và các action tiếp theo.
+
+### Quyết định thiết kế
+
+Đổi automation loop sang transaction có correlation:
+
+`Kotlin SCAN_MAP(cycle_id)` → `native đọc map + nearby + forts + inventory + player.current_location` → `native REQUEST_CATCH_SPIN(cycle_id, snapshot)` → `Kotlin filter/policy` → `TRY_CATCH` hoặc `TRY_SPIN` → đợi terminal result → timeout interval tiếp theo.
+
+`REQUEST_CATCH_SPIN` được biểu diễn là một observation payload mới để đi qua bridge hiện có, nhưng không còn dùng các observation `NEARBY`/`FORTS`/`INVENTORY` làm trigger cho automation. Các observation cũ vẫn được giữ cho compatibility và diagnostic ngoài automation.
+
+### Trade-off và guard
+
+- Một payload lớn hơn nhưng state là cùng một thời điểm, dễ log và dễ correlate hơn.
+- Nếu một binding không có, native vẫn trả response với cờ unavailable; Kotlin phải log và không gửi mutation dựa trên dữ liệu thiếu.
+- `cycle_id` phải dương và được kiểm tra khi nhận response; response cũ hoặc trễ không được chạy policy/action cho vòng mới.
+- `TRY_CATCH`/`TRY_SPIN` tiếp tục đi qua `AutomationAction`/runner hiện có để giữ identity, capability, lifecycle và serialization guard; tên command mới là semantic mapping, không tạo đường mutation bypass.
+- Không tự bật scan observer nền song song; `SCAN_MAP` là pull duy nhất của automation, tránh nhân đôi read với observer.
+
+## Tiêu chí nghiệm thu bổ sung
+
+**Nguồn:** yêu cầu mới trong hội thoại, không có spec riêng; các tiêu chí dưới đây là `inferred — needs BA confirm`.
+
+| ID | Quy tắc / yêu cầu | Kết quả mong đợi | Cách nghiệm thu |
+|---|---|---|---|
+| SCAN-01 | Service auto catch gửi `SCAN_MAP` | Mỗi vòng active có một log gửi `SCAN_MAP` kèm `cycle_id`; không gửi `SNAPSHOT` cho automation. | Log Kotlin/native theo cùng cycle. |
+| SCAN-02 | Native đọc các dữ liệu trong một lần scan | Response chứa nearby, forts, inventory và player location cùng cờ availability. | Log native nêu rõ từng phần; payload decode được ở Kotlin. |
+| SCAN-03 | Native trả `REQUEST_CATCH_SPIN` | Kotlin nhận đúng response, log cycle/seq/count/ball/location và dùng response làm filter trigger duy nhất. | Không cần chờ observation `NEARBY` riêng để filter. |
+| SCAN-04 | Kotlin gửi action sau filter | Chỉ gửi `TRY_CATCH`/`TRY_SPIN` tương ứng với policy và capability; không dispatch khi cycle stale hoặc snapshot thiếu điều kiện. | Log filter result rồi action dispatch/result theo cùng cycle. |
+| SCAN-05 | Interval tuần tự | Chỉ bắt đầu timeout/interval tiếp theo sau khi scan response và action terminal/không-action đã được xử lý; không scan chồng. | Log cycle tăng tuần tự, không có in-flight cycle kép. |
+| SCAN-06 | Backward compatibility | Observation cũ vẫn decode được và các module khác không bị phá. | `./gradlew test assembleDebug` và native build. |
+
 ## Section 12 — Pokémon có trên map nhưng nearby không đi qua Kotlin
 
 ### Phát hiện từ log run mới
@@ -300,3 +335,197 @@ Với config có `autoCatch`, `autoEncounter` hoặc `mapTapWalk`, readiness ph�
 ### Kết luận lượt này
 
 Có khả năng Pokémon thực sự đang ở xung quanh, nhưng hiện tại chúng bị kẹt trước bridge: native chưa bind được map entity owner nên không đọc được danh sách, không phải Kotlin nhận rồi bỏ qua. Cần sửa/retry native nearby discovery trước; chưa nên sửa `TryCapture` hoặc ép Kotlin tự tạo target vì sẽ không có `spawnId` hợp lệ.
+
+## Section 13 — Đánh giá thiết kế automation bật tạm thời và poll snapshot
+
+### Kết luận ngắn
+
+Hướng thiết kế là đúng và dễ debug hơn luồng push hiện tại, nhưng cần tách rõ **settings đã lưu** khỏi **automation run state**. `autoCatch`, `autoSpin`, policy, interval và các ngưỡng có thể lưu trong storage; nút master `automation` nên là trạng thái runtime trong memory, mặc định tắt sau process restart/reboot và chỉ bật khi người dùng click.
+
+Luồng nên có một owner duy nhất là `HeadlessAutomationService`/engine: click bật service → connect runtime → diagnostic/readiness → bật module → gửi một yêu cầu snapshot theo interval → Kotlin validate/filter → gửi tối đa một mutation → chờ terminal result hoặc timeout → toast/log → settle delay → vòng tiếp theo. Không nên để overlay tự chạy loop riêng, cũng không nên để native observer push nearby song song với poll nearby nếu chưa có cơ chế dedupe/batch.
+
+### 1. Trạng thái `automation` và persistence
+
+#### Hiện trạng source
+
+- `HeadlessAutomationConfig.enabled` mặc định là `false` nhưng hiện được đọc/ghi trong `SharedPreferences` ([AutomationConfig.kt:20](../../../../app/src/main/java/dev/pogoroot/automation/headless/AutomationConfig.kt:20), [AutomationConfig.kt:63](../../../../app/src/main/java/dev/pogoroot/automation/headless/AutomationConfig.kt:63)).
+- Settings screen cũng ghi `enabled` vào storage ([AutomationCategoryFragment.kt:99](../../../../app/src/main/java/dev/pogoroot/automation/overlay/AutomationCategoryFragment.kt:99)).
+- Shortcut overlay chỉ gọi `automationConfigRepository.update { ... enabled = ... }`, không gọi `HeadlessAutomationService.enable/disable` ([JoystickOverlayService.kt:287](../../../../app/src/main/java/dev/pogoroot/automation/overlay/JoystickOverlayService.kt:287)).
+- `MainActivity` và boot receiver có thể khởi động foreground service, nhưng service sẽ chạy idle nếu config `enabled=false`; việc đổi preference từ overlay không bảo đảm tạo service nếu service đã chết ([HeadlessAutomationService.kt:87](../../../../app/src/main/java/dev/pogoroot/automation/headless/HeadlessAutomationService.kt:87), [AutomationBootReceiver.kt:7](../../../../app/src/main/java/dev/pogoroot/automation/headless/AutomationBootReceiver.kt:7)).
+
+Vì vậy yêu cầu “biến automation luôn off, không lưu storage; click mới phát service bg” **chưa khớp source hiện tại**.
+
+#### Mô hình nên dùng
+
+Tách hai lớp:
+
+| Lớp | Có lưu storage? | Nội dung |
+|---|---:|---|
+| `AutomationSettings` | Có | `autoCatch`, `autoSpin`, policy filter, `loopIntervalMs`, settle delay, toast preference, allowlist build |
+| `AutomationRunState` | Không | `active`, runtime session, phase connect/ready/polling/waiting-result/stopped, pending cycle/command, last result |
+
+Nút master nên có semantics sau:
+
+1. Bật: gọi `HeadlessAutomationService.enable(context, ...)`, service vào foreground, đặt run state `STARTING`, rồi engine bắt đầu connect/start module.
+2. Tắt: gọi `HeadlessAutomationService.disable(context)`, đặt run state `STOPPING`, hủy vòng poll, dừng/đợi action đang chạy theo fail-closed policy, gửi STOP runtime và về `IDLE`.
+3. Boot/process restart: service có thể được khởi động để giữ API, nhưng run state mặc định `OFF`; không tự resume automation chỉ vì settings cũ còn `autoCatch=true`.
+4. UI phải render run state runtime, không render `config.enabled` nếu field này đã trở thành non-persistent. Nếu overlay không đọc được state trực tiếp, cần status channel/read-only API hoặc registry in-memory có reset an toàn khi process chết.
+
+Có thể giữ tên `enabled` ở API trong giai đoạn chuyển tiếp, nhưng semantics phải là `active` runtime. Không nên vừa có `config.enabled` persisted vừa có `engine.active` volatile, vì hai nguồn sự thật sẽ làm UI báo ON trong khi service không chạy hoặc reboot tự chạy ngoài ý muốn.
+
+### 2. Luồng click đến native
+
+Luồng đề xuất:
+
+```text
+Overlay click ON
+  → HeadlessAutomationService.enable()
+  → foreground service / engine active
+  → connect bridge
+  → START native host
+  → managed diagnostic + readiness
+  → resolve/re-probe nearby + fort owners
+  → enable catch_spin khi capability phù hợp
+  → poll snapshot mỗi 1–2 giây
+  → Kotlin validate + filter
+  → submit Catch(DIRECT_MAP) hoặc Spin
+  → native execute trên Unity main thread
+  → native result / timeout
+  → Kotlin accept result, log, toast
+  → settle delay
+  → snapshot cycle kế tiếp
+```
+
+Bước `connect/start module catch-spin` là đúng về mặt ownership, nhưng module chỉ được enable sau khi exact build, owner và capability đã qua guard. `DIRECT_CATCH` một mình không đủ để bắt; catch map cần nearby spawn hợp lệ. Spin cần fort reader/capability hợp lệ.
+
+### 3. Snapshot mỗi interval
+
+Ý tưởng “mỗi interval gửi `get nearby` gồm Pokémon, forts, player info và Poké Ball count” phù hợp để kiểm chứng end-to-end. Tuy nhiên không nên coi đó là bốn event độc lập không có batch ID. Source hiện có các payload riêng `NEARBY`, `FORTS`, `INVENTORY`; nearby đã có player latitude/longitude, còn Poké Ball count nằm trong inventory item list ([runtime_observation_protocol.h:96](../../../../zygisk/jni/shared/bridge_kotlin/runtime_observation_protocol.h:96), [runtime_observation_protocol.h:114](../../../../zygisk/jni/shared/bridge_kotlin/runtime_observation_protocol.h:114), [runtime_observation_protocol.h:123](../../../../zygisk/jni/shared/bridge_kotlin/runtime_observation_protocol.h:123)).
+
+Khuyến nghị tạo một logical `WorldSnapshotRequest/WorldSnapshotResponse` cho mỗi cycle, dù bên trong native vẫn dùng các reader hiện có:
+
+```text
+WorldSnapshot {
+  cycleId
+  runtimeSessionId
+  observedAt
+  lifecycle
+  nearby { complete, spawns[] }
+  forts[]
+  playerLocation { latitude, longitude }
+  ballCounts { pokeball, greatball, ultraball, ... }
+}
+```
+
+Nếu chưa muốn đổi protocol thành payload gộp, mỗi payload riêng phải có cùng `snapshotId`, `observedAt` và `complete` state; Kotlin chỉ đưa snapshot vào filter khi đã đủ phần bắt buộc. Không được ghép Pokémon lúc `t=1` với forts/inventory cũ ở `t=0` rồi coi là một state nguyên tử.
+
+Request phải được marshal vào Unity main thread. Kotlin/worker chỉ gửi command; native không được đọc managed collection từ thread bridge. Khi map owner chưa resolve được, response phải là `UNAVAILABLE` kèm lý do (`nearby_owner_missing`, `map_entity_binding_missing`, `main_thread_timeout`), không trả `spawns=[]` như thể map thật sự rỗng.
+
+Poll snapshot không tự giải quyết lỗi hiện tại: nếu `INearbyPokemonService`/`IMapSceneViewService` vẫn null thì request phải log lỗi rõ ràng. Cần re-probe owner sau khi map scene sống, rồi mới phát `READ_NEARBY`.
+
+### 4. Interval và timeout
+
+Nên dùng một loop duy nhất trên executor của engine. Interval mặc định `2_000 ms` an toàn hơn `1_000 ms` cho bước đầu vì map query/native collection walk có thể mất thời gian; cho phép cấu hình trong khoảng `1_000..2_000 ms` nếu cần. Không dùng thêm timer ở overlay hoặc một worker thứ hai.
+
+Các loại thời gian cần tách:
+
+| Timer | Bắt đầu khi nào? | Khi hết hạn |
+|---|---|---|
+| Snapshot request timeout | Khi native nhận `GET_WORLD_SNAPSHOT` | Đánh dấu cycle lỗi/unavailable; không dùng snapshot cũ như mới |
+| Action timeout | Khi native nhận Catch/Spin | `INDETERMINATE`, dừng mutation/re-sync; không retry mù |
+| Settle delay | Sau terminal action result | Chờ game/map ổn định trước cycle kế tiếp |
+| Poll interval | Sau khi cycle kết thúc hoặc bị bỏ qua an toàn | Bắt đầu cycle mới nếu không còn action pending |
+
+“Sau khi nhận kết quả mới đặt timeout” cần chỉnh lại: timeout phải chạy **trong lúc chờ kết quả**; sau kết quả terminal thì dùng `settle delay`, không dùng timeout để kết luận lại. Nếu không nhận kết quả trước deadline, không được toast `caught`/`fled`; phải báo `unknown/indeterminate` và chặn catch tiếp cho tới khi resync.
+
+Mỗi thời điểm chỉ cho phép một action mutation. Trong lúc Catch/Spin pending, interval có thể bỏ qua poll hoặc chỉ poll read-only có chủ đích; không gửi action thứ hai. Sau result, runner hiện có đã có cơ chế active mutation, timeout và settle gate; nên tái sử dụng thay vì tạo state machine thứ hai bên service.
+
+### 5. Kotlin validate và filter
+
+Thứ tự xử lý trong Kotlin nên là:
+
+1. Kiểm tra session, sequence, timestamp, payload version và `snapshot.complete`.
+2. Kiểm tra lifecycle (`OVERWORLD` cho direct map catch/spin), location hợp lệ và freshness.
+3. Kiểm tra capability (`READ_NEARBY`, `DIRECT_CATCH` hoặc `READ_FORTS`, `SPIN`).
+4. Lọc spawn hết hạn, ID rỗng/trùng, tọa độ lỗi, target đã pending/đã xử lý.
+5. Áp dụng policy: catch-all, shiny/IV nếu dữ liệu thật sự có, ưu tiên target, ball threshold.
+6. Chọn action và gửi kèm `cycleId`, `snapshotId`, `basedOnObservationSeq`, `commandId`.
+
+Kết quả filter nên biểu diễn được số lượng và lý do, ví dụ `input=5 valid=3 expired=1 duplicate=1 selected=spawnId`. Không log toàn bộ payload/location ở mức INFO mỗi giây; INFO chỉ ghi count/ID/action, DEBUG mới ghi chi tiết khi cần để tránh logcat bị ngập.
+
+Lưu ý: nearby hiện chỉ có species/ID/location, không có IV/shiny đầy đủ. Không áp dụng policy IV/shiny vào direct-map spawn rồi giả định dữ liệu đã có; nếu thiếu metadata thì ghi `filter_skip=metadata_unavailable` hoặc dùng catch-all theo policy đã chọn.
+
+### 6. Native action và kết quả
+
+Kotlin không gọi trực tiếp `MapPokemon.TryCapture`; Kotlin chỉ submit `AutomationAction.Catch(DIRECT_MAP)`, native mới invoke method. Native cần log theo cùng correlation:
+
+```text
+Kotlin action submit cycle=... command=... action=DIRECT_MAP_CATCH target=...
+Native command received cycle=... command=... target=...
+Native TryCapture invoked command=... object=... method=...
+Native result command=... outcome=CAUGHT|FLED|ERROR|INDETERMINATE
+Kotlin result accepted command=... outcome=...
+Toast emitted command=... outcome=...
+```
+
+Binding `TryCapture` hiện đã verified, nhưng log trước đó cho thấy `direct map catch outcome observer verified=0`. Do đó invocation/Promise non-null chưa phải terminal result. Chỉ show toast “đã bắt” hoặc “chạy mất” sau khi result observer có outcome authoritative và đã correlate đúng session/command/target. Nếu chưa có observer, toast tối đa là “đã gửi, đang chờ kết quả”, không được báo thành công.
+
+### 7. Logging checklist
+
+| Stage | Log bắt buộc | Correlation |
+|---|---|---|
+| Click | `automation requested on/off` và nguồn click | `runId` |
+| Service | `service started`, `engine active/idle` | `runId` |
+| Connect | bridge connected/disconnected, session | `runtimeSessionId` |
+| Readiness | diagnostic, exact build, owner/capability | `runtimeSessionId` |
+| Module | catch-spin requested/enabled/failed | `runtimeSessionId`, module |
+| Snapshot request | request gửi/nhận/timeout | `cycleId`, `snapshotId` |
+| Decode | version, counts, validation failure | `snapshotId` |
+| Filter | input/accepted/rejected/selected | `cycleId`, `snapshotId` |
+| Action | submit, native receive, invoke | `commandId`, target |
+| Result | accepted/late/duplicate/timeout | `commandId` |
+| Toast | type/message emitted | `commandId` |
+| Cycle | skip reason, settle, next due | `cycleId` |
+
+Các lỗi hiện đang bị che như `adapter.readNearby().getOrNull()` phải được log một lần theo cycle với lý do cụ thể. `getOrNull()` có thể vẫn dùng để fail-closed, nhưng không được là nơi duy nhất xử lý lỗi vì nó biến “reader hỏng” thành “không có Pokémon”.
+
+### 8. Những điểm chưa ổn nếu triển khai nguyên văn
+
+| Ý tưởng | Đánh giá | Điều chỉnh |
+|---|---|---|
+| `automation` luôn off, không lưu | **Ổn và nên làm** | Tách khỏi persisted settings; click gọi service command trực tiếp |
+| Click phát background service | **Ổn nhưng hiện chưa đủ** | Overlay phải gọi `enable/disable`, không chỉ update repository |
+| Poll mỗi 1–2 giây | **Ổn** | Một owner/loop duy nhất; mặc định 2 giây |
+| Một request lấy Pokémon, forts, player, balls | **Ổn về API** | Gộp logical snapshot hoặc thêm batch correlation |
+| Kotlin filter theo policy | **Ổn** | Validate/freshness/capability trước policy; log rejected reason |
+| Filter trigger Catch/Spin | **Ổn** | Một mutation tại một thời điểm, guard lifecycle/capability |
+| Nhận kết quả rồi toast | **Ổn nếu authoritative** | Không coi method return/non-null là caught; dedupe toast |
+| Kết thúc rồi đặt timeout | **Chưa ổn về semantics** | Timeout lúc pending; sau result dùng settle delay |
+| Native observer cũ và poll mới cùng chạy | **Rủi ro** | Chọn một nguồn nearby hoặc thêm snapshot ID/dedupe rõ ràng |
+
+### Tiêu chí nghiệm thu bổ sung cho thiết kế này
+
+| ID | Quy tắc | Kết quả mong đợi |
+|---|---|---|
+| AUTO-01 | Master automation không persisted | Sau process restart/reboot, automation OFF; policy settings vẫn giữ |
+| AUTO-02 | Click ON/OFF điều khiển service | ON tạo/đánh thức foreground service và engine; OFF dừng loop + native runtime an toàn |
+| AUTO-03 | Một loop duy nhất | Không có hai interval hoặc hai action mutation chạy chồng |
+| AUTO-04 | Snapshot atomic/correlated | Nearby, forts, location, ball count cùng cycle hoặc được đánh dấu thiếu; không trộn state cũ |
+| AUTO-05 | Nearby unavailable khác nearby empty | Owner/reader lỗi phát `UNAVAILABLE` và log lý do; list rỗng hợp lệ chỉ khi reader thành công |
+| AUTO-06 | Filter observable | Log được input count, từng nhóm reject, selected target và policy branch |
+| AUTO-07 | Action correlation | Mọi command/result/toast liên kết bằng runtime session + cycle/snapshot + command ID |
+| AUTO-08 | Timeout đúng nghĩa | Pending quá hạn thành `INDETERMINATE`; không tự retry catch/spin khi outcome chưa rõ |
+| AUTO-09 | Toast đúng kết quả | Chỉ toast caught/fled/error sau result hợp lệ; duplicate/late result không toast lần hai |
+| AUTO-10 | Nearby readiness | Khi map owner khởi tạo muộn, re-probe thành công và log được `map reader ... wild=N` rồi `nearby ... sent=1` |
+
+### Đề xuất phạm vi triển khai sau khi chốt thiết kế
+
+1. Tách run state volatile khỏi `AutomationConfigRepository`, cập nhật overlay/API/status theo state mới.
+2. Bổ sung native request/response snapshot có main-thread marshal và error reason; trước mắt có thể giữ các reader/payload riêng nhưng phải có cycle correlation.
+3. Sửa native scene/nearby owner re-probe và readiness gate; không bật auto-catch khi chưa có `READ_NEARBY`.
+4. Bổ sung log ở Kotlin/native theo checklist, đặc biệt log lỗi `readNearby()` thay vì nuốt bằng `getOrNull()`.
+5. Chỉ sau khi nearby payload chạy ổn mới kiểm tra action Catch/Spin và outcome/toast. Không dùng việc nhìn thấy Pokémon trên UI làm bằng chứng native reader đã đọc được chúng.
+
+### Kết luận
+
+Thiết kế đề xuất tốt hơn cho việc quan sát end-to-end và phù hợp với mong muốn automation chỉ chạy khi người dùng click. Điểm bắt buộc là `automation` phải là run state tạm thời, còn policy mới là storage; snapshot phải có correlation/atomicity; timeout phải bao quanh trạng thái pending; và nearby unavailable phải được phân biệt với danh sách rỗng. Sau các chỉnh sửa đó, đây là hướng triển khai hợp lý.

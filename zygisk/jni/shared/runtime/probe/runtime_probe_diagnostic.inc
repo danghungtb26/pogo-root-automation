@@ -60,6 +60,14 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
     }
     api.thread_detach(thread);
 
+    // Scene services are often created after the Zenject owners inspected
+    // above. Resolve the map owner through the main-thread bridge while no
+    // feature observer is active, so the first module start can read nearby.
+    if (!binding.map_entity_read_verified) {
+        discover_scene_runtime_owners(context);
+        binding = runtime_binding_snapshot(context);
+    }
+
     const bool ready = binding.exact_build_verified && binding.encounter_read_verified;
     __android_log_print(
         ready ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,

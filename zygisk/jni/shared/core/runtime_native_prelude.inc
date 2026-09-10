@@ -136,6 +136,7 @@ std::mutex g_broker_mutex;
 std::mutex g_internal_message_mutex;
 bool g_broker_running = false;
 std::string g_broker_session_id;
+std::atomic<bool> g_runtime_explicit_snapshot_mode{false};
 
 struct Il2CppDomain;
 struct Il2CppAssembly;
@@ -335,6 +336,8 @@ enum class MainThreadTaskType : uint32_t {
     kUseBerry = 5U,
     kDirectCatch = 6U,
     kSpin = 7U,
+    kReadInventory = 8U,
+    kReadPlayerPosition = 9U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -361,6 +364,10 @@ struct MainThreadBridge {
     int32_t pending_item_id = 0;
     pogo_runtime::RuntimeNearbyObservation pending_nearby;
     pogo_runtime::RuntimeFortsObservation pending_forts;
+    pogo_runtime::RuntimeInventoryObservation pending_inventory;
+    double pending_player_latitude = 0.0;
+    double pending_player_longitude = 0.0;
+    bool pending_has_player_position = false;
     bool pending_done = false;
     bool pending_success = false;
     MainThreadActionOutcome pending_action_outcome = MainThreadActionOutcome::kRejected;
@@ -444,6 +451,18 @@ bool read_runtime_map_snapshot_on_main_thread(
     ProbeContext &context,
     pogo_runtime::RuntimeNearbyObservation *observation,
     pogo_runtime::RuntimeFortsObservation *forts
+);
+
+bool read_runtime_inventory(
+    const Il2CppApi &api,
+    const RuntimeBinding &binding,
+    pogo_runtime::RuntimeInventoryObservation *observation
+);
+
+bool request_main_thread_player_position(
+    ProbeContext &context,
+    double *latitude,
+    double *longitude
 );
 
 void *find_active_map_pokemon_by_id(ProbeContext &context, uint64_t encounter_id);

@@ -14,6 +14,8 @@ enum class RuntimeControlAction(val wireValue: Int) {
     START(1),
     STOP(2),
     DIAGNOSTIC(3),
+    SNAPSHOT(4),
+    SCAN_MAP(5),
 }
 
 data class RuntimeControlRequest(
@@ -24,6 +26,7 @@ data class RuntimeControlRequest(
     val pid: Int,
     val processName: String,
     val packageName: String,
+    val cycleId: Long? = null,
 )
 
 object RuntimeControlPayloadCodec {
@@ -40,6 +43,11 @@ object RuntimeControlPayloadCodec {
         require(request.pid > 0) { "runtime pid is required" }
         require(request.processName.isNotBlank()) { "runtime process is required" }
         require(request.packageName.isNotBlank()) { "runtime package is required" }
+        if (request.action == RuntimeControlAction.SCAN_MAP) {
+            require(request.cycleId != null && request.cycleId > 0L) {
+                "scan map cycle is required"
+            }
+        }
 
         ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
@@ -52,6 +60,7 @@ object RuntimeControlPayloadCodec {
                 output.writeInt(request.pid)
                 codec.writeString(output, request.processName)
                 codec.writeString(output, request.packageName)
+                request.cycleId?.let(output::writeLong)
             }
             bytes.toByteArray().also {
                 require(it.size <= BridgeProtocol.HARD_MESSAGE_BYTES) {
@@ -83,12 +92,18 @@ object RuntimeControlPayloadCodec {
                 pid = input.readInt(),
                 processName = codec.readString(input),
                 packageName = codec.readString(input),
+                cycleId = if (input.available() > 0) input.readLong() else null,
             )
             require(input.available() == 0) { "trailing bytes in runtime control payload" }
             require(request.runtimeSessionId.isNotBlank()) { "runtime session is required" }
             require(request.requestId.isNotBlank()) { "runtime control request id is required" }
             require(request.expiresAtElapsedNs > 0L) { "runtime control expiry is required" }
             require(request.pid > 0) { "runtime pid is required" }
+            if (request.action == RuntimeControlAction.SCAN_MAP) {
+                require(request.cycleId != null && request.cycleId > 0L) {
+                    "scan map cycle is required"
+                }
+            }
             request
         }
     }

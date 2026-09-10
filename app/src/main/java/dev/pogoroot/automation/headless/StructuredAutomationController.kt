@@ -1,5 +1,6 @@
 package dev.pogoroot.automation.headless
 
+import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.RuntimeBridge
 import dev.pogoroot.automation.bridge.RuntimeSessionManager
@@ -13,37 +14,18 @@ import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
+import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.model.MapTargetObservation
-import dev.pogoroot.automation.core.model.PokemonIv
-import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
-import dev.pogoroot.automation.core.model.StoredPokemon
 import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
 import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
-
-data class StructuredAutomationTick(
-    val runtimeSessionId: String?,
-    val strongIdentityVerified: Boolean = false,
-    val runtimeCapabilities: Set<String> = emptySet(),
-    val mutationPermissionGranted: Boolean = false,
-    val lifecycleState: GameLifecycleState,
-    val observationSeq: Long? = null,
-    val lastAction: String? = null,
-    val lastError: String? = null,
-    val suspended: Boolean = false,
-    val submitted: Boolean = false,
-)
-
-/**
- * Structured policy loop used by the foreground service. It has no screen
- * capture or input-driver dependency; all state comes from the runtime bridge.
- */
+/** Structured policy loop; all state comes from the runtime bridge. */
 class StructuredAutomationController(
     private val bridge: RuntimeBridge,
     private val eventSink: AutomationEventSink = AutomationEventSink { },
@@ -73,29 +55,17 @@ class StructuredAutomationController(
     )
     private var connected = false
     private var processedObservationSeq = 0L
+    private var processedScanCycleId = 0L
     private var lastAction: String? = null
     private var lastError: String? = null
-    // Set when the native catch executor reports out_of_balls; drives the
-    // coordinator to skip catching and force a spin. Cleared once a spin runs.
     private var outOfBalls = false
     private var latestPlayerPosition: GeoPoint? = null
     private val recordedGameActionCommands = mutableSetOf<String>()
     private val catchLabelsByCommand = mutableMapOf<String, String>()
     private val publishedCatchOutcomeCommands = mutableSetOf<String>()
-    // Wild-caught Pokémon known at catch-dispatch time, keyed by command. On a
-    // confirmed CAUGHT the matching entry is promoted to a StoredPokemon (using
-    // the runtime-reported captured id) and fed into snapshot.storage so the
-    // shared transfer path (policy.autoTransfer) decides whether to release it.
-    private val caughtWildTemplateByCommand = linkedMapOf<String, WildCatchTemplate>()
-    private val pendingWildTransfers = linkedMapOf<String, StoredPokemon>()
-
-    private data class WildCatchTemplate(
-        val speciesId: Int,
-        val speciesName: String,
-        val iv: PokemonIv?,
-        val shiny: Boolean,
-    )
-
+    private val requestedCatchPokemonIds = linkedSetOf<String>()
+    private val wildState = StructuredAutomationWildState(eventSink)
+    private var resetRunnerOnNextAttach = false
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
         syncSafetyConfig()
         ensureConnected()
@@ -145,8 +115,54 @@ class StructuredAutomationController(
                             observationSeq = event.messageSeq
                             continue
                         }
+                        if (event.observationType !in setOf(
+                                dev.pogoroot.automation.bridge.ObservationType.REQUEST_CATCH_SPIN,
+                                dev.pogoroot.automation.bridge.ObservationType.ENCOUNTER,
+                            )) {
+                            Log.i(
+                                LOG_TAG,
+                                "automation observation consumed without filter type=" +
+                                    "${event.observationType} seq=${event.messageSeq}",
+                            )
+                            processedObservationSeq = event.messageSeq
+                            observationSeq = event.messageSeq
+                            continue
+                        }
+                        val scanCycleId = source.selectedScanCycleId()
+                        if (event.observationType ==
+                            dev.pogoroot.automation.bridge.ObservationType.REQUEST_CATCH_SPIN
+                        ) {
+                            if (scanCycleId == null || scanCycleId <= processedScanCycleId) {
+                                Log.w(
+                                    LOG_TAG,
+                                    "automation REQUEST_CATCH_SPIN ignored stale cycle=$scanCycleId " +
+                                        "last=$processedScanCycleId seq=${event.messageSeq}",
+                                )
+                                processedObservationSeq = event.messageSeq
+                                observationSeq = event.messageSeq
+                                continue
+                            }
+                            Log.i(
+                                LOG_TAG,
+                                "automation REQUEST_CATCH_SPIN received cycle=$scanCycleId " +
+                                    "seq=${event.messageSeq}",
+                            )
+                        }
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
-                        val snapshot = readSnapshot()
+                        val snapshot = adapter.readStructuredSnapshot(
+                            outOfBalls = outOfBalls,
+                            mergeStorage = wildState::mergePendingWildTransfers,
+                            excludedSpawnIds = requestedCatchPokemonIds,
+                        )
+                        Log.i(
+                            LOG_TAG,
+                            "automation filter input seq=${event.messageSeq} " +
+                                "type=${event.observationType} cycle=${scanCycleId ?: "none"} " +
+                                "lifecycle=${snapshot.lifecycleState} " +
+                                "nearby=${snapshot.nearby?.spawns?.size ?: "unavailable"} " +
+                                "forts=${snapshot.forts?.forts?.size ?: "unavailable"} " +
+                                "inventory=${snapshot.inventory?.items?.size ?: "unavailable"}",
+                        )
                         snapshot.encounter?.let(onEncounterSnapshot)
                         (snapshot.nearby?.playerPosition ?: snapshot.encounter?.position)
                             ?.let { latestPlayerPosition = it }
@@ -171,6 +187,12 @@ class StructuredAutomationController(
                             automationObservation,
                             policy,
                         ).getOrThrow()
+                        Log.i(
+                            LOG_TAG,
+                            "automation filter result seq=${event.messageSeq} " +
+                                "action=${dispatch.request?.action ?: "none"} " +
+                                "reason=${dispatch.reason ?: "none"}",
+                        )
                         dispatch.alerts.forEach { alert ->
                             eventSink.publish(AutomationEvent(AutomationEventType.INFO, alert.message))
                         }
@@ -184,11 +206,21 @@ class StructuredAutomationController(
                             }
                         }
                         dispatch.request?.let {
+                            (it.action as? AutomationAction.Catch)?.encounterId?.let {
+                                requestedCatchPokemonIds += it
+                            }
                             rememberCatchLabel(it, snapshot)
-                            rememberWildCatchTemplate(it, snapshot)
+                            wildState.rememberCatchTemplate(it, snapshot)
                             submitted = true
                             lastAction = it.action::class.simpleName
+                            Log.i(
+                                LOG_TAG,
+                                "automation action dispatched semantic=${it.action.structuredSemanticName()} " +
+                                    "command=${it.commandId} " +
+                                    "action=${it.action}",
+                            )
                         }
+                        if (scanCycleId != null) processedScanCycleId = scanCycleId
                         processedObservationSeq = event.messageSeq
                         observationSeq = event.messageSeq
                     } finally {
@@ -222,29 +254,38 @@ class StructuredAutomationController(
     }
 
     fun snapshot(): AutomationRunnerStatus = runner.snapshot()
-
-    fun stop() {
-        if (connected) {
-            runner.disconnect("structured runner stopped")
-            source.disconnect()
-        }
+    fun awaitingActionResult(): Boolean = runner.snapshot().activeExecution != null
+    fun resetForAutomationDisable() {
+        if (connected) source.disconnect()
         connected = false
+        resetRunnerOnNextAttach = true
+        processedObservationSeq = 0L
+        processedScanCycleId = 0L
+        requestedCatchPokemonIds.clear()
+        outOfBalls = false
+        latestPlayerPosition = null
+        recordedGameActionCommands.clear()
+        catchLabelsByCommand.clear()
+        publishedCatchOutcomeCommands.clear()
+        wildState.clear()
     }
 
+    fun stop() = resetForAutomationDisable()
     private fun ensureConnected() {
         if (connected) return
         source.connect().getOrThrow()
         val ready = source.runtimeMetadata?.ready ?: error("runtime did not provide readiness")
         sessionManager.accept(ready).getOrThrow()
         val identity = ready.toRuntimeIdentity(sessionManager.mutationsAllowed)
-        runner.attach(identity).getOrThrow()
+        runner.attach(identity, preserveRecoveryState = !resetRunnerOnNextAttach).getOrThrow()
+        resetRunnerOnNextAttach = false
         processedObservationSeq = 0L
+        processedScanCycleId = 0L
         latestPlayerPosition = null
         recordedGameActionCommands.clear()
         catchLabelsByCommand.clear()
         publishedCatchOutcomeCommands.clear()
-        caughtWildTemplateByCommand.clear()
-        pendingWildTransfers.clear()
+        wildState.clear()
         connected = true
         lastError = null
     }
@@ -267,45 +308,24 @@ class StructuredAutomationController(
 
     private fun currentAllowedBuildFingerprints(): Set<String> =
         allowedBuildFingerprintsProvider?.invoke()?.toSet() ?: configuredAllowedBuildFingerprints
-
-    private fun readSnapshot(): AutomationSnapshot {
-        val lifecycle = adapter.lifecycleState()
-        val nearby = adapter.readNearby().getOrNull()
-        val encounter = if (lifecycle == GameLifecycleState.ENCOUNTER) {
-            adapter.readEncounter().getOrNull()
-        } else {
-            null
-        }
-        val forts = if (GameCapability.READ_FORTS in adapter.capabilities) {
-            adapter.readForts().getOrNull()
-        } else {
-            null
-        }
-        val inventory = if (GameCapability.READ_INVENTORY in adapter.capabilities) {
-            adapter.readInventory().getOrNull()
-        } else {
-            null
-        }
-        val runtimeStorage = if (GameCapability.READ_POKEMON_STORAGE in adapter.capabilities) {
-            adapter.readPokemonStorage().getOrNull()
-        } else {
-            null
-        }
-        val storage = mergePendingWildTransfers(runtimeStorage)
-        return AutomationSnapshot(
-            lifecycleState = lifecycle,
-            nearby = nearby,
-            encounter = encounter,
-            forts = forts,
-            inventory = inventory,
-            storage = storage,
-            outOfBalls = outOfBalls,
-        )
-    }
-
     private fun consumeResult(result: BridgeEvent.AutomationCommandResult) {
-        val request = runner.snapshot().activeExecution?.request ?: return
-        if (request.commandId != result.commandId) return
+        Log.i(
+            LOG_TAG,
+            "automation action result command=${result.commandId} phase=${result.phase} " +
+                "error=${result.errorCode} message=${result.message}",
+        )
+        val request = runner.snapshot().activeExecution?.request ?: run {
+            Log.w(LOG_TAG, "automation action result has no active request command=${result.commandId}")
+            return
+        }
+        if (request.commandId != result.commandId) {
+            Log.w(
+                LOG_TAG,
+                "automation action result ignored expected=${request.commandId} " +
+                    "actual=${result.commandId}",
+            )
+            return
+        }
         val phase = when (result.phase) {
             dev.pogoroot.automation.bridge.CommandPhase.ACCEPTED -> ActionExecutionPhase.ACCEPTED
             dev.pogoroot.automation.bridge.CommandPhase.STARTED -> ActionExecutionPhase.STARTED
@@ -329,11 +349,38 @@ class StructuredAutomationController(
                 observedAtElapsedNs = result.observedAtElapsedNs,
             ),
         ).onFailure { lastError = it.message }
+        val catchAction = request.action as? AutomationAction.Catch
+        val holdDirectCatchResult = resultStatus.isSuccess &&
+            phase == ActionExecutionPhase.INDETERMINATE &&
+            catchAction?.mode == CatchMode.DIRECT_MAP
+        if (holdDirectCatchResult) {
+            Log.w(
+                LOG_TAG,
+                "automation direct catch held command=${request.commandId} " +
+                    "encounter=${catchAction.encounterId}; outcome observer unavailable; " +
+                    "no further catch will be dispatched",
+            )
+            eventSink.publish(
+                AutomationEvent(
+                    AutomationEventType.ERROR,
+                    "Direct catch submitted for ${catchAction.encounterId}; " +
+                        "waiting for authoritative outcome before continuing",
+                ),
+            )
+        }
         if (resultStatus.isSuccess && phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
             recordGameActionIfNeeded(request, result)
         }
-        if (resultStatus.isSuccess && phase.isTerminal) {
+        if (resultStatus.isSuccess && phase.isTerminal && !holdDirectCatchResult) {
             lastAction = request.action::class.simpleName
+            val label = if (request.action is AutomationAction.Catch) {
+                catchLabelsByCommand[request.commandId] ?: request.action.encounterId()
+            } else {
+                request.action::class.simpleName ?: "action"
+            }
+            if (!isAuthoritativeCatchResult(request, result, phase)) {
+                publishTerminalActionResult(eventSink, request, result, phase, label)
+            }
         }
         // Track the native on-demand ball check: a catch rejected with
         // out_of_balls forces the next cycle to spin; a completed spin clears it.
@@ -346,53 +393,8 @@ class StructuredAutomationController(
             publishCatchOutcome(request, result)
         }
         if (resultStatus.isSuccess && phase.isDefinitive) {
-            registerWildTransferIfCaught(request, result, phase)
-            resolveWildTransferResult(request, phase)
-        }
-    }
-
-    /**
-     * Promotes a freshly caught wild Pokémon into the pending-transfer set so the
-     * shared transfer path considers it. Runs only for a definitive catch result;
-     * the per-command template is always cleared to bound memory.
-     */
-    private fun registerWildTransferIfCaught(
-        request: dev.pogoroot.automation.core.automation.ActionRequest,
-        result: BridgeEvent.AutomationCommandResult,
-        phase: ActionExecutionPhase,
-    ) {
-        val action = request.action as? AutomationAction.Catch
-        val template = caughtWildTemplateByCommand.remove(request.commandId) ?: return
-        if (action == null || phase != ActionExecutionPhase.COMPLETED) return
-        if (result.catchOutcome != CatchOutcome.CAUGHT) return
-        // The transfer target is the storage id assigned on capture; without it
-        // (native catch-outcome observer not yet reporting the id) there is
-        // nothing to release, so skip until the runtime provides it.
-        val pokemonId = result.capturedPokemonId ?: return
-        pendingWildTransfers[pokemonId] = StoredPokemon(
-            pokemonId = pokemonId,
-            speciesId = template.speciesId,
-            speciesName = template.speciesName,
-            iv = template.iv,
-            shiny = template.shiny,
-        )
-        while (pendingWildTransfers.size > MAX_PENDING_WILD_TRANSFERS) {
-            val eldest = pendingWildTransfers.keys.firstOrNull() ?: break
-            pendingWildTransfers.remove(eldest)
-        }
-    }
-
-    private fun resolveWildTransferResult(
-        request: dev.pogoroot.automation.core.automation.ActionRequest,
-        phase: ActionExecutionPhase,
-    ) {
-        val action = request.action as? AutomationAction.TransferPokemon ?: return
-        // Drop on any definitive result: COMPLETED means released; a rejection or
-        // failure (e.g. TRANSFER_POKEMON not advertised yet) is not retried.
-        val released = pendingWildTransfers.remove(action.pokemonId)
-        if (phase == ActionExecutionPhase.COMPLETED) {
-            val label = released?.speciesName?.takeIf { it.isNotBlank() } ?: action.pokemonId
-            eventSink.publish(AutomationEvent(AutomationEventType.TRANSFERRED, "Transferred $label"))
+            wildState.registerIfCaught(request, result, phase)
+            wildState.resolveTransfer(request, phase)
         }
     }
 
@@ -411,50 +413,6 @@ class StructuredAutomationController(
                 ?.takeIf { it.isNotBlank() }
             ?: action.encounterId
         catchLabelsByCommand[request.commandId] = label
-    }
-
-    /**
-     * Captures the wild Pokémon being caught at dispatch time. Encounter catches
-     * carry IV/shiny; direct-map (TryCapture) catches expose only species, so IV
-     * stays null and TransferPolicy.keepUnknownIv governs whether it is released.
-     */
-    private fun rememberWildCatchTemplate(
-        request: dev.pogoroot.automation.core.automation.ActionRequest,
-        snapshot: AutomationSnapshot,
-    ) {
-        val action = request.action as? AutomationAction.Catch ?: return
-        val template = snapshot.encounter
-            ?.takeIf { it.encounterId == action.encounterId }
-            ?.let { WildCatchTemplate(it.speciesId, it.speciesName, it.iv, it.shiny == true) }
-            ?: snapshot.nearby?.spawns
-                ?.firstOrNull { it.spawnId == action.encounterId }
-                ?.let { WildCatchTemplate(it.speciesId, it.speciesName, iv = null, shiny = false) }
-            ?: return
-        caughtWildTemplateByCommand[request.commandId] = template
-        while (caughtWildTemplateByCommand.size > MAX_PENDING_WILD_TRANSFERS) {
-            val eldest = caughtWildTemplateByCommand.keys.firstOrNull() ?: break
-            caughtWildTemplateByCommand.remove(eldest)
-        }
-    }
-
-    /**
-     * Folds the freshly caught wild Pokémon awaiting transfer into the runtime
-     * storage snapshot (deduped by id) so the shared transfer planner considers
-     * them. Once a real box reader lands it becomes just another storage source.
-     */
-    private fun mergePendingWildTransfers(base: PokemonStorageSnapshot?): PokemonStorageSnapshot? {
-        if (pendingWildTransfers.isEmpty()) return base
-        val pending = pendingWildTransfers.values.toList()
-        if (base == null) {
-            return PokemonStorageSnapshot(
-                observedAtEpochMs = System.currentTimeMillis(),
-                usedSlots = pending.size,
-                capacity = pending.size,
-                pokemon = pending,
-            )
-        }
-        val merged = (base.pokemon + pending).distinctBy { it.pokemonId }
-        return base.copy(pokemon = merged)
     }
 
     private fun isAuthoritativeCatchResult(
@@ -536,6 +494,6 @@ class StructuredAutomationController(
         ready.toRuntimeIdentity(sessionManager.mutationsAllowed)
 
     private companion object {
-        const val MAX_PENDING_WILD_TRANSFERS = 64
+        const val LOG_TAG = "PogoRootAutomation"
     }
 }

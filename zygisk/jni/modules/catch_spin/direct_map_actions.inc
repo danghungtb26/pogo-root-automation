@@ -74,10 +74,7 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     const Il2CppApi &api = context.il2cpp_api;
     if (encounter_id == 0U || !binding.direct_catch_verified ||
         binding.map_pokemon_try_capture == nullptr ||
-        binding.ar_plus_encounter_values_class == nullptr ||
-        binding.catch_pokemon_proto_class == nullptr ||
-        api.runtime_invoke == nullptr || api.object_new == nullptr ||
-        api.runtime_object_init == nullptr) {
+        api.runtime_invoke == nullptr) {
         return MainThreadActionOutcome::kRejected;
     }
     void *map_pokemon = find_active_map_pokemon_by_id(context, encounter_id);
@@ -168,40 +165,50 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     // This is an ordinary Poke Ball intent. No hit, curve, excellent, or
     // guaranteed-catch flag is synthesized by the native bridge.
     DirectMapPokeballThrow throw_data;
-    void *ar_plus_values = api.object_new(binding.ar_plus_encounter_values_class);
-    if (!is_probable_managed_pointer(ar_plus_values)) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "direct map catch AR+ values allocation failed class=%p",
-            binding.ar_plus_encounter_values_class
-        );
-        return MainThreadActionOutcome::kRejected;
-    }
-    api.runtime_object_init(ar_plus_values);
-    using DirectMapTryCapture = void *(*)(
-        void *, DirectMapPokeballThrow, void *, const void *
-    );
     const auto *method_view = reinterpret_cast<const DirectRuntimeMethodInfoView *>(
         binding.map_pokemon_try_capture
     );
-    const auto try_capture = reinterpret_cast<DirectMapTryCapture>(
-        const_cast<void *>(method_view->method_pointer)
-    );
-    if (try_capture == nullptr) return MainThreadActionOutcome::kRejected;
+    void *arguments[] = {&throw_data, nullptr};
+    void *exception = nullptr;
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "runtime action invoking action=DIRECT_MAP_CATCH_DIRECT id=%llu object=%p ar_plus=%p method=%p code=%p",
+        "runtime action invoking action=DIRECT_MAP_CATCH_DIRECT id=%llu object=%p ar_plus=null ball=%d reticle=%.3f hit=%d spinning=%d missed=%d method=%p code=%p",
         static_cast<unsigned long long>(encounter_id),
         map_pokemon,
-        ar_plus_values,
+        throw_data.ball_type,
+        throw_data.reticle_size,
+        throw_data.hit_bullseye,
+        throw_data.spinning,
+        throw_data.missed,
         binding.map_pokemon_try_capture,
-        method_view->method_pointer
+        method_view == nullptr ? nullptr : method_view->method_pointer
     );
     log_direct_capture_method_metadata(binding.map_pokemon_try_capture);
-    void *promise = try_capture(
-        map_pokemon, throw_data, ar_plus_values, binding.map_pokemon_try_capture
+    void *promise = api.runtime_invoke(
+        binding.map_pokemon_try_capture,
+        map_pokemon,
+        arguments,
+        &exception
+    );
+    if (exception != nullptr) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime action direct map catch exception id=%llu exception=%p promise=%p",
+            static_cast<unsigned long long>(encounter_id),
+            exception,
+            promise
+        );
+        return MainThreadActionOutcome::kIndeterminate;
+    }
+    __android_log_print(
+        promise == nullptr ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
+        kLogTag,
+        "runtime action direct map catch returned id=%llu promise=%p exception=%p",
+        static_cast<unsigned long long>(encounter_id),
+        promise,
+        exception
     );
     return promise == nullptr
         ? MainThreadActionOutcome::kIndeterminate

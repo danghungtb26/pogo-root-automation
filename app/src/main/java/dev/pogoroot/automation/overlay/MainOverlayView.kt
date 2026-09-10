@@ -168,14 +168,18 @@ internal class MainOverlayView(
         runCatching { windowManager.updateViewLayout(rootView, windowParams) }
     }
 
-    fun render(config: HeadlessAutomationConfig, speedPresetIndex: Int) {
+    fun render(
+        config: HeadlessAutomationConfig,
+        speedPresetIndex: Int,
+        automationActive: Boolean,
+    ) {
         if (!::rootView.isInitialized) return
-        shortcutMenu.render(config, speedPresetIndex)
+        shortcutMenu.render(config, speedPresetIndex, automationActive)
         floatButton.background = context.roundedBackground(
-            if (config.enabled) 0xE62E7D32.toInt() else 0xE6202124.toInt(),
+            if (automationActive) 0xE62E7D32.toInt() else 0xE6202124.toInt(),
             28,
         )
-        floatButton.contentDescription = if (config.enabled) {
+        floatButton.contentDescription = if (automationActive) {
             "PoGo Tools menu, automation on"
         } else {
             "PoGo Tools menu, automation off"

@@ -18,6 +18,7 @@ enum class BerryMode {
 }
 
 data class HeadlessAutomationConfig(
+    /** Compatibility field; the live master switch is [AutomationRunState]. */
     val enabled: Boolean = false,
     val autoCatch: Boolean = true,
     val catchThrowQuality: ThrowQualityTarget = ThrowQualityTarget.ANY,
@@ -41,7 +42,7 @@ data class HeadlessAutomationConfig(
     val transferMinimumIvPercent: Double = 80.0,
     val berryMode: BerryMode = BerryMode.NONE,
     val showActionToasts: Boolean = true,
-    val loopIntervalMs: Long = 900L,
+    val loopIntervalMs: Long = 2_000L,
     val spinSettleDelayMs: Long = DEFAULT_SPIN_SETTLE_DELAY_MS,
     val catchSettleDelayMs: Long = DEFAULT_CATCH_SETTLE_DELAY_MS,
     /** Exact strong fingerprints verified for client-owned mutation. */
@@ -68,7 +69,8 @@ class AutomationConfigRepository(context: Context) {
     }
 
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
-        enabled = prefs.getBoolean(KEY_ENABLED, false),
+        // The master switch is process-local. A cold start must always be off.
+        enabled = false,
         autoCatch = prefs.getBoolean(KEY_AUTO_CATCH, true),
         catchThrowQuality = enumPreference(KEY_THROW_QUALITY, ThrowQualityTarget.ANY),
         catchCurvePreference = enumPreference(KEY_THROW_CURVE, CurvePreference.ANY),
@@ -93,7 +95,7 @@ class AutomationConfigRepository(context: Context) {
             BerryMode.valueOf(prefs.getString(KEY_BERRY_MODE, BerryMode.NONE.name) ?: BerryMode.NONE.name)
         }.getOrDefault(BerryMode.NONE),
         showActionToasts = prefs.getBoolean(KEY_SHOW_ACTION_TOASTS, true),
-        loopIntervalMs = prefs.getLong(KEY_LOOP_INTERVAL, 900L).coerceIn(300L, 5_000L),
+        loopIntervalMs = prefs.getLong(KEY_LOOP_INTERVAL, 2_000L).coerceIn(1_000L, 2_000L),
         spinSettleDelayMs = prefs.getLong(KEY_SPIN_SETTLE_DELAY, DEFAULT_SPIN_SETTLE_DELAY_MS)
             .coerceIn(0L, MAX_SETTLE_DELAY_MS),
         catchSettleDelayMs = prefs.getLong(KEY_CATCH_SETTLE_DELAY, DEFAULT_CATCH_SETTLE_DELAY_MS)
@@ -109,7 +111,9 @@ class AutomationConfigRepository(context: Context) {
     fun update(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig): HeadlessAutomationConfig {
         val next = transform(read())
         prefs.edit()
-            .putBoolean(KEY_ENABLED, next.enabled)
+            // Never persist the volatile master switch, including a stale value
+            // written by an older APK.
+            .remove(KEY_ENABLED)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
             .putString(KEY_THROW_QUALITY, next.catchThrowQuality.name)
             .putString(KEY_THROW_CURVE, next.catchCurvePreference.name)
@@ -130,7 +134,7 @@ class AutomationConfigRepository(context: Context) {
             .putFloat(KEY_TRANSFER_MIN_IV, next.transferMinimumIvPercent.coerceIn(0.0, 100.0).toFloat())
             .putString(KEY_BERRY_MODE, next.berryMode.name)
             .putBoolean(KEY_SHOW_ACTION_TOASTS, next.showActionToasts)
-            .putLong(KEY_LOOP_INTERVAL, next.loopIntervalMs.coerceIn(300L, 5_000L))
+            .putLong(KEY_LOOP_INTERVAL, next.loopIntervalMs.coerceIn(1_000L, 2_000L))
             .putLong(KEY_SPIN_SETTLE_DELAY, next.spinSettleDelayMs.coerceIn(0L, MAX_SETTLE_DELAY_MS))
             .putLong(KEY_CATCH_SETTLE_DELAY, next.catchSettleDelayMs.coerceIn(0L, MAX_SETTLE_DELAY_MS))
             .putString(KEY_STRUCTURED_ALLOWLIST, next.structuredAllowedBuildFingerprints
@@ -148,6 +152,7 @@ class AutomationConfigRepository(context: Context) {
      */
     private fun migrateLegacyPreferences() {
         val editor = prefs.edit()
+        editor.remove(KEY_ENABLED)
         if (!prefs.contains(KEY_AUTO_ENCOUNTER) && prefs.contains(KEY_LEGACY_ENCOUNTER_SWEEP)) {
             editor.putBoolean(
                 KEY_AUTO_ENCOUNTER,

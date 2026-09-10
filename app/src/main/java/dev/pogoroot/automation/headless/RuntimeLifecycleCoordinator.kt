@@ -1,5 +1,6 @@
 package dev.pogoroot.automation.headless
 
+import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.root.RuntimeBridgeClient
@@ -39,6 +40,7 @@ class RuntimeLifecycleCoordinator(
     private companion object {
         const val AUTO_DIAGNOSTIC_INITIAL_DELAY_MS = 3_000L
         const val AUTO_DIAGNOSTIC_RETRY_DELAY_MS = 5_000L
+        const val LOG_TAG = "PogoRootAutomation"
     }
 
     @Volatile private var state = RuntimeControlState.DETACHED
@@ -150,6 +152,16 @@ class RuntimeLifecycleCoordinator(
         }
         lastError = null
     }.onFailure(::recordFailure)
+
+    @Synchronized
+    fun requestCatchSpinScan(cycleId: Long): Result<Unit> = runCatching {
+        Log.i(LOG_TAG, "automation SCAN_MAP request cycle=$cycleId")
+        bridge.requestRuntimeScanMap(cycleId).getOrThrow()
+    }
+
+    /** Compatibility entry point for callers that still use the old name. */
+    @Synchronized
+    fun requestWorldSnapshot(cycleId: Long): Result<Unit> = requestCatchSpinScan(cycleId)
 
     @Synchronized
     fun snapshot(): RuntimeControlSnapshot = RuntimeControlSnapshot(
@@ -335,4 +347,5 @@ class RuntimeLifecycleCoordinator(
             resetModules()
         }
     }
+
 }

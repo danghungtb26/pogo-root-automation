@@ -26,6 +26,7 @@ private data class CachedRuntimeState(
     val encounter: RawEncounterObservation?,
     val forts: RawFortObservation?,
     val inventory: RawInventoryObservation?,
+    val scanCycleId: Long? = null,
 )
 
 /**
@@ -46,6 +47,7 @@ class BridgePogoRuntimeSource(
     private var encounter: RawEncounterObservation? = null
     private var forts: RawFortObservation? = null
     private var inventory: RawInventoryObservation? = null
+    private var lastScanCycleId: Long? = null
     private var lastError: String? = null
     private val pendingEvents = ArrayDeque<BridgeEvent>()
     private val observationStates = LinkedHashMap<Long, CachedRuntimeState>()
@@ -80,6 +82,7 @@ class BridgePogoRuntimeSource(
         encounter = null
         forts = null
         inventory = null
+        lastScanCycleId = null
         lastError = null
         pendingEvents.clear()
         observationStates.clear()
@@ -98,6 +101,7 @@ class BridgePogoRuntimeSource(
         encounter = null
         forts = null
         inventory = null
+        lastScanCycleId = null
         pendingEvents.clear()
         observationStates.clear()
         selectedObservationState = null
@@ -154,6 +158,8 @@ class BridgePogoRuntimeSource(
         selectedObservationState = observationStates[observationSeq]
             ?: error("observation state $observationSeq is no longer cached")
     }
+
+    fun selectedScanCycleId(): Long? = selectedObservationState?.scanCycleId
 
     fun clearObservationSelection() {
         selectedObservationState = null
@@ -236,8 +242,11 @@ class BridgePogoRuntimeSource(
             event.payloadVersion == BridgeProtocol.RUNTIME_FORTS_PAYLOAD_VERSION
         val structuredInventory = event.observationType == ObservationType.INVENTORY &&
             event.payloadVersion == BridgeProtocol.RUNTIME_INVENTORY_PAYLOAD_VERSION
+        val structuredCatchSpin = event.observationType == ObservationType.REQUEST_CATCH_SPIN &&
+            event.payloadVersion == BridgeProtocol.RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION
         if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION &&
-            !structuredEncounter && !structuredNearby && !structuredForts && !structuredInventory) {
+            !structuredEncounter && !structuredNearby && !structuredForts && !structuredInventory &&
+            !structuredCatchSpin) {
             lastError = "unsupported observation payload version ${event.payloadVersion}"
             return
         }
@@ -245,6 +254,7 @@ class BridgePogoRuntimeSource(
             lifecycle = state
             if (state != GameLifecycleState.ENCOUNTER) encounter = null
         }
+        var scanCycleId: Long? = null
         when (event.observationType) {
             ObservationType.LIFECYCLE -> Unit
             ObservationType.NEARBY -> (if (structuredNearby) {
@@ -309,13 +319,39 @@ class BridgePogoRuntimeSource(
                     lastError = it.message
                 }
             }
+            ObservationType.REQUEST_CATCH_SPIN -> if (structuredCatchSpin) {
+                RuntimeCatchSpinPayloadCodec.decode(
+                    payload = event.payload,
+                    observedAtEpochMs = event.observedAtEpochMs,
+                ).onSuccess { scan ->
+                    nearby = scan.nearby
+                    forts = scan.forts
+                    inventory = scan.inventory
+                    scanCycleId = scan.cycleId
+                    lastScanCycleId = scan.cycleId
+                    if (scan.playerLatitude != null && scan.playerLongitude != null && nearby != null) {
+                        nearby = nearby?.copy(
+                            playerLatitude = scan.playerLatitude,
+                            playerLongitude = scan.playerLongitude,
+                        )
+                    }
+                    if (event.lifecycleState == null && lifecycle != GameLifecycleState.ENCOUNTER) {
+                        lifecycle = GameLifecycleState.OVERWORLD
+                    }
+                }.onFailure {
+                    nearby = null
+                    forts = null
+                    inventory = null
+                    lastError = it.message
+                }
+            }
             ObservationType.POKEMON_STORAGE,
             ObservationType.MAP_TARGET,
             ObservationType.THROW_DIAGNOSTIC,
             -> Unit
         }
         observationStates[event.messageSeq] =
-            CachedRuntimeState(lifecycle, nearby, encounter, forts, inventory)
+            CachedRuntimeState(lifecycle, nearby, encounter, forts, inventory, scanCycleId)
         while (observationStates.size > MAX_OBSERVATION_STATES) {
             observationStates.remove(observationStates.entries.first().key)
         }

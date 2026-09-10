@@ -20,6 +20,7 @@ object BridgeProtocol {
     const val RUNTIME_NEARBY_PAYLOAD_VERSION = 2
     const val RUNTIME_FORTS_PAYLOAD_VERSION = 1
     const val RUNTIME_INVENTORY_PAYLOAD_VERSION = 1
+    const val RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION = 1
     const val NORMAL_MESSAGE_BYTES = 1 * 1024 * 1024
     const val HARD_MESSAGE_BYTES = 4 * 1024 * 1024
     const val FRAME_HEADER_BYTES = 4 + 2 + 2 + 8
@@ -56,6 +57,8 @@ enum class ObservationType(val wireValue: Int) {
     MAP_TARGET(7),
     /** Read-only throw-pipeline diagnostics from the verified runtime. */
     THROW_DIAGNOSTIC(8),
+    /** Correlated map/inventory snapshot used as the automation filter trigger. */
+    REQUEST_CATCH_SPIN(9),
 }
 
 enum class CommandPhase(val wireValue: Int) {

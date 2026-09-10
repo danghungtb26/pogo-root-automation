@@ -32,6 +32,16 @@ data class RawInventoryObservation(
     val items: List<RawItemStack>,
 )
 
+data class RawCatchSpinObservation(
+    val cycleId: Long,
+    val observedAtEpochMs: Long,
+    val nearby: RawNearbyObservation?,
+    val forts: RawFortObservation?,
+    val inventory: RawInventoryObservation?,
+    val playerLatitude: Double?,
+    val playerLongitude: Double?,
+)
+
 data class RawStoredPokemon(
     val pokemonId: String,
     val speciesId: Int,

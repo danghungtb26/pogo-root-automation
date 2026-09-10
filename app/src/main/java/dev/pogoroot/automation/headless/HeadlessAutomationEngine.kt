@@ -3,6 +3,7 @@ package dev.pogoroot.automation.headless
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicLong
 
 data class HeadlessAutomationStatus(
     val running: Boolean = false,
@@ -35,7 +36,20 @@ class HeadlessAutomationEngine(
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val loopActive = AtomicBoolean(false)
+    private val snapshotCycle = AtomicLong(0L)
+    private val resetRequested = AtomicBoolean(false)
     private val status = AtomicReference(HeadlessAutomationStatus())
+
+    fun activate() {
+        AutomationRunState.setActive(true)
+        start()
+    }
+
+    fun deactivate() {
+        AutomationRunState.setActive(false)
+        snapshotCycle.set(0L)
+        resetRequested.set(true)
+    }
 
     fun start() {
         if (!loopActive.compareAndSet(false, true)) return
@@ -44,11 +58,17 @@ class HeadlessAutomationEngine(
     }
 
     fun stop() {
+        AutomationRunState.setActive(false)
+        snapshotCycle.set(0L)
+        resetRequested.set(true)
         loopActive.set(false)
         status.updateAndGet { it.copy(running = false, updatedAtEpochMs = now()) }
     }
 
     fun shutdown() {
+        AutomationRunState.setActive(false)
+        snapshotCycle.set(0L)
+        resetRequested.set(true)
         loopActive.set(false)
         runCatching { runtimeCoordinator.ensureIdle().getOrThrow() }
         structuredController.stop()
@@ -59,6 +79,7 @@ class HeadlessAutomationEngine(
     fun snapshot(): HeadlessAutomationStatus {
         val runtime = runtimeCoordinator.snapshot()
         return status.get().copy(
+            enabled = AutomationRunState.isActive(),
             runtimeControlState = runtime.state.name,
             runtimeModules = runtime.moduleStates(),
             updatedAtEpochMs = now(),
@@ -67,8 +88,11 @@ class HeadlessAutomationEngine(
 
     private fun runLoop() {
         while (loopActive.get()) {
+            if (resetRequested.compareAndSet(true, false)) {
+                structuredController.resetForAutomationDisable()
+            }
             val config = configRepository.read()
-            if (!config.enabled) {
+            if (!AutomationRunState.isActive()) {
                 runtimeCoordinator.ensureIdle()
                     .onFailure { error ->
                         recordError(
@@ -86,6 +110,8 @@ class HeadlessAutomationEngine(
                 // reconnect path creates a fresh runtime session.
                 structuredController.stop()
             }
+            var waitForActionResult = false
+            var waitAfterAction = false
             runtimeCoordinator.ensureRunning(config)
                 .onSuccess { ready ->
                     if (!ready.strongIdentityVerified || ready.capabilities.isEmpty()) {
@@ -96,7 +122,9 @@ class HeadlessAutomationEngine(
                         structuredController.stop()
                         publishRuntimeDiagnosticPending(ready.runtimeSessionId)
                     } else {
-                        structuredController.tick(config)
+                        val wasAwaitingAction = structuredController.awaitingActionResult()
+                        val beforeScan = structuredController.tick(config)
+                        beforeScan
                             .onSuccess(::publishTick)
                             .onFailure { error ->
                                 val runner = structuredController.snapshot()
@@ -107,6 +135,24 @@ class HeadlessAutomationEngine(
                                     observationSeq = runner.lastObservationSeq,
                                 )
                             }
+                        if (beforeScan.isSuccess && structuredController.awaitingActionResult()) {
+                            waitForActionResult = true
+                        }
+                        if (beforeScan.isSuccess && wasAwaitingAction && !waitForActionResult) {
+                            waitAfterAction = true
+                        }
+                        if (!waitForActionResult && !waitAfterAction) {
+                            val cycle = snapshotCycle.incrementAndGet()
+                            runtimeCoordinator.requestCatchSpinScan(cycle)
+                                .onFailure { error ->
+                                    android.util.Log.w(
+                                        LOG_TAG,
+                                        "automation SCAN_MAP failed cycle=$cycle " +
+                                            "error=${error.message ?: error::class.java.simpleName}",
+                                    )
+                                }
+                            structuredAutomationTick(config)
+                        }
                     }
                 }
                 .onFailure { error ->
@@ -115,13 +161,36 @@ class HeadlessAutomationEngine(
                         runtimeSessionId = runtimeCoordinator.snapshot().runtimeSessionId,
                     )
                 }
-            sleepInterruptibly(config.loopIntervalMs)
+            if (waitForActionResult) {
+                sleepInterruptibly(200L)
+                continue
+            }
+            if (waitAfterAction) {
+                sleepInterruptibly(config.loopIntervalMs)
+                continue
+            }
+            sleepInterruptibly(
+                if (structuredController.awaitingActionResult()) 200L else config.loopIntervalMs,
+            )
         }
 
         runCatching { runtimeCoordinator.ensureIdle().getOrThrow() }
         structuredController.stop()
         status.updateAndGet { it.copy(running = false, updatedAtEpochMs = now()) }
     }
+
+    private fun structuredAutomationTick(config: HeadlessAutomationConfig) =
+        structuredController.tick(config)
+            .onSuccess(::publishTick)
+            .onFailure { error ->
+                val runner = structuredController.snapshot()
+                recordError(
+                    message = "runtime scan response: ${error.message ?: error::class.java.simpleName}",
+                    runtimeSessionId = runner.runtimeSessionId,
+                    runtimeSuspended = runner.suspended,
+                    observationSeq = runner.lastObservationSeq,
+                )
+            }
 
     private fun publishIdle() {
         val runtime = runtimeCoordinator.snapshot()
@@ -233,4 +302,8 @@ class HeadlessAutomationEngine(
     }
 
     private fun now(): Long = System.currentTimeMillis()
+
+    private companion object {
+        const val LOG_TAG = "PogoRootAutomation"
+    }
 }

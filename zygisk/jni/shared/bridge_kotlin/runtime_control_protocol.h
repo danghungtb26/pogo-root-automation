@@ -15,6 +15,8 @@ enum class Action : uint32_t {
     kStart = 1U,
     kStop = 2U,
     kDiagnostic = 3U,
+    kSnapshot = 4U,
+    kScanMap = 5U,
 };
 
 struct Request {
@@ -26,6 +28,7 @@ struct Request {
     uint32_t pid = 0U;
     std::string process_name;
     std::string package_name;
+    uint64_t cycle_id = 0U;
 };
 
 inline bool read_u32(
@@ -104,8 +107,7 @@ inline bool parse(const std::vector<uint8_t> &command, Request *request) {
         marker != kMarker || request->message_seq == 0U ||
         request->runtime_session_id.empty() || request->request_id.empty() ||
         request->expires_at_elapsed_ns == 0U || request->pid == 0U ||
-        request->process_name.empty() || request->package_name.empty() ||
-        offset != command.size()) {
+        request->process_name.empty() || request->package_name.empty()) {
         return false;
     }
 
@@ -119,9 +121,20 @@ inline bool parse(const std::vector<uint8_t> &command, Request *request) {
         case static_cast<uint32_t>(Action::kDiagnostic):
             request->action = Action::kDiagnostic;
             return true;
+        case static_cast<uint32_t>(Action::kSnapshot):
+            request->action = Action::kSnapshot;
+            break;
+        case static_cast<uint32_t>(Action::kScanMap):
+            request->action = Action::kScanMap;
+            break;
         default:
             return false;
     }
+    if (offset < command.size()) {
+        if (!read_u64(command, &offset, &request->cycle_id)) return false;
+    }
+    if (offset != command.size()) return false;
+    return request->action != Action::kScanMap || request->cycle_id > 0U;
 }
 
 }  // namespace pogo_runtime_control

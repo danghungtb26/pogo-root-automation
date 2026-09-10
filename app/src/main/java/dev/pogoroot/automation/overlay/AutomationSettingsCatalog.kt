@@ -21,7 +21,7 @@ internal object AutomationSettingsCatalog {
             AutomationSettingsCategory(
                 id = "automation",
                 title = "Automation",
-                summary = "Master ${onOff(config.enabled)} · Map walk ${onOff(config.mapTapWalkEnabled)} · Catch ${onOff(config.autoCatch)} · Throw ${throwQualityLabel(config.catchThrowQuality)} · Spin ${onOff(config.autoSpin)}",
+                summary = "Master: overlay only · Map walk ${onOff(config.mapTapWalkEnabled)} · Catch ${onOff(config.autoCatch)} · Throw ${throwQualityLabel(config.catchThrowQuality)} · Spin ${onOff(config.autoSpin)}",
             ),
             AutomationSettingsCategory(
                 id = "discard",

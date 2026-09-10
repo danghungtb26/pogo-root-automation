@@ -75,6 +75,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     );
     discard_pending_throw_events(context);
     g_runtime_active.store(true);
+    g_runtime_explicit_snapshot_mode.store(true);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -92,6 +93,7 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "runtime host stop requested");
     pogo_runtime_module::disable_all_modules(context);
     g_runtime_active.store(false);
+    g_runtime_explicit_snapshot_mode.store(false);
     discard_pending_throw_events(context);
     return send_runtime_control_completed(
         context.fd,
@@ -99,7 +101,6 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
         "runtime feature modules stopped; process attachment remains idle"
     );
 }
-
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id) {
     // Re-running discovery rebuilds RuntimeBinding and invokes il2cpp on this
     // thread. It is only safe when no feature module is observing (the observer
@@ -137,7 +138,6 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
         "managed runtime diagnostic completed; capabilities refreshed"
     );
 }
-
 bool handle_runtime_control(
     ProbeContext &context,
     const pogo_runtime_control::Request &request
@@ -167,6 +167,14 @@ bool handle_runtime_control(
             return stop_runtime(context, request.request_id.c_str());
         case pogo_runtime_control::Action::kDiagnostic:
             return run_runtime_control_diagnostic(context, request.request_id.c_str());
+        case pogo_runtime_control::Action::kSnapshot:
+            return run_runtime_snapshot(context, request.request_id.c_str());
+        case pogo_runtime_control::Action::kScanMap:
+            return run_runtime_scan_map(
+                context,
+                request.request_id.c_str(),
+                request.cycle_id
+            );
     }
     return false;
 }
@@ -228,6 +236,8 @@ bool handle_runtime_module_control(
             message.empty() ? "runtime feature module could not change state" : message.c_str()
         );
     }
+    const RuntimeBinding updated_binding = runtime_binding_snapshot(context);
+    send_runtime_capability_update(context.fd, updated_binding);
     if (request.module == pogo_runtime_module::Module::kEncounter) {
         discard_pending_throw_events(context);
     }
@@ -399,6 +409,7 @@ void runtime_command_channel_loop(ProbeContext &context) {
 
     pogo_runtime_module::disable_all_modules(context);
     g_runtime_active.store(false);
+    g_runtime_explicit_snapshot_mode.store(false);
     shutdown_main_thread_bridge(context);
 }
 

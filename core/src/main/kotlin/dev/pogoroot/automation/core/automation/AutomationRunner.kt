@@ -38,10 +38,10 @@ class AutomationRunner(
     private var nextMutationAllowedAtElapsedNs = 0L
 
     @Synchronized
-    fun attach(runtime: RuntimeIdentity): Result<Unit> {
+    fun attach(runtime: RuntimeIdentity, preserveRecoveryState: Boolean = true): Result<Unit> {
         val replacingSession = identity?.runtimeSessionId != runtime.runtimeSessionId
         if (identity != null && replacingSession) disconnect("runtime session replaced")
-        val preserveRecovery = !replacingSession &&
+        val preserveRecovery = preserveRecoveryState && !replacingSession &&
             suspended &&
             needsResync &&
             blockedActionAfterIndeterminate != null
@@ -49,8 +49,8 @@ class AutomationRunner(
         identity = runtime
         // A new runtime session is a new authority. Never carry an old command
         // into it, even if the PID happens to be reused.
-        if (replacingSession || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
-        if (replacingSession) pendingMapSyncExecution = null
+        if (replacingSession || !preserveRecovery || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
+        if (replacingSession || !preserveRecovery) pendingMapSyncExecution = null
         lastObservation = null
         clearMutationQueue()
         lastMessageSeq = 0L
@@ -288,7 +288,7 @@ class AutomationRunner(
 
     /** Explicit operator/runtime resumption after a fresh resync. */
     @Synchronized
-    fun resumeAfterResync(): Result<Unit> {
+    fun resumeAfterResync(settleDelayNs: Long = 0L): Result<Unit> {
         if (!suspended || !needsResync) return Result.failure(IllegalStateException("resync is not pending"))
         if (pendingMapSyncExecution != null) {
             return Result.failure(IllegalStateException("map synchronization is pending"))
@@ -302,7 +302,7 @@ class AutomationRunner(
         active = null
         suspended = false
         needsResync = false
-        nextMutationAllowedAtElapsedNs = 0L
+        scheduleSettle(settleDelayNs)
         lastError = null
         // Do not automatically retry the mutation whose outcome was unknown.
         // Other intents from the same fresh snapshot may still be considered.

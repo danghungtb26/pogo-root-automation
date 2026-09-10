@@ -88,6 +88,11 @@ class RuntimeBridgeClient(
                 val ready = events.findAndRemove { it is BridgeEvent.RuntimeReady }
                 if (ready is BridgeEvent.RuntimeReady) {
                     runtimeReady = ready
+                    Log.i(
+                        LOG_TAG,
+                        "runtime bridge connected session=${ready.runtimeSessionId} " +
+                            "pid=${ready.pid} process=${ready.processName}",
+                    )
                     return@runCatching ready
                 }
                 readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
@@ -126,6 +131,33 @@ class RuntimeBridgeClient(
     /** Read-only runtime readiness/binding check; it does not enable modules. */
     fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
+
+    /** Pull one correlated world read after the native module is running. */
+    fun requestRuntimeSnapshot(cycleId: Long): Result<Unit> = runCatching {
+        require(cycleId > 0L) { "runtime snapshot cycle must be positive" }
+        val result = requestRuntimeControl(
+            action = RuntimeControlAction.SNAPSHOT,
+            requestIdSuffix = "cycle-$cycleId",
+        ).getOrThrow()
+        Log.i(
+            LOG_TAG,
+            "runtime snapshot acknowledged cycle=$cycleId message=${result.message}",
+        )
+    }
+
+    /** Pull one correlated map/inventory read for the catch/spin automation loop. */
+    fun requestRuntimeScanMap(cycleId: Long): Result<Unit> = runCatching {
+        require(cycleId > 0L) { "scan map cycle must be positive" }
+        val result = requestRuntimeControl(
+            action = RuntimeControlAction.SCAN_MAP,
+            requestIdSuffix = "cycle-$cycleId",
+            cycleId = cycleId,
+        ).getOrThrow()
+        Log.i(
+            LOG_TAG,
+            "runtime SCAN_MAP acknowledged cycle=$cycleId message=${result.message}",
+        )
+    }
 
     /**
      * Drop capability state from a previous START/STOP cycle. The native host
@@ -166,9 +198,12 @@ class RuntimeBridgeClient(
 
     private fun requestRuntimeControl(
         action: RuntimeControlAction,
+        requestIdSuffix: String? = null,
+        cycleId: Long? = null,
     ): Result<BridgeEvent.AutomationCommandResult> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
-        val requestId = "runtime-${action.name.lowercase()}-${System.nanoTime()}"
+        val suffix = requestIdSuffix ?: System.nanoTime().toString()
+        val requestId = "runtime-${action.name.lowercase()}-$suffix"
         val request = RuntimeControlRequest(
             runtimeSessionId = ready.runtimeSessionId,
             requestId = requestId,
@@ -177,6 +212,7 @@ class RuntimeBridgeClient(
             pid = ready.pid,
             processName = ready.processName,
             packageName = ready.packageName,
+            cycleId = cycleId,
         )
         awaitControlResult(requestId) {
             sendPayload(
@@ -245,6 +281,11 @@ class RuntimeBridgeClient(
             payload = payload,
         )
         synchronized(outputLock) {
+            Log.i(
+                LOG_TAG,
+                "runtime bridge send type=${frame.messageType} seq=${frame.messageSeq} " +
+                    "bytes=${frame.payload.size}",
+            )
             BridgeFrameCodec.write(frame, current.outputStream).getOrThrow()
         }
     }

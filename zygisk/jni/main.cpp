@@ -1,10 +1,12 @@
 // Keep the native runtime in focused units while preserving one translation
 // unit for Zygisk's registration macros and the existing internal linkage.
 #include <sys/mman.h>
+#include "shared/bridge_kotlin/runtime_catch_spin_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
 #include "shared/bridge_kotlin/runtime_feature_module_protocol.h"
 #include "shared/core/runtime_native_common.inc"
 #include "shared/bridge_kotlin/runtime_bridge_protocol.inc"
+#include "shared/bridge_kotlin/runtime_catch_spin_bridge.inc"
 #include "shared/bridge_kotlin/runtime_bridge_broker.inc"
 #include "shared/core/runtime_probe_elf.inc"
 #include "shared/runtime/probe/runtime_probe_inspection.inc"
@@ -52,6 +54,8 @@
 #include "modules/catch_spin/open_encounter.inc"
 #include "modules/catch_spin/map_hooks.inc"
 #include "modules/discard/inventory_reader.inc"
+#include "shared/runtime/mainthread/runtime_inventory_request.inc"
+#include "shared/runtime/mainthread/runtime_player_position_request.inc"
 #include "modules/discard/parse.inc"
 #include "modules/discard/execute.inc"
 #include "modules/transfer/parse.inc"
@@ -62,6 +66,8 @@
 // publication can describe the verified executors without owning them.
 #include "host/runtime_capabilities.inc"
 #include "shared/runtime/module/runtime_feature_modules.inc"
+#include "shared/runtime/control/runtime_snapshot_control.inc"
+#include "shared/runtime/control/runtime_scan_map_control.inc"
 #include "shared/runtime/control/runtime_control.inc"
 }  // namespace
 
