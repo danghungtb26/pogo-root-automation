@@ -14,7 +14,7 @@ enum class Module : uint32_t {
     kCatchSpin = 1U,
     kDiscard = 2U,
     kTransfer = 3U,
-    kThrowAssist = 4U,
+    kEncounter = 4U,
 };
 
 enum class Action : uint32_t {
@@ -39,7 +39,7 @@ bool module_enabled(Module module);
 
 inline bool valid_module(uint32_t value) {
     return value >= static_cast<uint32_t>(Module::kCatchSpin) &&
-        value <= static_cast<uint32_t>(Module::kThrowAssist);
+        value <= static_cast<uint32_t>(Module::kEncounter);
 }
 
 inline bool valid_action(uint32_t value) {

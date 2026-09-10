@@ -31,7 +31,7 @@
 
 // THROW_ASSIST owns throw binding/hooks. Keep this before observation because
 // the shared observer drains module-owned throw diagnostics when armed.
-#include "modules/throw_assist/throw_hooks.inc"
+#include "modules/encounter/throw_hooks.inc"
 #include "shared/runtime_observation_policy.inc"
 #include "shared/runtime_observation_senders.inc"
 #define request_main_thread_map_snapshot request_main_thread_map_snapshot_throttled
@@ -54,7 +54,7 @@
 #include "modules/discard/inventory_reader.inc"
 #include "modules/discard/parse.inc"
 #include "modules/discard/execute.inc"
-#include "modules/throw_assist/berry.inc"
+#include "modules/encounter/berry.inc"
 
 // Host publication/routing comes after feature implementations so capability
 // publication can describe the verified executors without owning them.

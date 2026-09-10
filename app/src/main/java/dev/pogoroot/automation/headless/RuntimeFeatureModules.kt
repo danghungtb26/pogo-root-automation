@@ -23,9 +23,9 @@ data class RuntimeFeatureModuleSnapshot(
 /**
  * Convert user-facing switches into native feature-group intent.
  *
- * CATCH_SPIN owns encounter/catch/spin automation. THROW_ASSIST owns berry and
- * throw-profile assistance. It does not request or represent a guaranteed
- * server-side capture result.
+ * CATCH_SPIN owns map targeting: encounter open, catch, and spin. ENCOUNTER owns
+ * in-encounter assistance (berry, throw profile/excellent; future guaranteed/AR).
+ * It does not request or represent a guaranteed server-side capture result.
  */
 fun HeadlessAutomationConfig.desiredRuntimeFeatureModules(): Set<RuntimeFeatureModule> = buildSet {
     if (autoCatch || autoSpin || autoEncounter || autoSnapshotDuringEncounter) {
@@ -38,6 +38,6 @@ fun HeadlessAutomationConfig.desiredRuntimeFeatureModules(): Set<RuntimeFeatureM
         catchThrowQuality != ThrowQualityTarget.ANY ||
         catchCurvePreference != CurvePreference.ANY
     ) {
-        add(RuntimeFeatureModule.THROW_ASSIST)
+        add(RuntimeFeatureModule.ENCOUNTER)
     }
 }

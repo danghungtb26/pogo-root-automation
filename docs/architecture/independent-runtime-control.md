@@ -108,7 +108,7 @@ zygisk/jni/
     transfer/
       module.inc                       # executor not verified yet
 
-    throw_assist/
+    encounter/
       module.inc
       berry.inc
       throw_hooks.inc
@@ -127,7 +127,7 @@ runtime_throw_trampoline.inc
 modules/runtime_module_catch_spin.inc
 modules/runtime_module_discard.inc
 modules/runtime_module_transfer.inc
-modules/runtime_module_throw_assist.inc
+modules/runtime_module_encounter.inc
 ```
 
 Shared runtime infrastructure remains at the host level when it is not feature policy, for example bridge/protocol transport, IL2CPP inspection, main-thread dispatch, observation infrastructure, and common action/result helpers.
@@ -154,14 +154,14 @@ Runtime host
   |     - Pokémon storage observation/execution boundary
   |     - currently UNAVAILABLE until a verified native transfer binding exists
   |
-  +-- THROW_ASSIST
+  +-- ENCOUNTER
         - berry action
         - throw-profile requests such as Excellent/curve
         - throw diagnostic hooks
         - no force-hit or guaranteed server-side capture-result flag
 ```
 
-`CATCH_SPIN`, `DISCARD`, `TRANSFER`, and `THROW_ASSIST` have independent enabled state. An unavailable module fails closed without preventing another verified module from running.
+`CATCH_SPIN`, `DISCARD`, `TRANSFER`, and `ENCOUNTER` have independent enabled state. An unavailable module fails closed without preventing another verified module from running.
 
 Current implementation status:
 
@@ -170,7 +170,7 @@ Current implementation status:
 | `CATCH_SPIN` | yes | yes | existing catch/spin/open bindings where capability verification succeeds |
 | `DISCARD` | yes | yes | no — reports `UNAVAILABLE` |
 | `TRANSFER` | yes | yes | no — reports `UNAVAILABLE` |
-| `THROW_ASSIST` | yes | yes | existing berry/throw-profile/hook bindings where capability verification succeeds |
+| `ENCOUNTER` | yes | yes | existing berry/throw-profile/hook bindings where capability verification succeeds |
 
 The architecture is therefore independent already, while discard/transfer still require their own verified native implementation before they can perform mutations.
 
@@ -205,7 +205,7 @@ At native bootstrap, the host explicitly registers:
 CATCH_SPIN
 DISCARD
 TRANSFER
-THROW_ASSIST
+ENCOUNTER
 ```
 
 Registration status is sent back through the bridge and the service may show a bootstrap toast such as:
@@ -252,10 +252,10 @@ autoTransfer
     -> TRANSFER
 
 berry != NONE || throwQuality != ANY || curve != ANY
-    -> THROW_ASSIST
+    -> ENCOUNTER
 ```
 
-A configured Excellent throw is therefore a `THROW_ASSIST` feature. It is a client-side requested throw profile, not a guarantee that a remote/server capture result will succeed.
+A configured Excellent throw is therefore a `ENCOUNTER` feature. It is a client-side requested throw profile, not a guarantee that a remote/server capture result will succeed.
 
 ## CATCH_SPIN data and decision flow
 
@@ -588,7 +588,7 @@ payload version
 runtime session id
 request id
 marker = 0x52544D44 ("RTMD")
-module = CATCH_SPIN | DISCARD | TRANSFER | THROW_ASSIST
+module = CATCH_SPIN | DISCARD | TRANSFER | ENCOUNTER
 action = ENABLE | DISABLE
 expiry
 pid
@@ -607,10 +607,10 @@ OpenEncounter / Catch / Spin / Snapshot / DirectCatch
     -> CATCH_SPIN
 
 Catch with non-default throw profile
-    -> CATCH_SPIN + THROW_ASSIST
+    -> CATCH_SPIN + ENCOUNTER
 
 UseBerry
-    -> THROW_ASSIST
+    -> ENCOUNTER
 
 DiscardItem
     -> DISCARD
@@ -642,8 +642,8 @@ Module control is idempotent.
 - A module starts shared observation only when it needs it.
 - Disabling one module does not disable another module.
 - The shared observer stops when no enabled module needs it.
-- `THROW_ASSIST` installs throw hooks at most once; later disable operations disarm the hook context instead of physically unhooking live code.
-- Re-enabling `THROW_ASSIST` re-arms the existing hooks and clears stale diagnostic events.
+- `ENCOUNTER` installs throw hooks at most once; later disable operations disarm the hook context instead of physically unhooking live code.
+- Re-enabling `ENCOUNTER` re-arms the existing hooks and clears stale diagnostic events.
 
 Keeping already-installed trampolines in place avoids unsafe live unhook/re-hook races while still making the feature module logically inactive.
 
@@ -682,15 +682,15 @@ Examples:
 ```text
 autoCatch=true, autoSpin=true, berry=NONE
     CATCH_SPIN   = ENABLED
-    THROW_ASSIST = DISABLED
+    ENCOUNTER = DISABLED
 
 then berry=GOLDEN_RAZZ
     CATCH_SPIN   = stays ENABLED
-    THROW_ASSIST = ENABLED
+    ENCOUNTER = ENABLED
 
 then autoDiscard=true
     DISCARD = UNAVAILABLE on the current build
-    CATCH_SPIN/THROW_ASSIST keep their own state
+    CATCH_SPIN/ENCOUNTER keep their own state
 ```
 
 ## Recommended CATCH_SPIN service structure
@@ -766,11 +766,11 @@ Before merge, validate the independent module behavior on the target rooted runt
 
 1. Launch the target app with automation disabled: modules register/load, host reaches `ATTACHED_IDLE`, and no module is active.
 2. Confirm the service receives one registration load/fail status per module for the runtime session.
-3. Enable only catch/spin: `CATCH_SPIN=ENABLED`, `THROW_ASSIST=DISABLED`.
+3. Enable only catch/spin: `CATCH_SPIN=ENABLED`, `ENCOUNTER=DISABLED`.
 4. Confirm nearby Pokémon and fort observations reach Kotlin while `CATCH_SPIN` is enabled.
 5. Confirm Kotlin selects a candidate and native does not autonomously choose a Pokémon.
 6. Open an encounter from a selected nearby candidate and confirm the service can perform a second policy check from `EncounterObservation` before sending Catch.
-7. Turn berry or non-default throw quality on: `THROW_ASSIST` becomes enabled without restarting `CATCH_SPIN`.
+7. Turn berry or non-default throw quality on: `ENCOUNTER` becomes enabled without restarting `CATCH_SPIN`.
 8. Turn throw assist off while catch/spin stays on: hooks remain safe pass-through and no throw-assist diagnostics are emitted.
 9. Enable discard: current build reports `DISCARD=UNAVAILABLE` while catch/spin continues.
 10. Enable transfer: current build reports `TRANSFER=UNAVAILABLE` while other modules continue.

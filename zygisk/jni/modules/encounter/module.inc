@@ -1,7 +1,7 @@
-class ThrowAssistModule final : public RuntimeFeatureModuleBase {
+class EncounterModule final : public RuntimeFeatureModuleBase {
 public:
-    Module id() const override { return Module::kThrowAssist; }
-    const char *name() const override { return "throw_assist"; }
+    Module id() const override { return Module::kEncounter; }
+    const char *name() const override { return "encounter"; }
 
     bool available(const RuntimeBinding &binding) const override {
         return binding.exact_build_verified && binding.encounter_read_verified &&
@@ -17,7 +17,7 @@ public:
         }
         if (binding.throw_hooks_installed) {
             // Keep trampolines installed once, but arm their module-owned event
-            // context only while THROW_ASSIST is enabled.
+            // context only while the encounter module is enabled.
             g_throw_hook_context = &context;
         }
         clear_throw_events(context);

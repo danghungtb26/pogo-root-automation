@@ -10,7 +10,7 @@ enum class RuntimeFeatureModule(val wireValue: Int) {
     CATCH_SPIN(1),
     DISCARD(2),
     TRANSFER(3),
-    THROW_ASSIST(4),
+    ENCOUNTER(4),
 }
 
 enum class RuntimeModuleControlAction(val wireValue: Int) {

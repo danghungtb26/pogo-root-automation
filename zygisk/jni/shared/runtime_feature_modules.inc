@@ -29,7 +29,7 @@ private:
 #include "../modules/catch_spin/module.inc"
 #include "../modules/discard/module.inc"
 #include "../modules/transfer/module.inc"
-#include "../modules/throw_assist/module.inc"
+#include "../modules/encounter/module.inc"
 
 constexpr size_t kMaxRuntimeFeatureModules = 8U;
 constexpr uint32_t kModuleLoadCompletedPhase = 3U;
@@ -89,7 +89,7 @@ RuntimeModuleRegistry g_runtime_module_registry;
 CatchSpinModule g_catch_spin_module;
 DiscardModule g_discard_module;
 TransferModule g_transfer_module;
-ThrowAssistModule g_throw_assist_module;
+EncounterModule g_encounter_module;
 bool g_registry_initialization_attempted = false;
 bool g_registry_initialized = false;
 
@@ -159,7 +159,7 @@ bool initialize_runtime_modules(int status_fd) {
     registered = register_and_publish(status_fd, g_catch_spin_module) && registered;
     registered = register_and_publish(status_fd, g_discard_module) && registered;
     registered = register_and_publish(status_fd, g_transfer_module) && registered;
-    registered = register_and_publish(status_fd, g_throw_assist_module) && registered;
+    registered = register_and_publish(status_fd, g_encounter_module) && registered;
 
     g_registry_initialized = registered && g_runtime_module_registry.size() == 4U;
     __android_log_print(
@@ -269,7 +269,7 @@ void disable_all_modules(ProbeContext &context) {
 
 bool gameplay_action_allowed(uint32_t action_tag, std::string *reason) {
     const bool catch_spin = module_enabled(Module::kCatchSpin);
-    const bool throw_assist = module_enabled(Module::kThrowAssist);
+    const bool encounter = module_enabled(Module::kEncounter);
     bool allowed = false;
     switch (action_tag) {
         case 2U:
@@ -281,7 +281,7 @@ bool gameplay_action_allowed(uint32_t action_tag, std::string *reason) {
             allowed = catch_spin;
             break;
         case 10U:
-            allowed = catch_spin && throw_assist;
+            allowed = catch_spin && encounter;
             break;
         case 5U:
             allowed = module_enabled(Module::kDiscard);
@@ -290,7 +290,7 @@ bool gameplay_action_allowed(uint32_t action_tag, std::string *reason) {
             allowed = module_enabled(Module::kTransfer);
             break;
         case 8U:
-            allowed = throw_assist;
+            allowed = encounter;
             break;
         default:
             return true;

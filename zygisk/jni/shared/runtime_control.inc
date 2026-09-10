@@ -221,7 +221,7 @@ bool handle_runtime_module_control(
             message.empty() ? "runtime feature module could not change state" : message.c_str()
         );
     }
-    if (request.module == pogo_runtime_module::Module::kThrowAssist) {
+    if (request.module == pogo_runtime_module::Module::kEncounter) {
         discard_pending_throw_events(context);
     }
     return send_runtime_control_completed(

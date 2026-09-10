@@ -8,7 +8,7 @@ binding_probe_thread
      -> register CATCH_SPIN
      -> register DISCARD
      -> register TRANSFER
-     -> register THROW_ASSIST
+     -> register ENCOUNTER
      -> send runtime-module-load:<wireId> result for each module
         -> root companion/broker
         -> RuntimeBridgeClient
