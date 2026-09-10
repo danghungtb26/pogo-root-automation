@@ -29,15 +29,24 @@ data class RuntimeControlSnapshot(
  * Service-owned control plane for the injected runtime host and its independent
  * native feature modules.
  *
- * Zygisk attachment is process-driven. START prepares verified bindings only;
- * module activation is synchronized separately from [HeadlessAutomationConfig].
+ * Zygisk attachment is process-driven. START starts a conservative native host;
+ * managed binding verification is scheduled after startup and module activation
+ * is synchronized separately from [HeadlessAutomationConfig].
  */
 class RuntimeLifecycleCoordinator(
     private val bridge: RuntimeBridgeClient,
 ) {
+    private companion object {
+        const val AUTO_DIAGNOSTIC_INITIAL_DELAY_MS = 3_000L
+        const val AUTO_DIAGNOSTIC_RETRY_DELAY_MS = 5_000L
+    }
+
     @Volatile private var state = RuntimeControlState.DETACHED
     @Volatile private var activeRuntimeSessionId: String? = null
+    @Volatile private var managedReadySessionId: String? = null
+    @Volatile private var managedReadinessBlockedBeforeMessageSeq: Long? = null
     @Volatile private var lastError: String? = null
+    private var nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
     private val modules = linkedMapOf<RuntimeFeatureModule, RuntimeFeatureModuleSnapshot>()
 
     val connected: Boolean
@@ -51,27 +60,55 @@ class RuntimeLifecycleCoordinator(
         if (sessionChanged) {
             resetModules()
             activeRuntimeSessionId = null
+            managedReadySessionId = null
+            managedReadinessBlockedBeforeMessageSeq = null
+            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.ATTACHED_IDLE
         }
 
         if (state != RuntimeControlState.RUNNING ||
             activeRuntimeSessionId != ready.runtimeSessionId) {
             state = RuntimeControlState.STARTING
+            managedReadinessBlockedBeforeMessageSeq = bridge.currentRuntimeReady()?.messageSeq
             bridge.startRuntime().getOrThrow()
             activeRuntimeSessionId = ready.runtimeSessionId
+            managedReadySessionId = null
+            nextAutomaticDiagnosticAtNanos = System.nanoTime() +
+                AUTO_DIAGNOSTIC_INITIAL_DELAY_MS * 1_000_000L
             state = RuntimeControlState.RUNNING
             lastError = null
             resetModules()
         }
 
-        syncModules(config)
-        bridge.currentRuntimeReady() ?: ready
+        var advertisedReady = bridge.currentRuntimeReady() ?: ready
+        if (!isManagedRuntimeReadyForSession(advertisedReady)) {
+            runAutomaticDiagnosticIfDue()
+            advertisedReady = bridge.currentRuntimeReady() ?: advertisedReady
+        }
+        val wasManagedReady = managedReadySessionId == advertisedReady.runtimeSessionId
+        val managedReady = isManagedRuntimeReadyForSession(advertisedReady)
+        if (managedReady) {
+            // Capability updates arrive asynchronously after DIAGNOSTIC. Once
+            // observed for this process session, they are the only readiness
+            // signal that permits module activation and structured automation.
+            managedReadySessionId = advertisedReady.runtimeSessionId
+        }
+        val effectiveReady = effectiveReady(advertisedReady)
+        syncModules(
+            config = config,
+            ready = effectiveReady,
+            forceUnavailableRetry = managedReady && !wasManagedReady,
+        )
+        effectiveReady
     }.onFailure(::recordFailure)
 
     @Synchronized
     fun ensureIdle(): Result<Unit> = runCatching {
         if (!bridge.connected) {
             activeRuntimeSessionId = null
+            managedReadySessionId = null
+            managedReadinessBlockedBeforeMessageSeq = null
+            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             lastError = null
             resetModules()
@@ -85,16 +122,30 @@ class RuntimeLifecycleCoordinator(
             bridge.stopRuntime().getOrThrow()
         }
         activeRuntimeSessionId = null
+        managedReadySessionId = null
+        managedReadinessBlockedBeforeMessageSeq = null
+        nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.ATTACHED_IDLE
         lastError = null
         resetModules()
     }.onFailure(::recordFailure)
 
     @Synchronized
-    fun runDiagnostic(): Result<Unit> = runCatching {
+    fun runDiagnostic(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
         bridge.connect().getOrThrow()
         bridge.requestRuntimeDiagnostic().getOrThrow()
-        if (state != RuntimeControlState.RUNNING && state != RuntimeControlState.ERROR) {
+        nextAutomaticDiagnosticAtNanos = System.nanoTime() +
+            AUTO_DIAGNOSTIC_RETRY_DELAY_MS * 1_000_000L
+        val advertisedReady = bridge.currentRuntimeReady()
+        if (advertisedReady != null && isManagedRuntimeReadyForSession(advertisedReady)) {
+            managedReadySessionId = advertisedReady.runtimeSessionId
+            syncModules(
+                config = config,
+                ready = advertisedReady,
+                forceUnavailableRetry = true,
+            )
+        }
+        if (state != RuntimeControlState.RUNNING) {
             state = RuntimeControlState.ATTACHED_IDLE
         }
         lastError = null
@@ -124,24 +175,38 @@ class RuntimeLifecycleCoordinator(
         runCatching { ensureIdle().getOrThrow() }
         bridge.disconnect()
         activeRuntimeSessionId = null
+        managedReadySessionId = null
+        managedReadinessBlockedBeforeMessageSeq = null
+        nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.DETACHED
         resetModules()
     }
 
-    private fun syncModules(config: HeadlessAutomationConfig) {
+    private fun syncModules(
+        config: HeadlessAutomationConfig,
+        ready: BridgeEvent.RuntimeReady,
+        forceUnavailableRetry: Boolean = false,
+    ) {
         val desiredModules = config.desiredRuntimeFeatureModules()
         RuntimeFeatureModule.entries.forEach { module ->
             val desired = module in desiredModules
             val current = modules[module]
 
             if (desired) {
-                if (current?.desired == true && current.state in setOf(
-                        RuntimeFeatureModuleState.ENABLED,
-                        RuntimeFeatureModuleState.UNAVAILABLE,
+                if (!isManagedRuntimeReadyForSession(ready)) {
+                    modules[module] = RuntimeFeatureModuleSnapshot(
+                        module = module,
+                        desired = true,
+                        state = RuntimeFeatureModuleState.UNAVAILABLE,
+                        lastError = "runtime managed diagnostic pending",
                     )
-                ) {
                     return@forEach
                 }
+                if (current?.desired == true &&
+                    (current.state == RuntimeFeatureModuleState.ENABLED ||
+                        (current.state == RuntimeFeatureModuleState.UNAVAILABLE &&
+                            !forceUnavailableRetry))
+                ) return@forEach
                 modules[module] = RuntimeFeatureModuleSnapshot(
                     module = module,
                     desired = true,
@@ -203,7 +268,43 @@ class RuntimeLifecycleCoordinator(
                         state = RuntimeFeatureModuleState.ERROR,
                         lastError = error.message ?: error::class.java.simpleName,
                     )
-                }
+            }
+        }
+    }
+
+    private fun effectiveReady(ready: BridgeEvent.RuntimeReady): BridgeEvent.RuntimeReady =
+        if (managedReadySessionId == ready.runtimeSessionId && isManagedRuntimeReadyForSession(ready)) {
+            ready
+        } else {
+            // Preserve identity/session metadata for diagnostics, but do not
+            // expose probe-only capabilities to the automation controller.
+            ready.copy(
+                strongIdentityVerified = false,
+                capabilities = emptySet(),
+            )
+        }
+
+    private fun isManagedRuntimeReady(ready: BridgeEvent.RuntimeReady): Boolean =
+        ready.strongIdentityVerified && ready.capabilities.isNotEmpty()
+
+    private fun isManagedRuntimeReadyForSession(ready: BridgeEvent.RuntimeReady): Boolean {
+        if (!isManagedRuntimeReady(ready)) return false
+        val blockedBefore = managedReadinessBlockedBeforeMessageSeq ?: return true
+        return ready.messageSeq > blockedBefore
+    }
+
+    private fun runAutomaticDiagnosticIfDue() {
+        if (System.nanoTime() < nextAutomaticDiagnosticAtNanos) return
+        nextAutomaticDiagnosticAtNanos = System.nanoTime() +
+            AUTO_DIAGNOSTIC_RETRY_DELAY_MS * 1_000_000L
+        val result = runCatching {
+            bridge.requestRuntimeDiagnostic().getOrThrow()
+        }
+        result.onSuccess {
+            lastError = null
+        }.onFailure { error ->
+            lastError = "runtime diagnostic pending: " +
+                (error.message ?: error::class.java.simpleName)
         }
     }
 
@@ -221,9 +322,15 @@ class RuntimeLifecycleCoordinator(
     private fun recordFailure(error: Throwable) {
         lastError = error.message ?: error::class.java.simpleName
         if (bridge.connected) {
+            managedReadySessionId = null
+            managedReadinessBlockedBeforeMessageSeq = null
+            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.ERROR
         } else {
             activeRuntimeSessionId = null
+            managedReadySessionId = null
+            managedReadinessBlockedBeforeMessageSeq = null
+            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             resetModules()
         }

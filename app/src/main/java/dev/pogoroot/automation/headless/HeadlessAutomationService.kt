@@ -68,7 +68,7 @@ class HeadlessAutomationService : Service() {
         apiServer = AutomationControlServer(
             configRepository = configRepository,
             engine = engine,
-            runtimeDiagnostic = runtimeCoordinator::runDiagnostic,
+            runtimeDiagnostic = { runtimeCoordinator.runDiagnostic(configRepository.read()) },
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(this)
 

@@ -21,10 +21,23 @@ The repository contains:
 ## Test emulator
 
 The active manual and harness test target is the BlueStacks instance named
-`BlueStacks Air 1`. Use its currently connected ADB serial, normally
-`127.0.0.1:5565`; do not assume the other `BlueStacks Air` instance or the
-Android Studio AVD is the test target. For commands that accept `ANDROID_SERIAL`,
-set it explicitly to `127.0.0.1:5565` after confirming with `adb devices -l`.
+`BlueStacks Air 1`. Do not assume the other `BlueStacks Air` instance or the
+Android Studio AVD is the test target. Use the repository scripts to select and
+validate the configured emulator target; do not inspect or select it with raw
+ADB commands.
+
+## Device and emulator command policy
+
+Use the existing `scripts/*.sh` entry point for each corresponding device or
+emulator operation, including reset/reconnect, build, upload, installation,
+diagnostics, smoke tests and log collection. Do not run equivalent ad hoc ADB
+commands directly.
+
+Do not run `adb kill-server`, `adb start-server`, `adb devices`, or
+`adb devices -l`. For complete logcat capture, use
+`./scripts/logcat-full.sh` (and its documented options) rather than invoking
+logcat directly. If an operation succeeds, do not read log files; inspect the
+relevant log file only when the operation fails.
 
 ## Reverse-engineered APK workflow
 
@@ -113,9 +126,9 @@ commands for those operations.
 
 ```bash
 ./scripts/build-magisk.sh
-ANDROID_SERIAL=127.0.0.1:5565 ./scripts/push-emulator.sh
-ANDROID_SERIAL=127.0.0.1:5565 ./scripts/install-magisk-module.sh
-ANDROID_SERIAL=127.0.0.1:5565 ./scripts/logcat-full.sh
+./scripts/push-emulator.sh
+./scripts/install-magisk-module.sh
+./scripts/logcat-full.sh
 ```
 
 User preference: do not create replacement scripts, temporary scripts,
@@ -172,9 +185,8 @@ fallbacks. If the runtime binding or camera state is unavailable, fail closed.
 - Keep every non-Markdown source file at or below 500 lines, regardless of
   language. Split cohesive responsibilities into smaller files and use the
   language's import/include mechanism when sharing code.
-- If ADB does not find the configured emulator, run `adb kill-server` followed
-  by `adb start-server`, reconnect the emulator, and check `adb devices` again
-  before continuing device tests.
+- Use the existing `scripts/*.sh` entry point for device/emulator operations;
+  do not recover manually with raw ADB commands.
 - Preserve capability checks, runtime identity checks, freshness and fail-closed
   behavior.
 - Keep game-build-specific code behind the adapter/native binding boundary.

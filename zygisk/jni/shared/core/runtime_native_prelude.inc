@@ -297,7 +297,7 @@ struct RuntimeBinding {
     const void *location_get_latitude = nullptr;
     const void *location_get_longitude = nullptr;
     bool location_read_verified = false;
-    // Map-query batch callback (Niantic.Platform.GameMapObject.Map.MapQueryManager
+    // Map-query batch callback (Niantic.Platform.GameMapObject.Map.S2CellManager
     // .OnMapQueryResponse) used as the mode-B dirty trigger. Resolved to a method
     // for inline hooking; see modules/catch_spin/map_hooks.inc.
     const void *map_query_on_response = nullptr;

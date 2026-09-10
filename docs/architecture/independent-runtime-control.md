@@ -370,7 +370,7 @@ Seams already in place (`refactor/independent-runtime-control`):
 
 Target (resolved from the full IL2CPP dump, build 0.427.0):
 
-- Class `Niantic.Platform.GameMapObject.Map.MapQueryManager`.
+- Class `Niantic.Platform.GameMapObject.Map.S2CellManager`.
 - Method `OnMapQueryResponse(int rpcId, byte[] response)` — RVA `0x9994F4C`
   (alternative: `ProcessCellsFromResponse(IEnumerable<MapS2Cell>)` RVA `0x9995900`).
 

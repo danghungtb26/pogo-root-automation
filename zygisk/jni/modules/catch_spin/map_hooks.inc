@@ -1,6 +1,6 @@
 // Mode B map-query batch-callback hook.
 //
-// Hooks Niantic.Platform.GameMapObject.Map.MapQueryManager.OnMapQueryResponse
+// Hooks Niantic.Platform.GameMapObject.Map.S2CellManager.OnMapQueryResponse
 // (int rpcId, byte[] response) so a server map update marks the observed world
 // dirty exactly once per batch, instead of the observer polling every tick. The
 // hook does the minimum (mark dirty, call original) and returns immediately.
@@ -77,7 +77,12 @@ bool install_runtime_map_query_hook(ProbeContext &context) {
     // (see the value logged by log_map_query_prologue above). Until then the
     // prologue memcmp in install_inline_hook fails and the hook safely refuses,
     // so the observer keeps running on the mode-C poll fallback.
-    const uint32_t on_map_query_response_prologue[4] = {0U, 0U, 0U, 0U};
+    const uint32_t on_map_query_response_prologue[4] = {
+        0xF81D0FFEU,
+        0xA90157F6U,
+        0xA9024FF4U,
+        0x90011695U,
+    };
     g_map_query_hook_context = &context;
     const bool installed = install_inline_hook(
         &g_map_query_hook,

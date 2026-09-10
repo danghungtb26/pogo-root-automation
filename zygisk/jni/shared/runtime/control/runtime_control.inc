@@ -64,32 +64,27 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
         );
     }
 
-    __android_log_print(ANDROID_LOG_INFO, kLogTag, "runtime host start requested");
-    const bool diagnostic_ready = run_managed_runtime_diagnostic(context);
-    if (!diagnostic_ready) {
-        return send_runtime_rejected(
-            context.fd,
-            request_id,
-            "runtime_not_ready",
-            "managed runtime is not ready for verified module activation"
-        );
-    }
-
+    // START is intentionally native-only. The probe can reach this path while
+    // il2cpp_init and Unity graphics/scene initialization are still in flight;
+    // managed discovery at that point can kill the target process. The
+    // controller issues DIAGNOSTIC after a short post-start settling period.
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "runtime host start requested; managed diagnostic deferred"
+    );
     discard_pending_throw_events(context);
-    const RuntimeBinding binding = runtime_binding_snapshot(context);
-    const bool capabilities_sent = send_runtime_capability_update(context.fd, binding);
     g_runtime_active.store(true);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "runtime host ready capabilities_sent=%d observer=%d",
-        capabilities_sent ? 1 : 0,
+        "runtime host ready; managed binding remains deferred observer=%d",
         context.observation_running.load() ? 1 : 0
     );
     return send_runtime_control_completed(
         context.fd,
         request_id,
-        "runtime host ready; feature modules remain independently disabled"
+        "runtime host ready; managed diagnostic is deferred"
     );
 }
 
@@ -114,6 +109,11 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
     // (e.g. a Zenject service not yet in the container at START) without a full
     // STOP/START, then re-advertises capabilities to reflect it.
     if (g_runtime_active.load() && pogo_runtime_module::any_enabled()) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime managed diagnostic skipped; active modules observing and binding stays frozen"
+        );
         return send_runtime_control_completed(
             context.fd,
             request_id,

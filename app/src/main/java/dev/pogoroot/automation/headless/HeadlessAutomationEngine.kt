@@ -87,18 +87,27 @@ class HeadlessAutomationEngine(
                 structuredController.stop()
             }
             runtimeCoordinator.ensureRunning(config)
-                .onSuccess {
-                    structuredController.tick(config)
-                        .onSuccess(::publishTick)
-                        .onFailure { error ->
-                            val runner = structuredController.snapshot()
-                            recordError(
-                                message = "runtime bridge: ${error.message ?: error::class.java.simpleName}",
-                                runtimeSessionId = runner.runtimeSessionId,
-                                runtimeSuspended = runner.suspended,
-                                observationSeq = runner.lastObservationSeq,
-                            )
-                        }
+                .onSuccess { ready ->
+                    if (!ready.strongIdentityVerified || ready.capabilities.isEmpty()) {
+                        // START is intentionally probe-only. Do not let the
+                        // structured adapter refresh or submit commands until
+                        // the delayed automatic (or explicit) DIAGNOSTIC
+                        // publishes verified capabilities for this session.
+                        structuredController.stop()
+                        publishRuntimeDiagnosticPending(ready.runtimeSessionId)
+                    } else {
+                        structuredController.tick(config)
+                            .onSuccess(::publishTick)
+                            .onFailure { error ->
+                                val runner = structuredController.snapshot()
+                                recordError(
+                                    message = "runtime bridge: ${error.message ?: error::class.java.simpleName}",
+                                    runtimeSessionId = runner.runtimeSessionId,
+                                    runtimeSuspended = runner.suspended,
+                                    observationSeq = runner.lastObservationSeq,
+                                )
+                            }
+                    }
                 }
                 .onFailure { error ->
                     recordError(
@@ -131,6 +140,28 @@ class HeadlessAutomationEngine(
                 observationSeq = null,
                 lastAction = "idle",
                 lastError = runtime.lastError,
+                updatedAtEpochMs = now(),
+            )
+        }
+    }
+
+    private fun publishRuntimeDiagnosticPending(runtimeSessionId: String?) {
+        val runtime = runtimeCoordinator.snapshot()
+        status.updateAndGet {
+            it.copy(
+                running = true,
+                enabled = true,
+                runtimeSessionId = runtimeSessionId,
+                runtimeControlState = runtime.state.name,
+                runtimeModules = runtime.moduleStates(),
+                runtimeStrongIdentityVerified = false,
+                runtimeCapabilities = emptySet(),
+                runtimeMutationPermissionGranted = false,
+                runtimeLifecycle = "WAITING_FOR_DIAGNOSTIC",
+                runtimeSuspended = false,
+                observationSeq = null,
+                lastAction = "runtime-started",
+                lastError = runtime.lastError ?: "runtime managed diagnostic pending",
                 updatedAtEpochMs = now(),
             )
         }

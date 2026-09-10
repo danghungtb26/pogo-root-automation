@@ -28,7 +28,7 @@ data class RuntimeFeatureModuleSnapshot(
  * It does not request or represent a guaranteed server-side capture result.
  */
 fun HeadlessAutomationConfig.desiredRuntimeFeatureModules(): Set<RuntimeFeatureModule> = buildSet {
-    if (autoCatch || autoSpin || autoEncounter || autoSnapshotDuringEncounter) {
+    if (mapTapWalkEnabled || autoCatch || autoSpin || autoEncounter || autoSnapshotDuringEncounter) {
         add(RuntimeFeatureModule.CATCH_SPIN)
     }
     if (autoDiscard) add(RuntimeFeatureModule.DISCARD)

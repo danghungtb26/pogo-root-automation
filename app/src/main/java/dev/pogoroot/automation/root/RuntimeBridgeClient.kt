@@ -113,9 +113,11 @@ class RuntimeBridgeClient(
         )
     }
 
-    /** Prepare verified native bindings. No feature module is enabled here. */
-    fun startRuntime(): Result<Unit> =
-        requestRuntimeControl(RuntimeControlAction.START).map { Unit }
+    /** Start the conservative native host. No feature module is enabled here. */
+    fun startRuntime(): Result<Unit> {
+        invalidateManagedReadiness()
+        return requestRuntimeControl(RuntimeControlAction.START).map { Unit }
+    }
 
     /** Disable all feature modules and leave the Zygisk process attachment idle. */
     fun stopRuntime(): Result<Unit> =
@@ -124,6 +126,20 @@ class RuntimeBridgeClient(
     /** Read-only runtime readiness/binding check; it does not enable modules. */
     fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
+
+    /**
+     * Drop capability state from a previous START/STOP cycle. The native host
+     * must publish a fresh capability update after the next explicit diagnostic.
+     */
+    fun invalidateManagedReadiness() {
+        runtimeReady = runtimeReady?.copy(
+            strongIdentityVerified = false,
+            capabilities = emptySet(),
+        )
+        for (event in events) {
+            if (event is BridgeEvent.RuntimeReady) events.remove(event)
+        }
+    }
 
     fun setModuleEnabled(module: RuntimeFeatureModule, enabled: Boolean): Result<Unit> =
         requestRuntimeModuleControl(
