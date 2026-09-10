@@ -78,7 +78,7 @@ void log_active_map_pokemon_objects(ProbeContext &context) {
     }
 }
 
-void diagnose_map_pokemon_instance(ProbeContext &context) {
+[[maybe_unused]] void diagnose_map_pokemon_instance(ProbeContext &context) {
     log_active_map_pokemon_objects(context);
     if (!ensure_main_thread_bridge(context)) return;
     void *map_pokemon = request_main_thread_object(

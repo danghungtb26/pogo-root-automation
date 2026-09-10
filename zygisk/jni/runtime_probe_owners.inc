@@ -16,7 +16,7 @@ bool is_runtime_owner_candidate(const char *field_name, const char *type_name) {
     return false;
 }
 
-void scan_runtime_static_owner_fields(
+[[maybe_unused]] void scan_runtime_static_owner_fields(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count
@@ -85,7 +85,7 @@ void scan_runtime_static_owner_fields(
     );
 }
 
-void scan_runtime_encounter_classes(
+[[maybe_unused]] void scan_runtime_encounter_classes(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count

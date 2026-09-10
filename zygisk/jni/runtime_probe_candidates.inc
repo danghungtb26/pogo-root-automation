@@ -33,7 +33,7 @@ static const char *const kMapContentHandlerMethods[] = {
     "get_MapEntityService", "get_MapPokemon", "get_NearbyPokemon",
 };
 
-void diagnose_map_runtime_classes(
+[[maybe_unused]] void diagnose_map_runtime_classes(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count
@@ -85,7 +85,7 @@ void diagnose_map_runtime_classes(
     }
 }
 
-void scan_runtime_map_class_names(
+[[maybe_unused]] void scan_runtime_map_class_names(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count

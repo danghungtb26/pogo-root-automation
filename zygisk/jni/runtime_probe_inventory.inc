@@ -1,4 +1,4 @@
-void diagnose_managed_runtime_candidates(
+[[maybe_unused]] void diagnose_managed_runtime_candidates(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count,

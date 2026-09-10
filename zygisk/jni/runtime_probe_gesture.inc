@@ -1,4 +1,4 @@
-void diagnose_tap_gesture_class(
+[[maybe_unused]] void diagnose_tap_gesture_class(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count

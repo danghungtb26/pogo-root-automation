@@ -1,4 +1,4 @@
-void discover_scene_runtime_owners(ProbeContext &context) {
+[[maybe_unused]] void discover_scene_runtime_owners(ProbeContext &context) {
     std::lock_guard<std::mutex> binding_lock(context.binding_mutex);
     RuntimeBinding &binding = context.binding;
     if (binding.map_entity_read_verified || !ensure_main_thread_bridge(context)) return;

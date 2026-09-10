@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(pogo_root_automation_zygisk LANGUAGES CXX)
 
+# Default to the vendored Zygisk API header (third_party/zygisk.hpp). Override
+# with -DZYGISK_API_DIR=<dir> to point at a different copy.
 if(NOT DEFINED ZYGISK_API_DIR)
-    message(FATAL_ERROR "Set -DZYGISK_API_DIR to the directory containing zygisk.hpp")
+    set(ZYGISK_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+endif()
+if(NOT EXISTS "${ZYGISK_API_DIR}/zygisk.hpp")
+    message(FATAL_ERROR "zygisk.hpp not found in ${ZYGISK_API_DIR}; set -DZYGISK_API_DIR")
 endif()
 
 add_library(pogo_root_automation SHARED main.cpp)
