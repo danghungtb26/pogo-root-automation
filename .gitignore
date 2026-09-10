@@ -9,5 +9,9 @@ local.properties
 zygisk/module/libs/
 zygisk/module/obj/
 /pogo-apkm/
-/reverse/
+/reverse/*
+!/reverse/pogo-0.427.0/
+/reverse/pogo-0.427.0/*
+!/reverse/pogo-0.427.0/DummyDll/
+!/reverse/pogo-0.427.0/DummyDll/**
 /tools/il2cppdumper/
