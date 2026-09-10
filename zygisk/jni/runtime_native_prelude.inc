@@ -307,6 +307,12 @@ struct RuntimeBinding {
     // and populates AutomationSnapshot.inventory for auto-discard / ball gating.
     const void *item_bag_get_item_count = nullptr;
     bool inventory_read_verified = false;
+    // Discard executor (IItemBag.RecycleItem(ItemData, int, ISet<Item>)). ItemData
+    // is a plain data class constructed by object_new + field writes. Execution is
+    // gated behind kDiscardExecutionEnabled until verified on device.
+    const void *item_bag_recycle_item = nullptr;
+    Il2CppClass *item_data_class = nullptr;
+    bool discard_verified = false;
 };
 
 enum class MainThreadTaskType : uint32_t {

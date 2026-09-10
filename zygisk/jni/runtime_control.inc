@@ -356,8 +356,19 @@ void runtime_command_channel_loop(ProbeContext &context) {
                 )) break;
             continue;
         }
-        // Discard and transfer have independent module control now, but remain
-        // fail-closed until verified native client-owned executors are added.
+        if (parse_runtime_discard_command(command, &action)) {
+            const RuntimeActionResult result = execute_runtime_discard(context, action);
+            if (!send_runtime_result(
+                    context.fd,
+                    action.command_id.c_str(),
+                    result.phase,
+                    result.error_code,
+                    result.message
+                )) break;
+            continue;
+        }
+        // Transfer has independent module control now, but remains fail-closed
+        // until a verified native client-owned executor is added.
         if (!send_runtime_rejected(
                 context.fd,
                 prefix.command_id.c_str(),

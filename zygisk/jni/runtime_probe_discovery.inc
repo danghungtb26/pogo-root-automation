@@ -341,6 +341,28 @@ void discover_runtime_owners(
                     "managed diagnostic: inventory read verified=%d item_bag=%p get_item_count=%p",
                     binding->inventory_read_verified ? 1 : 0, owner, get_item_count
                 );
+                // Discard executor binding (RecycleItem + the ItemData data class).
+                // ItemData is a nested type (ItemInventoryItemWidget.ItemData); the
+                // (namespace,name) lookup may miss it, in which case discard stays
+                // unavailable. Execution is gated behind kDiscardExecutionEnabled.
+                const void *recycle_item = api.class_get_method_from_name == nullptr
+                    ? nullptr
+                    : api.class_get_method_from_name(owner_class, "RecycleItem", 3);
+                Il2CppClass *item_data_class = find_runtime_class(
+                    api, assemblies, assembly_count,
+                    "Niantic.Holoholo.Inventory", "ItemData", nullptr
+                );
+                if (recycle_item != nullptr && item_data_class != nullptr) {
+                    binding->item_bag_recycle_item = recycle_item;
+                    binding->item_data_class = item_data_class;
+                    binding->discard_verified = true;
+                }
+                __android_log_print(
+                    binding->discard_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                    kLogTag,
+                    "managed diagnostic: discard binding verified=%d recycle=%p item_data=%p",
+                    binding->discard_verified ? 1 : 0, recycle_item, item_data_class
+                );
             }
         }
         if (strcmp(service.label, "IEncounterPokemon") == 0 && owner != nullptr &&

@@ -5,6 +5,8 @@ struct RuntimeActionCommand {
     uint32_t action_tag = 0U;
     std::string encounter_id;
     uint32_t berry_wire = 0U;
+    int32_t discard_item_id = 0;
+    int32_t discard_amount = 0;
     bool close_preview_after_caught = false;
     bool has_throw_profile = false;
     uint32_t throw_quality_wire = 0U;

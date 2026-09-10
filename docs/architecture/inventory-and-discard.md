@@ -8,10 +8,12 @@ discard; native executes the discard.
 
 As of this change the **observation half is implemented** (inventory is read and
 published, `READ_INVENTORY` is advertised, and `AutomationSnapshot.inventory` is
-populated). The **execution half is not** — there is no verified client-owned
-discard executor yet, so `DiscardModule` stays unavailable and `DiscardItem`
-actions are rejected. Wiring the read path also activates the out-of-balls →
-spin gate, which depends on `snapshot.inventory`.
+populated). The **execution half is scaffolded but disabled** — the executor,
+parser, binding, and dispatch exist, but `kDiscardExecutionEnabled = false` keeps
+`DiscardModule` unavailable and `DiscardItem` actions rejected until the
+`RecycleItem`/`ItemData` construction is verified on device. Wiring the read path
+also activates the out-of-balls → spin gate, which depends on
+`snapshot.inventory`.
 
 ## Observe: poll, not event-driven
 
@@ -85,21 +87,43 @@ itemCount x { u32 itemId, u32 count }
 
 Item names are not sent; the Kotlin mapper fills `#<id>` when blank.
 
-## Execute: not implemented (remaining work)
+## Execute: scaffolded but DISABLED (device verification required)
 
-`DiscardModule::available()` returns false and there is no discard executor.
-To complete it:
+The executor is written and wired but gated off, mirroring the encounter catch
+path (`kCatchExecutionEnabled = false`):
 
-- The clean path is a low-level `RecycleInventoryItem` RPC that takes
-  `(itemId, count)`. `IItemBag.RecycleItem(ItemInventoryItemWidget.ItemData,
-  int, ISet<Item>)` (RVA `0x81689A8`) also exists but is UI-coupled (needs a
-  widget `ItemData` and an `ISet<Item>`), so it is awkward to call from native.
-- Add the executor, gate `DiscardModule::available()` on a `discard_verified`
-  flag, and verify the recycle result on device.
+- `modules/discard/discard.inc` — `parse_runtime_discard_command` (action tag 5,
+  reads `itemId`/`amount` from the frame `BridgeActionCodec` already produces) and
+  `execute_runtime_discard`, dispatched in `runtime_control.inc`.
+- Binding: `IItemBag.RecycleItem(ItemData, int, ISet<Item>)` + the `ItemData`
+  class are resolved in `runtime_probe_discovery.inc`, setting `discard_verified`.
+- `recycle_runtime_item` constructs `ItemData` via `object_new` + field writes
+  (`item`@0x10, `count`@0x1C, `recyclable`@0x21 from the 0.427.0 dump) and calls
+  `RecycleItem(itemData, amount, null)`.
+- `kDiscardExecutionEnabled = false` — the executor returns `binding_unavailable`,
+  and `DiscardModule::available()` gates on this flag, so the module stays
+  unavailable and `DiscardItem` actions are cleanly rejected. No behavior change
+  until the flag is flipped.
 
-Until then, enabling `autoDiscard` produces `DiscardItem` plans that native
-rejects (the discard feature module cannot enable). The inventory read, discard
-planning, and the ball gate all work regardless.
+The **only** recycle entry point is `IItemBag.RecycleItem` — there is no
+lower-level `(itemId, count)` overload (the `RecycleInventoryItem` RPC, Method
+137, is only sent internally by `RecycleItem`). It is UI-coupled: `ItemData` is a
+nested `ItemInventoryItemWidget.ItemData` and the third argument is an
+`ISet<Item>`.
+
+To finish (on device):
+
+1. Confirm `find_runtime_class("Niantic.Holoholo.Inventory", "ItemData")` resolves
+   the nested type (nested-class lookup may need the enclosing type); the
+   diagnostic log line reports `discard binding verified`.
+2. Verify the `ItemData` field offsets and whether `RecycleItem` reads more than
+   `item`/`count`/`recyclable` (e.g. `type`), and whether the `ISet<Item>` may be
+   null (construct an empty `HashSet<Item>` if not).
+3. Confirm the recycle post-condition, then flip `kDiscardExecutionEnabled` to
+   `true`.
+
+Until then, inventory read, discard planning, and the ball gate all work; only
+the actual recycle is withheld.
 
 ## Verification status
 
