@@ -148,6 +148,23 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         spawn_point_id.c_str()
     );
 
+    // On-demand ball gate: DIRECT_MAP always throws a Poké Ball (ball_type = 1).
+    // Check the count right before the throw instead of continuously observing
+    // inventory. Zero -> do not waste the throw; report out-of-balls so the
+    // service can spin to farm balls. A negative count means the inventory
+    // binding is unavailable, so proceed rather than block.
+    constexpr int32_t kPokeBallItemId = 1;
+    const int32_t poke_ball_count = read_runtime_item_count(api, binding, kPokeBallItemId);
+    if (poke_ball_count == 0) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "direct map catch skipped id=%llu: out of Poké Balls",
+            static_cast<unsigned long long>(encounter_id)
+        );
+        return MainThreadActionOutcome::kOutOfBalls;
+    }
+
     // This is an ordinary Poke Ball intent. No hit, curve, excellent, or
     // guaranteed-catch flag is synthesized by the native bridge.
     DirectMapPokeballThrow throw_data;

@@ -22,18 +22,8 @@ data class AutomationPolicy(
      * the combined catch/close capability.
      */
     val autoCloseCatchPreview: Boolean = false,
-    /**
-     * Minimum number of catch balls (Poké/Great/Ultra; Master Ball excluded)
-     * required before a catch is attempted. When fewer balls remain, catching
-     * is suppressed and a spin is forced instead to farm more balls.
-     */
-    val minBallsToCatch: Int = 1,
     val timing: AutomationTimingPolicy = AutomationTimingPolicy(),
-) {
-    init {
-        require(minBallsToCatch >= 0) { "minBallsToCatch must be non-negative" }
-    }
-}
+)
 
 data class AutomationTimingPolicy(
     val spinSettleDelayMs: Long = DEFAULT_SPIN_SETTLE_DELAY_MS,

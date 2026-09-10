@@ -329,6 +329,7 @@ enum class MainThreadActionOutcome : uint32_t {
     kRejected = 0U,
     kInvoked = 1U,
     kIndeterminate = 2U,
+    kOutOfBalls = 3U,
 };
 
 struct MainThreadBridge {
@@ -413,6 +414,19 @@ RuntimeBinding runtime_binding_snapshot(ProbeContext &context) {
     std::lock_guard<std::mutex> lock(context.binding_mutex);
     return context.binding;
 }
+
+// Per-module observation (mode B: root orchestrates, modules trigger). The shared
+// observer thread builds this once per tick and passes it to each enabled module's
+// observe() hook, which reads its own concern and decides its own cadence.
+struct ObserverTickContext {
+    ProbeContext &context;
+    const RuntimeBinding &binding;
+    uint64_t tick = 0U;
+};
+
+namespace pogo_runtime_module {
+void observe_enabled_modules(ObserverTickContext &tick);
+}  // namespace pogo_runtime_module
 
 bool read_runtime_map_snapshot_on_main_thread(
     ProbeContext &context,

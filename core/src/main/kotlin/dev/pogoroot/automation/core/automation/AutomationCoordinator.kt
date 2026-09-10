@@ -15,6 +15,12 @@ data class AutomationSnapshot(
     val forts: FortSnapshot? = null,
     val inventory: InventorySnapshot? = null,
     val storage: PokemonStorageSnapshot? = null,
+    /**
+     * Set by the controller after a catch was rejected with `out_of_balls` by the
+     * native on-demand ball check. While set, catching is skipped and a spin is
+     * forced to farm balls. Cleared once a spin completes.
+     */
+    val outOfBalls: Boolean = false,
 )
 
 class AutomationCoordinator(
@@ -26,12 +32,11 @@ class AutomationCoordinator(
         snapshot: AutomationSnapshot,
         policy: AutomationPolicy,
     ): List<AutomationAction> {
-        // Only gate on ball count when inventory is actually known. An absent
-        // inventory snapshot must not be treated as "out of balls", otherwise
-        // catching would be suppressed whenever inventory is not wired in.
-        val outOfBalls = snapshot.inventory
-            ?.let { it.catchBallCount() < policy.minBallsToCatch }
-            ?: false
+        // The ball check is on-demand in the native catch executor (DIRECT_MAP
+        // throws a Poké Ball and reports out_of_balls when none remain). The
+        // controller reflects that back as snapshot.outOfBalls; while set, skip
+        // catching and force a spin to farm balls.
+        val outOfBalls = snapshot.outOfBalls
 
         if (snapshot.lifecycleState == GameLifecycleState.ENCOUNTER) {
             return planEncounter(snapshot.encounter, policy, outOfBalls)

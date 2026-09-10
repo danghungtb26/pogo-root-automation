@@ -72,6 +72,9 @@ class StructuredAutomationController(
     private var processedObservationSeq = 0L
     private var lastAction: String? = null
     private var lastError: String? = null
+    // Set when the native catch executor reports out_of_balls; drives the
+    // coordinator to skip catching and force a spin. Cleared once a spin runs.
+    private var outOfBalls = false
     private var latestPlayerPosition: GeoPoint? = null
     private val recordedGameActionCommands = mutableSetOf<String>()
     private val catchLabelsByCommand = mutableMapOf<String, String>()
@@ -276,6 +279,7 @@ class StructuredAutomationController(
             forts = forts,
             inventory = inventory,
             storage = storage,
+            outOfBalls = outOfBalls,
         )
     }
 
@@ -310,6 +314,13 @@ class StructuredAutomationController(
         }
         if (resultStatus.isSuccess && phase.isTerminal) {
             lastAction = request.action::class.simpleName
+        }
+        // Track the native on-demand ball check: a catch rejected with
+        // out_of_balls forces the next cycle to spin; a completed spin clears it.
+        if (result.errorCode == "out_of_balls") {
+            outOfBalls = true
+        } else if (request.action is AutomationAction.Spin && phase.isTerminal) {
+            outOfBalls = false
         }
         if (resultStatus.isSuccess && isAuthoritativeCatchResult(request, result, phase)) {
             publishCatchOutcome(request, result)

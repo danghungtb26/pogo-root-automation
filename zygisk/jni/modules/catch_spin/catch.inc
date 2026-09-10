@@ -126,6 +126,9 @@ RuntimeActionResult execute_runtime_catch(
             direct_result.phase = kCommandPhaseIndeterminate;
             direct_result.error_code = "invoke_outcome_indeterminate";
             direct_result.message = "MapPokemon.TryCapture may have run but the main-thread result was lost";
+        } else if (outcome == MainThreadActionOutcome::kOutOfBalls) {
+            direct_result.error_code = "out_of_balls";
+            direct_result.message = "no Poké Balls remain; catch skipped so the service can spin";
         } else {
             direct_result.error_code = "catch_target_unavailable";
             direct_result.message = "the requested map Pokémon is no longer available";

@@ -14,6 +14,10 @@ public:
     virtual bool available(const RuntimeBinding &binding) const = 0;
     virtual bool on_enable(ProbeContext &) { return true; }
     virtual void on_disable(ProbeContext &) {}
+    // Called each observer tick while this module is enabled, on the observer's
+    // attached il2cpp thread. Each module reads its own concern and decides its
+    // own cadence via ObserverTickContext::tick. Default: nothing to observe.
+    virtual void observe(ObserverTickContext &) {}
 
     bool enabled() const { return enabled_.load(); }
     void set_enabled(bool value) { enabled_.store(value); }
@@ -64,6 +68,13 @@ public:
             if (feature == nullptr || !feature->enabled()) continue;
             feature->set_enabled(false);
             feature->on_disable(context);
+        }
+    }
+
+    void observe_enabled(ObserverTickContext &tick) {
+        for (size_t index = 0U; index < count_; ++index) {
+            RuntimeFeatureModuleBase *feature = modules_[index];
+            if (feature != nullptr && feature->enabled()) feature->observe(tick);
         }
     }
 
@@ -133,6 +144,12 @@ bool register_and_publish(int fd, RuntimeFeatureModuleBase &module) {
     return loaded;
 }
 }  // namespace
+
+// Named-namespace entry point (declared in the prelude) so the shared observer
+// thread can dispatch a tick to every enabled module's observe() hook.
+void observe_enabled_modules(ObserverTickContext &tick) {
+    g_runtime_module_registry.observe_enabled(tick);
+}
 
 bool initialize_runtime_modules(int status_fd) {
     if (g_registry_initialization_attempted) return g_registry_initialized;

@@ -342,6 +342,19 @@ Design intent and rationale:
   changes when the player moves, with no map-change signal, so player location
   (`ILocationProvider`) is observed/published independently of `world_dirty`.
 
+### Per-module observers
+
+The observer thread orchestrates; modules observe their own concern. Each tick it
+builds an `ObserverTickContext {context, binding, tick}` and calls
+`pogo_runtime_module::observe_enabled_modules`, which dispatches to every enabled
+module's `observe(ObserverTickContext&)` hook on the observer's attached il2cpp
+thread. Each module self-gates on its own binding and decides its own cadence via
+`tick`. Root keeps shared/coupled concerns (world snapshot, encounter, lifecycle,
+throw-event drain); genuinely private observations live in a module:
+`DiscardModule::observe()` reads inventory. Build: the Zygisk API header is
+vendored at `zygisk/jni/third_party/zygisk.hpp` and is the CMake default, so
+`cmake -S zygisk/jni -B <dir> -DCMAKE_TOOLCHAIN_FILE=<ndk>/build/cmake/android.toolchain.cmake -DANDROID_ABI=arm64-v8a` builds without extra flags.
+
 Seams already in place (`refactor/independent-runtime-control`):
 
 | Seam | Location | State |

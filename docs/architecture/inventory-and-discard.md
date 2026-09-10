@@ -15,7 +15,26 @@ parser, binding, and dispatch exist, but `kDiscardExecutionEnabled = false` keep
 also activates the out-of-balls → spin gate, which depends on
 `snapshot.inventory`.
 
-## Observe: poll, not event-driven
+## Ball check is on-demand, not observed
+
+The catch-vs-spin ball decision does **not** use the inventory observation. The
+DIRECT_MAP catch always throws a Poké Ball, so the native catch executor reads
+`IItemBag.GetItemCount(Poké Ball)` **right before the throw**
+(`direct_catch_runtime_on_main_thread`); zero → it skips the throw and returns
+`MainThreadActionOutcome::kOutOfBalls` → result `out_of_balls`. The controller
+sets `AutomationSnapshot.outOfBalls`, and the coordinator then skips catching and
+forces a spin to farm balls (cleared once a spin completes). This keeps inventory
+observation out of the ball path entirely.
+
+## Observe: poll, not event-driven, and owned by the discard module
+
+Inventory observation now has a single consumer — discard planning — so it is a
+per-module observer: `DiscardModule::observe(ObserverTickContext&)` reads
+inventory at its own low cadence (~30 s) on the shared observer's attached
+thread. The root observer thread only dispatches ticks to enabled modules'
+`observe()` hooks; it does not read inventory itself. `DiscardModule::available()`
+is gated on `inventory_read_verified` so enabling it turns inventory observation
+on (discard execution stays gated separately by `kDiscardExecutionEnabled`).
 
 Inventory is **polled at a low cadence**, not driven by an item-added event.
 

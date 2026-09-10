@@ -82,6 +82,31 @@ bool read_runtime_player_position(
         *longitude >= -180.0 && *longitude <= 180.0;
 }
 
+// Reads the count of a single item via IItemBag.GetItemCount(Item). Returns the
+// count, or -1 when the inventory binding is unavailable or the read fails (so
+// callers can distinguish "zero" from "unknown").
+int32_t read_runtime_item_count(
+    const Il2CppApi &api,
+    const RuntimeBinding &binding,
+    int32_t item_id
+) {
+    if (!binding.inventory_read_verified || binding.item_bag == nullptr ||
+        binding.item_bag_get_item_count == nullptr || api.runtime_invoke == nullptr ||
+        api.object_unbox == nullptr) return -1;
+    int32_t item_arg = item_id;
+    void *args[] = {&item_arg};
+    void *exception = nullptr;
+    void *boxed = api.runtime_invoke(
+        binding.item_bag_get_item_count, binding.item_bag, args, &exception
+    );
+    if (exception != nullptr || !is_probable_managed_pointer(boxed)) return -1;
+    void *unboxed = api.object_unbox(boxed);
+    if (!is_probable_managed_pointer(unboxed)) return -1;
+    int32_t count = 0;
+    memcpy(&count, unboxed, sizeof(count));
+    return count < 0 ? -1 : count;
+}
+
 // Reads item counts via IItemBag.GetItemCount(Item) over a curated set of
 // commonly-discardable item ids. ItemBag is a data service (not a Unity
 // MonoBehaviour), so this is invoked from the observer's attached il2cpp thread.
@@ -103,17 +128,7 @@ bool read_runtime_inventory(
     observation->items.clear();
     int64_t total = 0;
     for (int32_t item_id : kInventoryItemIds) {
-        int32_t item_arg = item_id;
-        void *args[] = {&item_arg};
-        void *exception = nullptr;
-        void *boxed = api.runtime_invoke(
-            binding.item_bag_get_item_count, binding.item_bag, args, &exception
-        );
-        if (exception != nullptr || !is_probable_managed_pointer(boxed)) continue;
-        void *unboxed = api.object_unbox(boxed);
-        if (!is_probable_managed_pointer(unboxed)) continue;
-        int32_t count = 0;
-        memcpy(&count, unboxed, sizeof(count));
+        const int32_t count = read_runtime_item_count(api, binding, item_id);
         if (count <= 0) continue;
         observation->items.push_back({item_id, count});
         total += count;

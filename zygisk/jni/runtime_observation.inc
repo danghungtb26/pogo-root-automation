@@ -193,7 +193,6 @@ void *runtime_observation_thread(void *opaque_context) {
     // dirty signal once the hook is driving updates.
     constexpr uint32_t kFallbackPollTicks = 2U;   // ~200 ms
     constexpr uint32_t kReconcileTicks = 300U;    // ~30 s
-    constexpr uint32_t kInventoryTicks = 300U;    // ~30 s (discard is maintenance)
 
     bool was_encounter = false;
     bool sent_initial_state = false;
@@ -201,7 +200,7 @@ void *runtime_observation_thread(void *opaque_context) {
     uint32_t lifecycle_heartbeat_ticks = 0U;
     uint32_t nearby_ticks = 0U;
     uint32_t reconcile_ticks = 0U;
-    uint32_t inventory_ticks = 0U;
+    uint64_t observer_tick = 0U;
     uint32_t encounter_owner_refresh_ticks = 0U;
     while (context->observation_running.load() && kill(getpid(), 0) == 0) {
         if (!send_pending_runtime_throw_events(*context)) break;
@@ -305,27 +304,21 @@ void *runtime_observation_thread(void *opaque_context) {
             if (left_encounter) context->active_encounter_id.store(0U);
             sent_initial_state = true;
         }
-        // Inventory (low cadence). ItemBag is a data service, so read it from an
-        // attached il2cpp thread like the encounter read rather than the Unity
-        // main-thread bridge. Discard is maintenance, so ~30 s polling is enough.
-        if (binding.inventory_read_verified && inventory_ticks >= kInventoryTicks &&
+        // Per-module observation (mode B: root orchestrates, modules trigger).
+        // Each enabled module observes its own concern (e.g. discard -> inventory)
+        // on an attached il2cpp thread; the root owns thread attach + cadence base.
+        if (context->il2cpp_api_ready &&
             api.domain_get != nullptr && api.thread_attach != nullptr &&
             api.thread_detach != nullptr) {
             Il2CppDomain *domain = api.domain_get();
             Il2CppThread *thread = domain == nullptr ? nullptr : api.thread_attach(domain);
             if (thread != nullptr) {
-                pogo_runtime::RuntimeInventoryObservation inventory_observation;
-                const bool read_ok = read_runtime_inventory(
-                    api, binding, &inventory_observation
-                );
+                ObserverTickContext octx{*context, binding, observer_tick};
+                pogo_runtime_module::observe_enabled_modules(octx);
                 api.thread_detach(thread);
-                if (read_ok && !send_runtime_inventory_payload(*context, inventory_observation)) {
-                    break;
-                }
             }
-            inventory_ticks = 0U;
         }
-        ++inventory_ticks;
+        ++observer_tick;
         if (!send_pending_runtime_throw_events(*context)) break;
         usleep(100000U);
     }
