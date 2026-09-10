@@ -235,6 +235,30 @@ bool send_runtime_forts_payload(
     return sent;
 }
 
+bool send_runtime_inventory_payload(
+    ProbeContext &context,
+    const pogo_runtime::RuntimeInventoryObservation &observation
+) {
+    std::vector<uint8_t> envelope;
+    if (!pogo_runtime::encode_runtime_inventory_observation(
+            observation,
+            static_cast<uint64_t>(now_epoch_millis()),
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            &envelope
+        )) return false;
+    const bool sent = send_internal_message(
+        context.fd, pogo_runtime::kRuntimeObservationMagic, envelope
+    );
+    __android_log_print(
+        sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "runtime observation inventory items=%zu sent=%d",
+        observation.items.size(),
+        sent ? 1 : 0
+    );
+    return sent;
+}
+
 bool send_runtime_lifecycle(
     ProbeContext &context,
     uint32_t lifecycle_wire
@@ -319,6 +343,7 @@ void *runtime_observation_thread(void *opaque_context) {
     // dirty signal once the hook is driving updates.
     constexpr uint32_t kFallbackPollTicks = 2U;   // ~200 ms
     constexpr uint32_t kReconcileTicks = 300U;    // ~30 s
+    constexpr uint32_t kInventoryTicks = 300U;    // ~30 s (discard is maintenance)
 
     bool was_encounter = false;
     bool sent_initial_state = false;
@@ -326,6 +351,7 @@ void *runtime_observation_thread(void *opaque_context) {
     uint32_t lifecycle_heartbeat_ticks = 0U;
     uint32_t nearby_ticks = 0U;
     uint32_t reconcile_ticks = 0U;
+    uint32_t inventory_ticks = 0U;
     uint32_t encounter_owner_refresh_ticks = 0U;
     while (context->observation_running.load() && kill(getpid(), 0) == 0) {
         if (!send_pending_runtime_throw_events(*context)) break;
@@ -429,6 +455,27 @@ void *runtime_observation_thread(void *opaque_context) {
             if (left_encounter) context->active_encounter_id.store(0U);
             sent_initial_state = true;
         }
+        // Inventory (low cadence). ItemBag is a data service, so read it from an
+        // attached il2cpp thread like the encounter read rather than the Unity
+        // main-thread bridge. Discard is maintenance, so ~30 s polling is enough.
+        if (binding.inventory_read_verified && inventory_ticks >= kInventoryTicks &&
+            api.domain_get != nullptr && api.thread_attach != nullptr &&
+            api.thread_detach != nullptr) {
+            Il2CppDomain *domain = api.domain_get();
+            Il2CppThread *thread = domain == nullptr ? nullptr : api.thread_attach(domain);
+            if (thread != nullptr) {
+                pogo_runtime::RuntimeInventoryObservation inventory_observation;
+                const bool read_ok = read_runtime_inventory(
+                    api, binding, &inventory_observation
+                );
+                api.thread_detach(thread);
+                if (read_ok && !send_runtime_inventory_payload(*context, inventory_observation)) {
+                    break;
+                }
+            }
+            inventory_ticks = 0U;
+        }
+        ++inventory_ticks;
         if (!send_pending_runtime_throw_events(*context)) break;
         usleep(100000U);
     }

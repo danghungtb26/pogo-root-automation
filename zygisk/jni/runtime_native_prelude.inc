@@ -302,6 +302,11 @@ struct RuntimeBinding {
     // for inline hooking; see modules/catch_spin/map_hooks.inc.
     const void *map_query_on_response = nullptr;
     bool map_query_hook_binding_verified = false;
+    // Inventory read (Niantic.Holoholo.IItemBag -> ItemBagImpl.GetItemCount(Item)).
+    // item_bag is resolved in the IItemBag service block. Enables READ_INVENTORY
+    // and populates AutomationSnapshot.inventory for auto-discard / ball gating.
+    const void *item_bag_get_item_count = nullptr;
+    bool inventory_read_verified = false;
 };
 
 enum class MainThreadTaskType : uint32_t {

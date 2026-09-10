@@ -82,6 +82,50 @@ bool read_runtime_player_position(
         *longitude >= -180.0 && *longitude <= 180.0;
 }
 
+// Reads item counts via IItemBag.GetItemCount(Item) over a curated set of
+// commonly-discardable item ids. ItemBag is a data service (not a Unity
+// MonoBehaviour), so this is invoked from the observer's attached il2cpp thread.
+// A full enumeration would use NianticInventoryCache.GetCurrentItems instead.
+bool read_runtime_inventory(
+    const Il2CppApi &api,
+    const RuntimeBinding &binding,
+    pogo_runtime::RuntimeInventoryObservation *observation
+) {
+    if (observation == nullptr || !binding.inventory_read_verified ||
+        binding.item_bag == nullptr || binding.item_bag_get_item_count == nullptr ||
+        api.runtime_invoke == nullptr || api.object_unbox == nullptr) return false;
+    static const int32_t kInventoryItemIds[] = {
+        1, 2, 3, 4,               // Poké / Great / Ultra / Master Ball
+        101, 102, 103, 104,       // Potion / Super / Hyper / Max Potion
+        201, 202,                 // Revive / Max Revive
+        701, 703, 705, 706, 708,  // Razz / Nanab / Pinap / Golden Razz / Silver Pinap
+    };
+    observation->items.clear();
+    int64_t total = 0;
+    for (int32_t item_id : kInventoryItemIds) {
+        int32_t item_arg = item_id;
+        void *args[] = {&item_arg};
+        void *exception = nullptr;
+        void *boxed = api.runtime_invoke(
+            binding.item_bag_get_item_count, binding.item_bag, args, &exception
+        );
+        if (exception != nullptr || !is_probable_managed_pointer(boxed)) continue;
+        void *unboxed = api.object_unbox(boxed);
+        if (!is_probable_managed_pointer(unboxed)) continue;
+        int32_t count = 0;
+        memcpy(&count, unboxed, sizeof(count));
+        if (count <= 0) continue;
+        observation->items.push_back({item_id, count});
+        total += count;
+    }
+    // The bag capacity is not read yet; report used==capacity==sum so the Kotlin
+    // mapper's used<=capacity invariant holds. Discard uses per-item limits, not
+    // capacity, so this does not affect the discard decision.
+    observation->used_slots = static_cast<int32_t>(total);
+    observation->capacity = static_cast<int32_t>(total);
+    return true;
+}
+
 bool read_runtime_map_pokestop(
     const Il2CppApi &api,
     const RuntimeBinding &binding,

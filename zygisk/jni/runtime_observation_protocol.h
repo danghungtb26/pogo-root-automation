@@ -21,6 +21,9 @@ constexpr uint32_t kRuntimeFortsPayloadMagic = 0x504F4746U;  // POGF
 /** Structured IL2CPP observation; distinct from raw EncounterOutProto v1. */
 constexpr uint32_t kRuntimeEncounterPayloadVersion = 2U;
 constexpr uint32_t kRuntimeEncounterPayloadMagic = 0x504F4745U;  // POGE
+constexpr uint32_t kInventoryObservationType = 5U;
+constexpr uint32_t kRuntimeInventoryPayloadVersion = 1U;
+constexpr uint32_t kRuntimeInventoryPayloadMagic = 0x504F4756U;  // POGV
 constexpr uint32_t kMapTargetObservationType = 7U;
 constexpr uint32_t kMapTargetPayloadVersion = 1U;
 constexpr uint32_t kThrowDiagnosticObservationType = 8U;
@@ -110,6 +113,17 @@ struct RuntimeFortObservation {
 
 struct RuntimeFortsObservation {
     std::vector<RuntimeFortObservation> forts;
+};
+
+struct RuntimeInventoryItemObservation {
+    int32_t item_id = 0;
+    int32_t count = 0;
+};
+
+struct RuntimeInventoryObservation {
+    std::vector<RuntimeInventoryItemObservation> items;
+    int32_t used_slots = 0;
+    int32_t capacity = 0;
 };
 
 inline void append_u32(std::vector<uint8_t> *output, uint32_t value) {
@@ -291,6 +305,45 @@ inline bool encode_runtime_forts_observation(
     append_u32(envelope, kRuntimeObservationEnvelopeVersion);
     append_u32(envelope, kFortsObservationType);
     append_u32(envelope, kRuntimeFortsPayloadVersion);
+    append_u32(envelope, static_cast<uint32_t>(payload.size()));
+    envelope->insert(envelope->end(), payload.begin(), payload.end());
+    append_u64(envelope, observed_at_epoch_ms);
+    append_u64(envelope, observed_at_elapsed_ns);
+    return true;
+}
+
+inline bool encode_runtime_inventory_payload(
+    const RuntimeInventoryObservation &value,
+    std::vector<uint8_t> *payload
+) {
+    if (payload == nullptr || value.used_slots < 0 || value.capacity < 0 ||
+        value.used_slots > value.capacity || value.items.size() > 4096U) return false;
+    payload->clear();
+    append_u32(payload, kRuntimeInventoryPayloadMagic);
+    append_u32(payload, static_cast<uint32_t>(value.used_slots));
+    append_u32(payload, static_cast<uint32_t>(value.capacity));
+    append_u32(payload, static_cast<uint32_t>(value.items.size()));
+    for (const RuntimeInventoryItemObservation &item : value.items) {
+        if (item.item_id <= 0 || item.count < 0) return false;
+        append_u32(payload, static_cast<uint32_t>(item.item_id));
+        append_u32(payload, static_cast<uint32_t>(item.count));
+    }
+    return true;
+}
+
+inline bool encode_runtime_inventory_observation(
+    const RuntimeInventoryObservation &value,
+    uint64_t observed_at_epoch_ms,
+    uint64_t observed_at_elapsed_ns,
+    std::vector<uint8_t> *envelope
+) {
+    if (envelope == nullptr) return false;
+    std::vector<uint8_t> payload;
+    if (!encode_runtime_inventory_payload(value, &payload)) return false;
+    envelope->clear();
+    append_u32(envelope, kRuntimeObservationEnvelopeVersion);
+    append_u32(envelope, kInventoryObservationType);
+    append_u32(envelope, kRuntimeInventoryPayloadVersion);
     append_u32(envelope, static_cast<uint32_t>(payload.size()));
     envelope->insert(envelope->end(), payload.begin(), payload.end());
     append_u64(envelope, observed_at_epoch_ms);

@@ -317,11 +317,30 @@ void discover_runtime_owners(
                 "Holoholo.Rpc.Item",
                 "System.UInt64"
             );
-            if (owner_class_name != nullptr && strcmp(owner_class_name, "ItemBagImpl") == 0 &&
-                use_item_method != nullptr) {
+            const bool is_item_bag_impl = owner_class_name != nullptr &&
+                strcmp(owner_class_name, "ItemBagImpl") == 0;
+            if (is_item_bag_impl && use_item_method != nullptr) {
                 binding->item_bag = owner;
                 binding->use_item_on_pokemon = use_item_method;
                 binding->use_berry_verified = true;
+            }
+            if (is_item_bag_impl) {
+                // Inventory read: GetItemCount(Holoholo.Rpc.Item) -> int. Ensure
+                // item_bag is set even when the berry path is unavailable.
+                const void *get_item_count = find_runtime_method_with_parameter(
+                    api, owner_class, "GetItemCount", "Holoholo.Rpc.Item"
+                );
+                if (get_item_count != nullptr) {
+                    binding->item_bag = owner;
+                    binding->item_bag_get_item_count = get_item_count;
+                    binding->inventory_read_verified = true;
+                }
+                __android_log_print(
+                    binding->inventory_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                    kLogTag,
+                    "managed diagnostic: inventory read verified=%d item_bag=%p get_item_count=%p",
+                    binding->inventory_read_verified ? 1 : 0, owner, get_item_count
+                );
             }
         }
         if (strcmp(service.label, "IEncounterPokemon") == 0 && owner != nullptr &&

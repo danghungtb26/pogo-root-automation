@@ -8,6 +8,7 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
     }
     if (binding.map_entity_read_verified) capabilities.emplace_back("READ_NEARBY");
     if (binding.forts_read_verified) capabilities.emplace_back("READ_FORTS");
+    if (binding.inventory_read_verified) capabilities.emplace_back("READ_INVENTORY");
     if (kOpenEncounterExecutionEnabled && binding.dynamic_tappables_service != nullptr &&
         binding.dynamic_tappables_tap != nullptr) {
         capabilities.emplace_back("OPEN_ENCOUNTER");
