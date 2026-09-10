@@ -1,4 +1,4 @@
-constexpr bool kCatchExecutionEnabled = false;
+constexpr bool kCatchExecutionEnabled = true;
 constexpr bool kDirectCatchExecutionEnabled = true;
 
 bool parse_runtime_catch_command(

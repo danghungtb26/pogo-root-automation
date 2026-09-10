@@ -11,7 +11,7 @@
 // binding_unavailable rejection. The binding (recycle method + ItemData class) is
 // still resolved so the diagnostic log shows whether the build is wireable.
 
-constexpr bool kDiscardExecutionEnabled = false;
+constexpr bool kDiscardExecutionEnabled = true;
 
 // Verified ItemData field offsets (from the 0.427.0 dump):
 // item @0x10 (Item, int32), count @0x1C (int32), recyclable @0x21 (bool).

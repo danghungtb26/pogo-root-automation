@@ -106,13 +106,18 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
 }
 
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id) {
-    // Do not rediscover bindings while any feature module may be observing the
-    // runtime. START already performs this bounded readiness/binding pass.
-    if (g_runtime_active.load()) {
+    // Re-running discovery rebuilds RuntimeBinding and invokes il2cpp on this
+    // thread. It is only safe when no feature module is observing (the observer
+    // touches il2cpp on its own thread and holds resolved owner pointers). While
+    // a module is enabled the start-time binding stays frozen; otherwise a
+    // DIAGNOSTIC re-probe lets a client pick up a binding that resolved late
+    // (e.g. a Zenject service not yet in the container at START) without a full
+    // STOP/START, then re-advertises capabilities to reflect it.
+    if (g_runtime_active.load() && pogo_runtime_module::any_enabled()) {
         return send_runtime_control_completed(
             context.fd,
             request_id,
-            "runtime host is already ready; start-time diagnostic is current"
+            "runtime host is ready with modules observing; binding stays frozen"
         );
     }
     const bool ready = run_managed_runtime_diagnostic(context);
@@ -124,10 +129,12 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
             "managed runtime diagnostic could not verify the initialized runtime"
         );
     }
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    send_runtime_capability_update(context.fd, binding);
     return send_runtime_control_completed(
         context.fd,
         request_id,
-        "managed runtime diagnostic completed without activating feature modules"
+        "managed runtime diagnostic completed; capabilities refreshed"
     );
 }
 

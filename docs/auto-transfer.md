@@ -132,6 +132,32 @@ Từ struct `Il2CppApi` có sẵn — không phải app method của game:
 
 Khi hai việc trên xong, toàn bộ pipeline (Phase 2 đã sẵn sàng) tự sáng lên.
 
+### Late binding & re-probe an toàn
+
+`*_verified` được discovery set **một lần** lúc START rồi đóng băng (re-discover bị từ
+chối khi có module đang observe, vì observer cũng gọi il2cpp trên thread khác). Nếu một
+service (vd `PokemonBagImpl`) chưa có trong Zenject container tại thời điểm START thì
+`transfer_verified=false` và **không tự sửa** giữa session.
+
+Cơ chế bù (chỉ **thủ công**, không auto — để START không tự chạy diagnostic gây pause):
+
+- **Native** (`runtime_control.inc`, `run_runtime_control_diagnostic`): action `DIAGNOSTIC`
+  cho **re-run discovery khi `!any_enabled()`** (observer đã dừng → không tranh chấp),
+  rồi `send_runtime_capability_update` để advertise lại. Khi đang có module observe thì
+  vẫn giữ binding đóng băng (trả "binding stays frozen"). Chỉ chạy khi có lệnh `DIAGNOSTIC`.
+- **Client**: `DIAGNOSTIC` chỉ được kích qua API thủ công
+  (`RuntimeLifecycleCoordinator.runDiagnostic` → `AutomationControlServer`). **Không** có
+  auto re-probe trong `syncModules`/`ensureRunning`: module vẫn auto-attach bình thường,
+  nhưng START/sync không tự bắn diagnostic.
+
+Vì sao không auto: `run_managed_runtime_diagnostic` gọi nhiều managed reflection + Zenject
+`Resolve` từ thread injected, contend GC/domain lock với main thread → game có thể khựng.
+Nên diagnostic chỉ chạy khi người dùng chủ động gọi.
+
+Giới hạn cố hữu: re-probe chỉ chạy khi **chưa có module nào observe**. Nếu binding cần
+verify muộn *trong khi* các module khác đang chạy, phải **STOP → START** (đã hỗ trợ qua
+`ensureIdle()`+`ensureRunning()`) để probe lại toàn bộ.
+
 ## 9. Trạng thái verify
 
 - Native aarch64: `clang++ --target=aarch64-linux-android24 -std=c++17 -Wall -Wextra

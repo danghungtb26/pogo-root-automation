@@ -10,7 +10,7 @@
 // rejection. The binding is still resolved so the diagnostic log shows whether
 // the build is wireable.
 
-constexpr bool kTransferExecutionEnabled = false;
+constexpr bool kTransferExecutionEnabled = true;
 
 MainThreadActionOutcome release_runtime_pokemon(
     ProbeContext &context,
