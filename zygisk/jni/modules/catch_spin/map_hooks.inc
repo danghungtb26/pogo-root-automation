@@ -35,7 +35,8 @@ void hooked_on_map_query_response(
 
 // Read-only diagnostic: log the first 16 bytes at the resolved code pointer so
 // the prologue constant above can be filled for the pinned build. Safe to call
-// without installing anything.
+// without installing anything. Only used on the aarch64 install path below.
+#if defined(__aarch64__)
 void log_map_query_prologue(const void *code) {
     if (code == nullptr) return;
     uint32_t words[4]{};
@@ -47,6 +48,7 @@ void log_map_query_prologue(const void *code) {
         code, words[0], words[1], words[2], words[3]
     );
 }
+#endif
 
 bool install_runtime_map_query_hook(ProbeContext &context) {
 #if defined(__aarch64__)
