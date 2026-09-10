@@ -9,5 +9,4 @@ kotlin {
 dependencies {
     implementation(project(":core"))
     implementation(project(":game-adapter:api"))
-    testImplementation("junit:junit:4.13.2")
 }

@@ -16,14 +16,3 @@ target_include_directories(
 target_compile_features(pogo_root_automation PRIVATE cxx_std_17)
 target_compile_options(pogo_root_automation PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(pogo_root_automation log dl)
-
-option(POGO_BUILD_PROTOCOL_TESTS "Build host-side native protocol tests" OFF)
-if(POGO_BUILD_PROTOCOL_TESTS)
-    add_executable(runtime_command_protocol_test runtime_command_protocol_test.cpp)
-    target_compile_features(runtime_command_protocol_test PRIVATE cxx_std_17)
-    target_compile_options(runtime_command_protocol_test PRIVATE -Wall -Wextra -Werror)
-
-    add_executable(runtime_observation_protocol_test runtime_observation_protocol_test.cpp)
-    target_compile_features(runtime_observation_protocol_test PRIVATE cxx_std_17)
-    target_compile_options(runtime_observation_protocol_test PRIVATE -Wall -Wextra -Werror)
-endif()

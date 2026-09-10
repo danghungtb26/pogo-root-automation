@@ -198,7 +198,7 @@ class AutomationControlServer(
     }
 
     private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
-        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoExcellent":${config.catchThrowQuality == dev.pogoroot.automation.core.automation.ThrowQualityTarget.EXCELLENT},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"spinSettleDelayMs":${config.spinSettleDelayMs},"catchSettleDelayMs":${config.catchSettleDelayMs},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeCapabilities":${status.runtimeCapabilities.toJsonArray()},"runtimeMutationPermissionGranted":${status.runtimeMutationPermissionGranted},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
+        {"running":${status.running},"enabled":${config.enabled},"mapTapWalk":${config.mapTapWalkEnabled},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"autoExcellent":${config.catchThrowQuality == dev.pogoroot.automation.core.automation.ThrowQualityTarget.EXCELLENT},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"spinSettleDelayMs":${config.spinSettleDelayMs},"catchSettleDelayMs":${config.catchSettleDelayMs},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeControlState":"${status.runtimeControlState}","runtimeModules":${status.runtimeModules.toJsonObject()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeCapabilities":${status.runtimeCapabilities.toJsonArray()},"runtimeMutationPermissionGranted":${status.runtimeMutationPermissionGranted},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 
     private fun configJson(config: HeadlessAutomationConfig): String = """
@@ -213,6 +213,11 @@ class AutomationControlServer(
         prefix = "[",
         postfix = "]",
     ) { it.jsonStringOrNull() }
+
+    private fun Map<String, String>.toJsonObject(): String = entries.joinToString(
+        prefix = "{",
+        postfix = "}",
+    ) { (key, value) -> "${key.jsonStringOrNull()}:${value.jsonStringOrNull()}" }
 
     private fun jsonError(message: String): String = "{\"ok\":false,\"error\":${message.jsonStringOrNull()}}"
 

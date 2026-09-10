@@ -60,24 +60,17 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
     }
     api.thread_detach(thread);
 
-    // ProjectContext does not own the SoftSfida handler on this build. Resolve
-    // its scene owner on Unity's main thread after the managed domain is ready.
-    discover_soft_sfida_scene_owner(context);
-
-    const RuntimeBinding ready_binding = runtime_binding_snapshot(context);
-    const bool ready = ready_binding.exact_build_verified &&
-        ready_binding.encounter_read_verified;
+    const bool ready = binding.exact_build_verified && binding.encounter_read_verified;
     __android_log_print(
         ready ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "runtime bootstrap: ready=%d exact_build=%d encounter_read=%d map_read=%d throw_bound=%d hooks=%d soft_sfida=%d assemblies=%zu",
+        "runtime bootstrap: ready=%d exact_build=%d encounter_read=%d map_read=%d throw_bound=%d hooks=%d assemblies=%zu",
         ready ? 1 : 0,
-        ready_binding.exact_build_verified ? 1 : 0,
-        ready_binding.encounter_read_verified ? 1 : 0,
-        ready_binding.map_entity_read_verified ? 1 : 0,
+        binding.exact_build_verified ? 1 : 0,
+        binding.encounter_read_verified ? 1 : 0,
+        binding.map_entity_read_verified ? 1 : 0,
         throw_methods_bound ? 1 : 0,
-        ready_binding.throw_hooks_installed ? 1 : 0,
-        ready_binding.soft_sfida_capture_verified ? 1 : 0,
+        binding.throw_hooks_installed ? 1 : 0,
         assembly_count
     );
     return ready;

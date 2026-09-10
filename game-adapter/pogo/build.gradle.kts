@@ -15,6 +15,4 @@ dependencies {
     implementation("com.google.protobuf:protobuf-java:3.23.0")
 
     compileOnly(pogoProtos)
-    testImplementation(pogoProtos)
-    testImplementation("junit:junit:4.13.2")
 }

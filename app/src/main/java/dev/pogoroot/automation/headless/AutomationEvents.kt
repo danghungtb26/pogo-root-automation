@@ -14,6 +14,8 @@ enum class AutomationEventType {
     BERRY_USED,
     DISCARDED,
     TRANSFERRED,
+    MODULE_LOADED,
+    MODULE_LOAD_FAILED,
     INFO,
     ERROR,
 }
@@ -37,7 +39,9 @@ class ToastAutomationEventSink(
 
     override fun publish(event: AutomationEvent) {
         Log.i(LOG_TAG, "automation event type=${event.type} message=${event.message}")
-        if (!configRepository.read().showActionToasts) return
+        val isRuntimeModuleStatus = event.type == AutomationEventType.MODULE_LOADED ||
+            event.type == AutomationEventType.MODULE_LOAD_FAILED
+        if (!isRuntimeModuleStatus && !configRepository.read().showActionToasts) return
         mainHandler.post {
             Toast.makeText(appContext, event.message, Toast.LENGTH_SHORT).show()
         }

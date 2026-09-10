@@ -10,6 +10,7 @@ import android.content.Intent
 import android.os.IBinder
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.root.RuntimeBridgeClient
+import dev.pogoroot.automation.root.RuntimeModuleLoadStatus
 import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -19,7 +20,9 @@ class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
+    private lateinit var eventSink: AutomationEventSink
     private var runtimeBridge: RuntimeBridgeClient? = null
+    private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
     private lateinit var structuredController: StructuredAutomationController
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
     private lateinit var mapTargetRepository: MapTargetRepository
@@ -31,14 +34,18 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
+        eventSink = ToastAutomationEventSink(this, configRepository)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
         mapTargetRepository = MapTargetRepository(this)
         scanResultRepository = ScanResultRepository()
         scanResultRepository.clear()
-        runtimeBridge = RuntimeBridgeClient()
+        runtimeBridge = RuntimeBridgeClient(
+            onModuleLoadStatus = ::publishRuntimeModuleLoadStatus,
+        )
+        runtimeCoordinator = RuntimeLifecycleCoordinator(runtimeBridge!!)
         structuredController = StructuredAutomationController(
             bridge = runtimeBridge!!,
-            eventSink = ToastAutomationEventSink(this, configRepository),
+            eventSink = eventSink,
             // A verified fingerprint must be explicitly provisioned per device/build.
             // Empty means structured observation is available but mutations stay disabled.
             allowedBuildFingerprintsProvider = {
@@ -54,16 +61,14 @@ class HeadlessAutomationService : Service() {
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
+            runtimeCoordinator = runtimeCoordinator,
             structuredController = structuredController,
-            eventSink = ToastAutomationEventSink(this, configRepository),
+            eventSink = eventSink,
         )
         apiServer = AutomationControlServer(
             configRepository = configRepository,
             engine = engine,
-            runtimeDiagnostic = {
-                runtimeBridge?.requestRuntimeDiagnostic()
-                    ?: Result.failure(IllegalStateException("runtime bridge is not initialized"))
-            },
+            runtimeDiagnostic = runtimeCoordinator::runDiagnostic,
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(this)
 
@@ -95,6 +100,8 @@ class HeadlessAutomationService : Service() {
             }
 
             ACTION_DISABLE -> {
+                // The worker remains alive. Its next loop sends STOP_RUNTIME and
+                // leaves the injected process in ATTACHED_IDLE for fast restart.
                 configRepository.update { it.copy(enabled = false) }
             }
 
@@ -116,9 +123,30 @@ class HeadlessAutomationService : Service() {
         }
         apiServer.stop()
         engine.shutdown()
-        structuredController.stop()
-        runtimeBridge?.disconnect()
         super.onDestroy()
+    }
+
+    private fun publishRuntimeModuleLoadStatus(status: RuntimeModuleLoadStatus) {
+        val moduleName = status.module.name
+        if (status.loaded) {
+            eventSink.publish(
+                AutomationEvent(
+                    type = AutomationEventType.MODULE_LOADED,
+                    message = "$moduleName module loaded",
+                ),
+            )
+            return
+        }
+
+        val detail = status.errorCode
+            ?: status.message
+            ?: "unknown error"
+        eventSink.publish(
+            AutomationEvent(
+                type = AutomationEventType.MODULE_LOAD_FAILED,
+                message = "$moduleName module load failed: $detail",
+            ),
+        )
     }
 
     private fun syncJoystickAutoStart() {
