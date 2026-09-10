@@ -20,6 +20,9 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
         capabilities.emplace_back("DIRECT_CATCH");
     }
     if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
+    if (kTransferExecutionEnabled && binding.transfer_verified) {
+        capabilities.emplace_back("TRANSFER_POKEMON");
+    }
     if (binding.throw_hooks_installed) capabilities.emplace_back("OBSERVE_THROW_EVENTS");
     if (capabilities.empty()) return false;
 

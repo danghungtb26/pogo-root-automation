@@ -54,6 +54,8 @@
 #include "modules/discard/inventory_reader.inc"
 #include "modules/discard/parse.inc"
 #include "modules/discard/execute.inc"
+#include "modules/transfer/parse.inc"
+#include "modules/transfer/execute.inc"
 #include "modules/encounter/berry.inc"
 
 // Host publication/routing comes after feature implementations so capability

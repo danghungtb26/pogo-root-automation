@@ -319,7 +319,9 @@ void runtime_command_channel_loop(ProbeContext &context) {
                     action.command_id.c_str(),
                     result.phase,
                     result.error_code,
-                    result.message
+                    result.message,
+                    result.catch_outcome_wire,
+                    result.captured_pokemon_id.c_str()
                 )) break;
             continue;
         }
@@ -367,8 +369,19 @@ void runtime_command_channel_loop(ProbeContext &context) {
                 )) break;
             continue;
         }
-        // Transfer has independent module control now, but remains fail-closed
-        // until a verified native client-owned executor is added.
+        if (parse_runtime_transfer_command(command, &action)) {
+            const RuntimeActionResult result = execute_runtime_transfer(context, action);
+            if (!send_runtime_result(
+                    context.fd,
+                    action.command_id.c_str(),
+                    result.phase,
+                    result.error_code,
+                    result.message
+                )) break;
+            continue;
+        }
+        // Any other gameplay action remains fail-closed until a verified native
+        // client-owned executor is added.
         if (!send_runtime_rejected(
                 context.fd,
                 prefix.command_id.c_str(),

@@ -313,6 +313,18 @@ struct RuntimeBinding {
     const void *item_bag_recycle_item = nullptr;
     Il2CppClass *item_data_class = nullptr;
     bool discard_verified = false;
+    // Transfer executor. Per the 0.427.0 dump, Niantic.Holoholo.Internal
+    // .PokemonBagImpl (IPokemonBag) exposes:
+    //   PokemonProto GetPokemon(ulong id)
+    //   IPromise<ReleasePokemonOutProto> ReleasePokemon(PokemonProto pokemon)
+    // Release is UI-independent, so the executor resolves the proto by storage id
+    // then releases it. Execution stays gated behind kTransferExecutionEnabled
+    // until the promise post-condition is verified on device, like the discard
+    // path.
+    void *pokemon_inventory = nullptr;
+    const void *pokemon_inventory_get_pokemon = nullptr;
+    const void *pokemon_inventory_release = nullptr;
+    bool transfer_verified = false;
 };
 
 enum class MainThreadTaskType : uint32_t {

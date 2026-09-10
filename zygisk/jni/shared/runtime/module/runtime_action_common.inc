@@ -7,6 +7,8 @@ struct RuntimeActionCommand {
     uint32_t berry_wire = 0U;
     int32_t discard_item_id = 0;
     int32_t discard_amount = 0;
+    // Storage id of the Pokémon to release, decoded from a TRANSFER frame (tag 6).
+    std::string transfer_pokemon_id;
     bool close_preview_after_caught = false;
     bool has_throw_profile = false;
     uint32_t throw_quality_wire = 0U;
@@ -28,19 +30,27 @@ bool send_runtime_result(
     uint32_t phase,
     const char *error_code,
     const char *message,
-    uint32_t catch_outcome_wire = 0U
+    uint32_t catch_outcome_wire = 0U,
+    const char *captured_pokemon_id = nullptr
 ) {
     if (command_id == nullptr || command_id[0] == '\0') return false;
+    if (catch_outcome_wire > 6U) return false;
     std::vector<uint8_t> result;
     append_u32(&result, 1U);
     append_string(&result, command_id);
     append_u32(&result, phase);
     append_string(&result, error_code);
     append_string(&result, message);
-    if (catch_outcome_wire != 0U) {
-        if (catch_outcome_wire > 6U) return false;
-        result.push_back(1U);
-        append_u32(&result, catch_outcome_wire);
+    // Trailing block carries the authoritative catch outcome and/or the storage
+    // id of a just-captured Pokémon. Written only when at least one is present so
+    // older readers that stop after `message` stay compatible.
+    const bool has_captured =
+        captured_pokemon_id != nullptr && captured_pokemon_id[0] != '\0';
+    if (catch_outcome_wire != 0U || has_captured) {
+        result.push_back(catch_outcome_wire != 0U ? 1U : 0U);
+        if (catch_outcome_wire != 0U) append_u32(&result, catch_outcome_wire);
+        result.push_back(has_captured ? 1U : 0U);
+        if (has_captured) append_string(&result, captured_pokemon_id);
     }
     return send_internal_message(fd, kRuntimeResultMagic, result);
 }
@@ -76,4 +86,7 @@ struct RuntimeActionResult {
     // 0 means that the native runtime did not receive an authoritative catch
     // outcome. Values 1..6 mirror BridgePayloadCodecSupport.CatchOutcome.
     uint32_t catch_outcome_wire = 0U;
+    // Storage id of the Pokémon captured by this action, when a verified catch
+    // outcome observer reads it. Empty until that binding is confirmed on device.
+    std::string captured_pokemon_id;
 };

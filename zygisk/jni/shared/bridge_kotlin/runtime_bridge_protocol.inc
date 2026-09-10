@@ -112,9 +112,11 @@ bool send_command_result(
     uint32_t phase,
     const char *error_code,
     const char *message,
-    uint32_t catch_outcome_wire = 0U
+    uint32_t catch_outcome_wire = 0U,
+    const char *captured_pokemon_id = nullptr
 ) {
     if (command_id == nullptr || command_id[0] == '\0') return false;
+    if (catch_outcome_wire > 6U) return false;
     const uint64_t message_seq = context.next_message_seq++;
     std::vector<uint8_t> payload;
     append_u32(&payload, 1U);
@@ -126,10 +128,20 @@ bool send_command_result(
     append_nullable_string(&payload, message);
     append_u64(&payload, static_cast<uint64_t>(now_epoch_millis()));
     append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
+    // Matches BridgePayloadDecoder.readCommandResult: nullable catch outcome,
+    // then (when a captured id follows) an ext-block marker set to 0 (no
+    // throw/snapshot) and the nullable captured pokemon id.
+    const bool has_captured =
+        captured_pokemon_id != nullptr && captured_pokemon_id[0] != '\0';
     if (catch_outcome_wire != 0U) {
-        if (catch_outcome_wire > 6U) return false;
         payload.push_back(1U);
         append_u32(&payload, catch_outcome_wire);
+    } else if (has_captured) {
+        payload.push_back(0U);  // catch outcome absent, so the ext block can follow
+    }
+    if (has_captured) {
+        payload.push_back(0U);  // ext marker: no throw/snapshot outcome present
+        append_nullable_string(&payload, captured_pokemon_id);
     }
     const bool sent = send_bridge_frame(fd, kBridgeCommandResultType, message_seq, payload);
     __android_log_print(
@@ -358,7 +370,8 @@ bool parse_runtime_result(
     uint32_t *phase,
     std::string *error_code,
     std::string *message,
-    uint32_t *catch_outcome_wire = nullptr
+    uint32_t *catch_outcome_wire = nullptr,
+    std::string *captured_pokemon_id = nullptr
 ) {
     size_t offset = 0U;
     uint32_t version = 0U;
@@ -369,10 +382,25 @@ bool parse_runtime_result(
         !read_string(payload, &offset, error_code) ||
         !read_string(payload, &offset, message)) return false;
     if (catch_outcome_wire != nullptr) *catch_outcome_wire = 0U;
+    if (captured_pokemon_id != nullptr) captured_pokemon_id->clear();
+    // Optional trailing block: presence byte for the catch outcome (+u32 when
+    // set) followed by a presence byte for the captured pokemon id (+string when
+    // set). Written by send_runtime_result only when at least one is present.
     if (offset < payload.size()) {
-        if (payload[offset++] != 1U || catch_outcome_wire == nullptr ||
-            !read_be32(payload, &offset, catch_outcome_wire) ||
-            *catch_outcome_wire == 0U || *catch_outcome_wire > 6U) return false;
+        const uint8_t has_catch = payload[offset++];
+        if (has_catch > 1U) return false;
+        if (has_catch == 1U) {
+            if (catch_outcome_wire == nullptr || !read_be32(payload, &offset, catch_outcome_wire) ||
+                *catch_outcome_wire == 0U || *catch_outcome_wire > 6U) return false;
+        }
+        if (offset >= payload.size()) return false;
+        const uint8_t has_captured = payload[offset++];
+        if (has_captured > 1U) return false;
+        if (has_captured == 1U) {
+            std::string id;
+            if (!read_string(payload, &offset, &id) || id.empty()) return false;
+            if (captured_pokemon_id != nullptr) *captured_pokemon_id = std::move(id);
+        }
     }
     return offset == payload.size();
 }

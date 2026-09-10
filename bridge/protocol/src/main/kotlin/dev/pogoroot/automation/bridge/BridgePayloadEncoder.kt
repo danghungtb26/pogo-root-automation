@@ -109,10 +109,17 @@ internal object BridgePayloadEncoder {
         output.writeLong(value.observedAtEpochMs)
         output.writeLong(value.observedAtElapsedNs)
         codec.writeNullableCatchOutcome(output, value.catchOutcome)
-        if (value.throwOutcome != null || value.snapshotResult != null) {
-            output.writeBoolean(true)
-            codec.writeNullableThrowOutcome(output, value.throwOutcome)
-            codec.writeNullableSnapshotResult(output, value.snapshotResult)
+        // Ext block: a marker byte tells whether a throw/snapshot outcome follows.
+        // The captured pokemon id is a trailing optional after it, so a frame can
+        // carry the id alone (marker = false). Older frames omit the whole block.
+        val hasThrowOrSnapshot = value.throwOutcome != null || value.snapshotResult != null
+        if (hasThrowOrSnapshot || value.capturedPokemonId != null) {
+            output.writeBoolean(hasThrowOrSnapshot)
+            if (hasThrowOrSnapshot) {
+                codec.writeNullableThrowOutcome(output, value.throwOutcome)
+                codec.writeNullableSnapshotResult(output, value.snapshotResult)
+            }
+            codec.writeNullableString(output, value.capturedPokemonId)
         }
     }
 

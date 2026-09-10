@@ -365,6 +365,32 @@ void discover_runtime_owners(
                 );
             }
         }
+        if (strcmp(service.label, "IPokemonBag") == 0 && owner != nullptr &&
+            runtime_object_is_exact_class(api, owner, "Niantic.Holoholo.Internal", "PokemonBagImpl")) {
+            // Transfer executor binding (from the 0.427.0 dump): GetPokemon(ulong)
+            // resolves the PokemonProto by storage id; ReleasePokemon(PokemonProto)
+            // releases it. Execution stays gated behind kTransferExecutionEnabled
+            // until the release promise post-condition is verified on device.
+            Il2CppClass *owner_class = api.object_get_class(owner);
+            const void *get_pokemon = api.class_get_method_from_name == nullptr || owner_class == nullptr
+                ? nullptr
+                : api.class_get_method_from_name(owner_class, "GetPokemon", 1);
+            const void *release = api.class_get_method_from_name == nullptr || owner_class == nullptr
+                ? nullptr
+                : api.class_get_method_from_name(owner_class, "ReleasePokemon", 1);
+            if (get_pokemon != nullptr && release != nullptr) {
+                binding->pokemon_inventory = owner;
+                binding->pokemon_inventory_get_pokemon = get_pokemon;
+                binding->pokemon_inventory_release = release;
+                binding->transfer_verified = true;
+            }
+            __android_log_print(
+                binding->transfer_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                kLogTag,
+                "managed diagnostic: transfer binding verified=%d bag=%p get_pokemon=%p release=%p",
+                binding->transfer_verified ? 1 : 0, owner, get_pokemon, release
+            );
+        }
         if (strcmp(service.label, "IEncounterPokemon") == 0 && owner != nullptr &&
             api.object_get_class != nullptr && api.class_get_name != nullptr &&
             api.class_get_namespace != nullptr) {

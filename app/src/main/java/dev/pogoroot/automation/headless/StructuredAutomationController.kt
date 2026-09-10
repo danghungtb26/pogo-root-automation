@@ -18,6 +18,9 @@ import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.model.MapTargetObservation
+import dev.pogoroot.automation.core.model.PokemonIv
+import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
+import dev.pogoroot.automation.core.model.StoredPokemon
 import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
@@ -79,6 +82,19 @@ class StructuredAutomationController(
     private val recordedGameActionCommands = mutableSetOf<String>()
     private val catchLabelsByCommand = mutableMapOf<String, String>()
     private val publishedCatchOutcomeCommands = mutableSetOf<String>()
+    // Wild-caught Pokémon known at catch-dispatch time, keyed by command. On a
+    // confirmed CAUGHT the matching entry is promoted to a StoredPokemon (using
+    // the runtime-reported captured id) and fed into snapshot.storage so the
+    // shared transfer path (policy.autoTransfer) decides whether to release it.
+    private val caughtWildTemplateByCommand = linkedMapOf<String, WildCatchTemplate>()
+    private val pendingWildTransfers = linkedMapOf<String, StoredPokemon>()
+
+    private data class WildCatchTemplate(
+        val speciesId: Int,
+        val speciesName: String,
+        val iv: PokemonIv?,
+        val shiny: Boolean,
+    )
 
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
         syncSafetyConfig()
@@ -162,13 +178,14 @@ class StructuredAutomationController(
                             lastError = it
                             if (it != "runner suspended; resync required" &&
                                 it != "mutation active" &&
-                                !it.startsWith("mutation blocked: missing capability DIRECT_CATCH")
+                                !it.startsWith("mutation blocked: missing capability")
                             ) {
                                 eventSink.publish(AutomationEvent(AutomationEventType.ERROR, it))
                             }
                         }
                         dispatch.request?.let {
                             rememberCatchLabel(it, snapshot)
+                            rememberWildCatchTemplate(it, snapshot)
                             submitted = true
                             lastAction = it.action::class.simpleName
                         }
@@ -226,6 +243,8 @@ class StructuredAutomationController(
         recordedGameActionCommands.clear()
         catchLabelsByCommand.clear()
         publishedCatchOutcomeCommands.clear()
+        caughtWildTemplateByCommand.clear()
+        pendingWildTransfers.clear()
         connected = true
         lastError = null
     }
@@ -267,11 +286,12 @@ class StructuredAutomationController(
         } else {
             null
         }
-        val storage = if (GameCapability.READ_POKEMON_STORAGE in adapter.capabilities) {
+        val runtimeStorage = if (GameCapability.READ_POKEMON_STORAGE in adapter.capabilities) {
             adapter.readPokemonStorage().getOrNull()
         } else {
             null
         }
+        val storage = mergePendingWildTransfers(runtimeStorage)
         return AutomationSnapshot(
             lifecycleState = lifecycle,
             nearby = nearby,
@@ -325,6 +345,55 @@ class StructuredAutomationController(
         if (resultStatus.isSuccess && isAuthoritativeCatchResult(request, result, phase)) {
             publishCatchOutcome(request, result)
         }
+        if (resultStatus.isSuccess && phase.isDefinitive) {
+            registerWildTransferIfCaught(request, result, phase)
+            resolveWildTransferResult(request, phase)
+        }
+    }
+
+    /**
+     * Promotes a freshly caught wild Pokémon into the pending-transfer set so the
+     * shared transfer path considers it. Runs only for a definitive catch result;
+     * the per-command template is always cleared to bound memory.
+     */
+    private fun registerWildTransferIfCaught(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        result: BridgeEvent.AutomationCommandResult,
+        phase: ActionExecutionPhase,
+    ) {
+        val action = request.action as? AutomationAction.Catch
+        val template = caughtWildTemplateByCommand.remove(request.commandId) ?: return
+        if (action == null || phase != ActionExecutionPhase.COMPLETED) return
+        if (result.catchOutcome != CatchOutcome.CAUGHT) return
+        // The transfer target is the storage id assigned on capture; without it
+        // (native catch-outcome observer not yet reporting the id) there is
+        // nothing to release, so skip until the runtime provides it.
+        val pokemonId = result.capturedPokemonId ?: return
+        pendingWildTransfers[pokemonId] = StoredPokemon(
+            pokemonId = pokemonId,
+            speciesId = template.speciesId,
+            speciesName = template.speciesName,
+            iv = template.iv,
+            shiny = template.shiny,
+        )
+        while (pendingWildTransfers.size > MAX_PENDING_WILD_TRANSFERS) {
+            val eldest = pendingWildTransfers.keys.firstOrNull() ?: break
+            pendingWildTransfers.remove(eldest)
+        }
+    }
+
+    private fun resolveWildTransferResult(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        phase: ActionExecutionPhase,
+    ) {
+        val action = request.action as? AutomationAction.TransferPokemon ?: return
+        // Drop on any definitive result: COMPLETED means released; a rejection or
+        // failure (e.g. TRANSFER_POKEMON not advertised yet) is not retried.
+        val released = pendingWildTransfers.remove(action.pokemonId)
+        if (phase == ActionExecutionPhase.COMPLETED) {
+            val label = released?.speciesName?.takeIf { it.isNotBlank() } ?: action.pokemonId
+            eventSink.publish(AutomationEvent(AutomationEventType.TRANSFERRED, "Transferred $label"))
+        }
     }
 
     private fun rememberCatchLabel(
@@ -342,6 +411,50 @@ class StructuredAutomationController(
                 ?.takeIf { it.isNotBlank() }
             ?: action.encounterId
         catchLabelsByCommand[request.commandId] = label
+    }
+
+    /**
+     * Captures the wild Pokémon being caught at dispatch time. Encounter catches
+     * carry IV/shiny; direct-map (TryCapture) catches expose only species, so IV
+     * stays null and TransferPolicy.keepUnknownIv governs whether it is released.
+     */
+    private fun rememberWildCatchTemplate(
+        request: dev.pogoroot.automation.core.automation.ActionRequest,
+        snapshot: AutomationSnapshot,
+    ) {
+        val action = request.action as? AutomationAction.Catch ?: return
+        val template = snapshot.encounter
+            ?.takeIf { it.encounterId == action.encounterId }
+            ?.let { WildCatchTemplate(it.speciesId, it.speciesName, it.iv, it.shiny == true) }
+            ?: snapshot.nearby?.spawns
+                ?.firstOrNull { it.spawnId == action.encounterId }
+                ?.let { WildCatchTemplate(it.speciesId, it.speciesName, iv = null, shiny = false) }
+            ?: return
+        caughtWildTemplateByCommand[request.commandId] = template
+        while (caughtWildTemplateByCommand.size > MAX_PENDING_WILD_TRANSFERS) {
+            val eldest = caughtWildTemplateByCommand.keys.firstOrNull() ?: break
+            caughtWildTemplateByCommand.remove(eldest)
+        }
+    }
+
+    /**
+     * Folds the freshly caught wild Pokémon awaiting transfer into the runtime
+     * storage snapshot (deduped by id) so the shared transfer planner considers
+     * them. Once a real box reader lands it becomes just another storage source.
+     */
+    private fun mergePendingWildTransfers(base: PokemonStorageSnapshot?): PokemonStorageSnapshot? {
+        if (pendingWildTransfers.isEmpty()) return base
+        val pending = pendingWildTransfers.values.toList()
+        if (base == null) {
+            return PokemonStorageSnapshot(
+                observedAtEpochMs = System.currentTimeMillis(),
+                usedSlots = pending.size,
+                capacity = pending.size,
+                pokemon = pending,
+            )
+        }
+        val merged = (base.pokemon + pending).distinctBy { it.pokemonId }
+        return base.copy(pokemon = merged)
     }
 
     private fun isAuthoritativeCatchResult(
@@ -422,4 +535,7 @@ class StructuredAutomationController(
     private fun dev.pogoroot.automation.pogo.PogoRuntimeMetadata.identity() =
         ready.toRuntimeIdentity(sessionManager.mutationsAllowed)
 
+    private companion object {
+        const val MAX_PENDING_WILD_TRANSFERS = 64
+    }
 }

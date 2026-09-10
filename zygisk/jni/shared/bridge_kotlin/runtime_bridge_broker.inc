@@ -34,13 +34,15 @@ bool handle_controller(int fd, BrokerContext &context) {
                 std::string error_code;
                 std::string message;
                 uint32_t catch_outcome_wire = 0U;
+                std::string captured_pokemon_id;
                 if (!parse_runtime_result(
                         runtime_result,
                         &command_id,
                         &phase,
                         &error_code,
                         &message,
-                        &catch_outcome_wire
+                        &catch_outcome_wire,
+                        &captured_pokemon_id
                     ) ||
                     !send_command_result(
                         fd,
@@ -49,7 +51,8 @@ bool handle_controller(int fd, BrokerContext &context) {
                         phase,
                         error_code.c_str(),
                         message.c_str(),
-                        catch_outcome_wire
+                        catch_outcome_wire,
+                        captured_pokemon_id.c_str()
                     )) {
                     return true;
                 }

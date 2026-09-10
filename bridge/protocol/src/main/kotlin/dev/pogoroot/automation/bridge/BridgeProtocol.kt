@@ -224,6 +224,13 @@ sealed interface BridgeEvent {
         val throwOutcome: ThrowOutcome? = null,
         /** Optional metadata from a completed GO Snapshot action. */
         val snapshotResult: EncounterSnapshotResult? = null,
+        /**
+         * Optional storage id of the Pokémon captured by a Catch. A verified
+         * runtime that reads the catch-result proto reports it so the controller
+         * can target that specific Pokémon for a post-catch transfer. Absent
+         * until the native catch-outcome observer provides it.
+         */
+        val capturedPokemonId: String? = null,
         val observedAtEpochMs: Long = System.currentTimeMillis(),
         val observedAtElapsedNs: Long = System.nanoTime(),
     ) : BridgeEvent {
@@ -233,6 +240,9 @@ sealed interface BridgeEvent {
             require(commandId.isNotBlank()) { "commandId must not be blank" }
             if (snapshotResult != null) {
                 require(snapshotResult.encounterId.isNotBlank()) { "snapshot encounterId must not be blank" }
+            }
+            require(capturedPokemonId == null || capturedPokemonId.isNotBlank()) {
+                "capturedPokemonId must not be blank when present"
             }
         }
     }

@@ -1,0 +1,41 @@
+// Transfer command parsing.
+//
+// Decodes the TRANSFER action frame (action tag 6) that BridgeActionCodec emits:
+// a single pokemonId string, wrapped in the standard runtime command envelope.
+// Mirrors the discard parser.
+
+bool parse_runtime_transfer_command(
+    const std::vector<uint8_t> &command,
+    RuntimeActionCommand *parsed
+) {
+    if (parsed == nullptr) return false;
+    *parsed = RuntimeActionCommand{};
+    size_t offset = 0U;
+    uint32_t message_type = 0U;
+    uint32_t payload_version = 0U;
+    uint8_t lifecycle_present = 0U;
+    if (!read_be32(command, &offset, &message_type) ||
+        !read_be64(command, &offset, &parsed->message_seq) ||
+        !read_be32(command, &offset, &payload_version) ||
+        !read_string(command, &offset, &parsed->session_id) ||
+        !read_string(command, &offset, &parsed->command_id) ||
+        !read_be32(command, &offset, &parsed->action_tag) ||
+        parsed->action_tag != 6U ||
+        !read_string(command, &offset, &parsed->transfer_pokemon_id) ||
+        !read_be64(command, &offset, &parsed->based_on_observation_seq) ||
+        offset >= command.size()) return false;
+    lifecycle_present = command[offset++];
+    if (lifecycle_present > 1U) return false;
+    parsed->expected_lifecycle_present = lifecycle_present != 0U;
+    if (parsed->expected_lifecycle_present &&
+        !read_be32(command, &offset, &parsed->expected_lifecycle)) return false;
+    if (!read_be64(command, &offset, &parsed->expires_at_elapsed_ns) ||
+        !read_be32(command, &offset, &parsed->pid) ||
+        !read_string(command, &offset, &parsed->process_name) ||
+        !read_string(command, &offset, &parsed->package_name) ||
+        !read_string(command, &offset, &parsed->build_fingerprint)) return false;
+    return message_type == kBridgeCommandType && payload_version == 1U &&
+        parsed->message_seq > 0U && !parsed->session_id.empty() &&
+        !parsed->command_id.empty() && !parsed->transfer_pokemon_id.empty() &&
+        parsed->based_on_observation_seq > 0U && offset == command.size();
+}
