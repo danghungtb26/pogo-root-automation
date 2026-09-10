@@ -7,6 +7,7 @@ tool="$repo_root/tools/il2cppdumper/Il2CppDumper.dll"
 base_apk="${POGO_BASE_APK:-$repo_root/pogo-apkm/base.apk}"
 native_apk="${POGO_NATIVE_APK:-$repo_root/pogo-apkm/split_config.arm64_v8a.apk}"
 output_dir="${POGO_REVERSE_OUTPUT:-$repo_root/reverse/pogo-0.427.0}"
+native_dir="$output_dir/native"
 dotnet_cli_home="${POGO_DOTNET_CLI_HOME:-/private/tmp/dotnet-cli-pogo}"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -18,23 +19,24 @@ require_file "$native_apk"
 command -v dotnet >/dev/null 2>&1 || fail "dotnet is not installed"
 command -v unzip >/dev/null 2>&1 || fail "unzip is not installed"
 
-work_dir="$(mktemp -d /private/tmp/pogo-reverse-run.XXXXXX)"
-trap 'rm -rf "$work_dir"' EXIT
-mkdir -p "$output_dir/classes"
+mkdir -p "$output_dir/classes" "$native_dir"
+
+metadata_file="$native_dir/global-metadata.dat"
+libil2cpp_file="$native_dir/libil2cpp.so"
 
 unzip -p "$base_apk" \
   assets/bin/Data/Managed/Metadata/global-metadata.dat \
-  > "$work_dir/global-metadata.dat"
+  > "$metadata_file"
 unzip -p "$native_apk" lib/arm64-v8a/libil2cpp.so \
-  > "$work_dir/libil2cpp.so"
-[[ -s "$work_dir/global-metadata.dat" ]] || fail "metadata extraction failed"
-[[ -s "$work_dir/libil2cpp.so" ]] || fail "libil2cpp extraction failed"
+  > "$libil2cpp_file"
+[[ -s "$metadata_file" ]] || fail "metadata extraction failed"
+[[ -s "$libil2cpp_file" ]] || fail "libil2cpp extraction failed"
 
 DOTNET_ROOT="${DOTNET_ROOT:-/opt/homebrew/opt/dotnet/libexec}" \
 DOTNET_CLI_HOME="$dotnet_cli_home" \
 DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
 DOTNET_ROLL_FORWARD=Major \
-dotnet "$tool" "$work_dir/libil2cpp.so" "$work_dir/global-metadata.dat" "$output_dir"
+dotnet "$tool" "$libil2cpp_file" "$metadata_file" "$output_dir"
 
 dump_file="$output_dir/dump.cs"
 require_file "$dump_file"
@@ -64,4 +66,5 @@ for generated in dump.cs il2cpp.h script.json stringliteral.json; do
 done
 
 echo "Reverse artifacts written to $output_dir"
+echo "Native inputs preserved in $native_dir"
 echo "Readable classes: $output_dir/classes"
