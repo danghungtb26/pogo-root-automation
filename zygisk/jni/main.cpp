@@ -10,7 +10,7 @@
 #include "runtime_probe_inspection.inc"
 #include "runtime_probe_owners.inc"
 #include "runtime_probe_discovery.inc"
-#include "runtime_direct_map_bindings.inc"
+#include "modules/catch_spin/direct_map_bindings.inc"
 #include "runtime_encounter_owners.inc"
 #include "runtime_probe_candidates.inc"
 #include "runtime_main_thread_bridge.inc"
@@ -18,7 +18,7 @@
 #include "runtime_main_thread_loader.inc"
 #include "runtime_main_thread_unity.inc"
 #include "runtime_main_thread_actions.inc"
-#include "runtime_main_thread_direct_actions.inc"
+#include "modules/catch_spin/main_thread_direct_actions.inc"
 #include "runtime_probe_gesture.inc"
 #include "runtime_probe_diagnostic.inc"
 #include "runtime_probe_inventory.inc"
@@ -40,10 +40,10 @@
 #undef refresh_runtime_encounter_owners
 #undef request_main_thread_map_snapshot
 
-// Shared execution infrastructure.
-#include "runtime_map_actions.inc"
-#include "runtime_direct_map_actions.inc"
-#include "runtime_encounter_actions.inc"
+// catch_spin main-thread execution workers (dispatched by the shared bridge).
+#include "modules/catch_spin/map_actions.inc"
+#include "modules/catch_spin/direct_map_actions.inc"
+#include "modules/catch_spin/encounter_actions.inc"
 #include "runtime_action_common.inc"
 
 // Feature-owned command parsing/execution.
@@ -51,6 +51,7 @@
 #include "modules/catch_spin/spin.inc"
 #include "modules/catch_spin/open_encounter.inc"
 #include "modules/catch_spin/map_hooks.inc"
+#include "modules/discard/inventory_reader.inc"
 #include "modules/discard/parse.inc"
 #include "modules/discard/execute.inc"
 #include "modules/throw_assist/berry.inc"
