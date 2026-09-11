@@ -271,3 +271,36 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 
 > ⚠️ Điểm (1) đụng vào semantics core (state machine tinh vi: indeterminate hold, map-sync, settle).
 > Cần làm cẩn thận, có thể là bước rủi ro nhất — tách riêng, verify kỹ.
+
+---
+
+## Phần 5 — Trạng thái implementation (cập nhật)
+
+| Bước | Nội dung | Commit | Trạng thái |
+|------|----------|--------|-----------|
+| Phase 0 | Chia `headless/` → 7 nhóm package (giữ `root/`) | `a3aede3` | ✅ xanh, committed |
+| Phase 1 | 2 trục `ModuleTriggerType` + `ExecutionMode` thành field trên descriptor | `f1e20ec` | ✅ |
+| Phase 2a | `ExecutionLock` (shared/exclusive) | `1cdb96c` | ✅ additive |
+| Phase 2b | `RuntimeEventDispatcher` + `ownerOfObservationType` | `d031319` | ✅ additive |
+| Phase 3a | `ModuleLifecycleController` (reducer 2 trục) | `64ccac5` | ✅ additive |
+| Phase 3b | Wire reducer → native enable (catch_spin theo arm) | `70a0f66` | ✅ **live behavior** |
+
+**Đã đạt:** package sạch theo tầng; taxonomy 2 trục trong code; đủ kernel primitive (lock/dispatcher/reducer);
+lifecycle 2 trục **đã chạy thật** — disarm giờ **stop** native catch_spin module (đúng Phần 1), GO-absent vẫn
+tắt tất cả qua `ensureIdle()`.
+
+### 🚧 Còn lại — GATE trên native + cần verify trên máy
+Việc cho **transfer/discard chạy song song thật** (execution-lane split) **chưa làm**, vì:
+1. **Phụ thuộc native chưa có:** cần native push observation `INVENTORY`/`POKEMON_STORAGE` **riêng** cho
+   transfer/discard (hiện `POKEMON_STORAGE` là no-op ở Kotlin source; inventory đang đi kèm scan catch_spin).
+   Bạn đã xác nhận *sẽ làm native song song* — bước này chờ cái đó.
+2. **Đụng core state-machine + không verify được ở đây:** tách transfer/discard ra khỏi `AutomationCoordinator`
+   + `AutomationRunner` (đang serialize chung), cho chúng execution path riêng dùng `ExecutionLock`, là thay đổi
+   dễ vỡ trên một hệ đang chạy. Phải làm **cùng lúc với native** và **verify trên máy root**.
+
+**Khi native sẵn sàng, các mảnh còn lại (primitives đã có sẵn để ráp):**
+- `MutationArbiter`: bọc `AutomationRunner` (world-lane exclusive: catch_spin+encounter) + lane concurrent
+  (transfer/discard) qua `ExecutionLock`. Giữ policy (b) + timeout backstop.
+- Chuyển 4 feature thành `AutomationModule` runtime object, đăng ký với `RuntimeEventDispatcher`.
+- Rút transfer/discard planner khỏi world-lane `AutomationCoordinator`; nuôi bằng observation riêng.
+- Thu nhỏ `HeadlessAutomationEngine`/`AutomationCycle` (bỏ double-tick) sau khi lane split ổn định.
