@@ -1,6 +1,7 @@
 package dev.pogoroot.automation.runtime
 
 import dev.pogoroot.automation.bridge.ModuleControlAction
+import dev.pogoroot.automation.bridge.ObservationType
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.modules.CatchSpinModuleDescriptor
 import dev.pogoroot.automation.modules.DiscardModuleDescriptor
@@ -94,6 +95,35 @@ object RuntimeFeatureModuleCatalog {
     /** The module that owns [gameplayTag], or null when none claims it. */
     fun ownerOfGameplayTag(gameplayTag: Int): RuntimeFeatureModule? =
         descriptors.firstOrNull { gameplayTag in it.gameplayActionTags }?.module
+
+    /**
+     * The module that consumes [observationType], or null when the type is
+     * kernel-level (lifecycle/diagnostics) and owned by no feature module.
+     *
+     * NEARBY/FORTS/REQUEST_CATCH_SPIN are catch_spin's world-snapshot inputs;
+     * INVENTORY feeds discard and POKEMON_STORAGE feeds transfer (native pushes
+     * these independently — see docs/automation-flow.md Phần 2 finding).
+     */
+    fun ownerOfObservationType(observationType: ObservationType): RuntimeFeatureModule? =
+        when (observationType) {
+            ObservationType.REQUEST_CATCH_SPIN,
+            ObservationType.NEARBY,
+            ObservationType.FORTS,
+            -> RuntimeFeatureModule.CATCH_SPIN
+
+            ObservationType.ENCOUNTER -> RuntimeFeatureModule.ENCOUNTER
+            ObservationType.INVENTORY -> RuntimeFeatureModule.DISCARD
+            ObservationType.POKEMON_STORAGE -> RuntimeFeatureModule.TRANSFER
+
+            ObservationType.LIFECYCLE,
+            ObservationType.MAP_TARGET,
+            ObservationType.THROW_DIAGNOSTIC,
+            -> null
+        }
+
+    /** Modules whose action execution holds the exclusive world-UI lock. */
+    fun modulesWithExecution(mode: ExecutionMode): Set<RuntimeFeatureModule> =
+        descriptors.filter { it.executionMode == mode }.mapTo(linkedSetOf()) { it.module }
 }
 
 /**
