@@ -120,8 +120,36 @@ flowchart TD
     CS & EN & TR & DI -- submit action --> ARB
     ARB -- result theo commandId --> CS & EN & TR & DI
 
-    LC[ModuleLifecycleController<br/>reducer 2 trục] -->|start/stop| MODS
+    ENG[HeadlessAutomationEngine<br/>game presence] -->|activeModules context| CAT[RuntimeFeatureModuleCatalog]
+    CAT -->|isActive từng module| MRM[ModuleRuntimeManager<br/>start/stop/join — generic, KHÔNG chứa policy]
+    MRM -->|start/stop| MODS
 ```
+
+**Kiến trúc chốt (engine-centric):**
+```
+HeadlessAutomationEngine
+│
+├── Game presence
+│     ├── absent → ensureIdle()
+│     └── ready  → evaluateModules()
+│
+├── RuntimeFeatureModuleCatalog.activeModules(context)   ← POLICY: module nào active
+│     ├── CatchSpin.isActive(context)   // đọc arm
+│     ├── Encounter.isActive(context)
+│     ├── Transfer.isActive(context)
+│     └── Discard.isActive(context)
+│
+├── ModuleRuntimeManager                                 ← MECHANISM: start()/stop()/join()
+│     (generic, không chứa policy của bất kỳ module nào)
+│
+└── Shared Kernel
+      ├── RuntimeEventDispatcher
+      ├── MutationArbiter
+      └── ReadinessGate
+```
+> **Tách bạch:** *policy* (module nào bật) = `activeModules(context)` + `isActive` từng module.
+> *mechanism* (bật/tắt/join thread) = `ModuleRuntimeManager` generic. Không component nào vừa
+> giữ policy vừa giữ mechanism. `ModuleLifecycleController` cũ bị **xoá** (nó gộp cả hai + special-case).
 
 ### 3.1 Kernel — CHỈ 2 thứ dùng chung (rút ra từ `StructuredAutomationController`)
 > Scan KHÔNG nằm ở kernel — nó là việc riêng của CatchSpinModule (xem 3.2b).
@@ -236,7 +264,14 @@ lặp lại trong từng module.
 
 ### 3.4 Engine gốc co lại
 `HeadlessAutomationEngine.runLoop` + `AutomationCycle` (double-tick, scan-gating) **biến mất**.
-Engine chỉ còn: sở hữu kernel threads + chạy `ModuleLifecycleController`.
+Engine chỉ còn:
+- Theo **game presence**: absent → `ensureIdle()`; ready → `evaluateModules()`.
+- `evaluateModules()` = hỏi `RuntimeFeatureModuleCatalog.activeModules(context)` (policy) rồi giao cho
+  `ModuleRuntimeManager` `start()/stop()/join()` (mechanism).
+- Sở hữu kernel threads (`RuntimeEventDispatcher` / `MutationArbiter` / `ReadinessGate`).
+
+**KHÔNG** còn `ModuleLifecycleController` — policy về từng module nằm trong `isActive`, mechanism nằm ở
+`ModuleRuntimeManager` generic.
 
 ### ⚠️ Cảnh báo "thread riêng mỗi module"
 Nếu module chỉ **phản ứng** với snapshot/event thì **không cần** thread riêng — dispatcher gọi callback
@@ -247,7 +282,8 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 1. Rút `RuntimeEventDispatcher` + `WorldScanSource` + `MutationArbiter` ra khỏi `StructuredAutomationController`.
 2. Định nghĩa `AutomationModule` + `ModuleHost`.
 3. Chuyển planning catchspin (`runner.onObservation` + core planner) vào `CatchSpinModule`.
-4. Viết `ModuleLifecycleController` với reducer 2 trục; nối GO-presence + AutomationState.
+4. Policy activation: mỗi module tự khai `isActive(context)`; engine gọi `activeModules(context)`
+   (KHÔNG có reducer/central special-case). Mechanism: `ModuleRuntimeManager` generic lo start/stop/join.
 5. Xoá scan/tick trong `AutomationCycle`, thu nhỏ `HeadlessAutomationEngine`.
 
 ---
@@ -271,7 +307,8 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 1. **EXCLUSIVE/CONCURRENT groups.** Hiện `AutomationRunner` serialize **mọi** mutation (mọi thứ đều
    exclusive). Muốn transfer/discard chạy song song với catch/spin ⇒ cần tách execution theo nhóm
    tranh-chấp (world-UI lock vs inventory), thay vì một slot chung.
-2. **Event-driven lifecycle 2 trục** (`ModuleLifecycleController`) + start/stop/join thread module.
+2. **`ModuleRuntimeManager`** generic: start/stop/join module theo kết quả `activeModules(context)`
+   (policy nằm ở `isActive` từng module, KHÔNG ở manager). ✅ policy đã xong (Phase 3c).
 3. **`RuntimeEventDispatcher`** fan-out kênh native về đúng module (thay `when(type)` trong controller).
 
 > ⚠️ Điểm (1) đụng vào semantics core (state machine tinh vi: indeterminate hold, map-sync, settle).
@@ -289,7 +326,8 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 | Phase 2b | `RuntimeEventDispatcher` + `ownerOfObservationType` | `d031319` | ✅ additive |
 | Phase 3a | ~~`ModuleLifecycleController`~~ → thay bằng per-module `isActive(context)` | `64ccac5`→refactor | ✅ |
 | Phase 3b | Wire `activeModules(context)` → native enable (catch_spin đọc arm) | `70a0f66`→refactor | ✅ **live behavior** |
-| Phase 3c | Bỏ special-case `if CATCH_SPIN`; mỗi module tự khai `isActive`; xoá `ModuleLifecycleController` unused | (kế tiếp) | ✅ |
+| Phase 3c | Bỏ special-case `if CATCH_SPIN`; mỗi module tự khai `isActive`; xoá `ModuleLifecycleController` unused | `073657b` | ✅ |
+| doc | Đồng bộ doc: kiến trúc engine-centric, tách policy/mechanism (`ModuleRuntimeManager`) | (this) | ✅ |
 
 **Đã đạt:** package sạch theo tầng; taxonomy 2 trục trong code; đủ kernel primitive (lock/dispatcher/reducer);
 lifecycle 2 trục **đã chạy thật** — disarm giờ **stop** native catch_spin module (đúng Phần 1), GO-absent vẫn
