@@ -261,6 +261,24 @@ bool read_runtime_map_snapshot_on_main_thread(
         }
         return true;
     }
+    // Forts and the player position are independent of the pokemon-cell walk
+    // (their bindings are captured separately). Read them FIRST so a failure in
+    // the fragile MapEntityCell traversal below cannot suppress them — the walk
+    // returns false on a bad cell, and the caller keys nearby availability off
+    // that return value while still consuming the forts/player it populated here.
+    if (binding.forts_read_verified && !read_runtime_map_forts(
+            context.il2cpp_api, binding, forts)) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime map reader could not enumerate active PokéStops"
+        );
+    }
+    observation->has_player_position = read_runtime_player_position(
+        context.il2cpp_api, binding,
+        &observation->player_latitude, &observation->player_longitude
+    );
+
     std::vector<MapDictionaryEntry> cell_entries;
     if (!enumerate_map_dictionary(
             context.il2cpp_api, binding.map_entity_cells, &cell_entries)) {
@@ -281,18 +299,6 @@ bool read_runtime_map_snapshot_on_main_thread(
         "runtime map reader cells=%zu wild=%zu",
         cell_entries.size(),
         observation->spawns.size()
-    );
-    if (binding.forts_read_verified && !read_runtime_map_forts(
-            context.il2cpp_api, binding, forts)) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "runtime map reader could not enumerate active PokéStops"
-        );
-    }
-    observation->has_player_position = read_runtime_player_position(
-        context.il2cpp_api, binding,
-        &observation->player_latitude, &observation->player_longitude
     );
     return pogo_runtime::valid_runtime_nearby_observation(*observation);
 }

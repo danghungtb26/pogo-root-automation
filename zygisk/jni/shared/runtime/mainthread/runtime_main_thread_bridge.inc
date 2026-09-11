@@ -483,14 +483,21 @@ bool request_main_thread_map_snapshot(
                 context.main_thread_bridge.pending_done;
         }
     );
-    if (!completed || context.main_thread_bridge.pending_token != token ||
-        !context.main_thread_bridge.pending_success) {
-        context.main_thread_bridge.pending_token = 0U;
-        return false;
+    const bool committed = completed &&
+        context.main_thread_bridge.pending_token == token &&
+        context.main_thread_bridge.pending_done;
+    if (committed) {
+        // The map reader populates forts and the player position independently of
+        // (and before) the fragile pokemon-cell walk. Copy them back even when
+        // pending_success is false: that flag only reflects the nearby/spawn read,
+        // and dropping the whole snapshot on its failure would discard a perfectly
+        // good fort/location read. The caller keys nearby availability off the
+        // return value, so partial spawns are still suppressed there.
+        *observation = context.main_thread_bridge.pending_nearby;
+        *forts = context.main_thread_bridge.pending_forts;
     }
-    *observation = context.main_thread_bridge.pending_nearby;
-    *forts = context.main_thread_bridge.pending_forts;
+    const bool success = committed && context.main_thread_bridge.pending_success;
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;
-    return true;
+    return success;
 }

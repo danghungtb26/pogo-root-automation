@@ -43,7 +43,9 @@ bool run_runtime_scan_map(
     pogo_runtime::RuntimeFortsObservation forts;
     const bool map_ok = request_main_thread_map_snapshot(context, &nearby, &forts);
 
-    bool has_player_position = map_ok && nearby.has_player_position;
+    // Player position is read independently of the pokemon-cell walk, so it must
+    // not be gated on map_ok (which reflects the nearby/spawn read succeeding).
+    bool has_player_position = nearby.has_player_position;
     double player_latitude = nearby.player_latitude;
     double player_longitude = nearby.player_longitude;
     if (!has_player_position) {
@@ -58,7 +60,10 @@ bool run_runtime_scan_map(
     response.cycle_id = cycle_id;
     response.nearby_available = map_ok && binding.map_entity_read_verified;
     response.nearby = nearby;
-    response.forts_available = map_ok && binding.forts_read_verified;
+    // Forts come from their own directory binding; the reader populates them
+    // before the fragile cell walk that can flip map_ok false, so gate on the
+    // fort binding alone rather than on the nearby/spawn read succeeding.
+    response.forts_available = binding.forts_read_verified;
     response.forts = forts;
     response.inventory_available = inventory_ok;
     response.inventory = inventory;
