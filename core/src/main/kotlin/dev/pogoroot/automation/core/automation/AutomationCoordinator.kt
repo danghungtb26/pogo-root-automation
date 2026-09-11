@@ -11,6 +11,7 @@ import dev.pogoroot.automation.core.model.FortSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
 import dev.pogoroot.automation.core.model.InventorySnapshot
 import dev.pogoroot.automation.core.model.NearbySnapshot
+import dev.pogoroot.automation.core.model.NearbySpawn
 import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
 
 data class AutomationSnapshot(
@@ -53,10 +54,16 @@ class AutomationCoordinator(
         snapshot: AutomationSnapshot,
         policy: AutomationPolicy,
     ): List<AutomationAction> {
+        val target = overworldTargetSpawn(snapshot)
         val context = PlanningContext(
             snapshot = snapshot,
             policy = policy,
             encounterCatchDecision = encounterCatchDecision(snapshot, policy),
+            overworldTargetSpawn = target,
+            // A catch (direct-map) or an open-encounter was intended this cycle;
+            // catch_spin uses this to force a spin when the pouch is out of balls.
+            overworldCatchIntended = target != null &&
+                ((policy.autoCatch && policy.catchPolicy.catchAll) || policy.autoEncounter),
         )
         return planners.flatMap { it.plan(context) }
     }
@@ -75,5 +82,18 @@ class AutomationCoordinator(
         val encounter = snapshot.encounter ?: return null
         if (!policy.autoCatch || snapshot.outOfBalls) return null
         return catchPlanner.decide(encounter, policy.catchPolicy)
+    }
+
+    /** The soonest-expiring nearby spawn to target this overworld cycle, if any. */
+    private fun overworldTargetSpawn(snapshot: AutomationSnapshot): NearbySpawn? {
+        if (snapshot.lifecycleState != GameLifecycleState.OVERWORLD) return null
+        val nearby = snapshot.nearby ?: return null
+        return nearby.spawns
+            .asSequence()
+            .filter { spawn ->
+                val expiresAt = spawn.expiresAtEpochMs
+                expiresAt == null || expiresAt > nearby.observedAtEpochMs
+            }
+            .minByOrNull { it.expiresAtEpochMs ?: Long.MAX_VALUE }
     }
 }

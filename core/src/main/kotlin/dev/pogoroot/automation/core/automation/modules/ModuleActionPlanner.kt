@@ -4,18 +4,26 @@ import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.AutomationPolicy
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
 import dev.pogoroot.automation.core.automation.CatchDecision
+import dev.pogoroot.automation.core.model.NearbySpawn
 
 /**
  * One planning cycle's inputs, shared across module planners. The coordinator
- * computes cross-module derived values once — e.g. the active-encounter catch
- * decision, needed by both the encounter berry assist and the catch throw — so the
- * per-module planners stay independent and never duplicate a decision.
+ * computes cross-module derived values once so the per-module planners stay
+ * independent and never duplicate a decision:
+ *
+ * - [encounterCatchDecision]: needed by both the encounter berry assist and throw.
+ * - [overworldTargetSpawn]: the soonest-expiring spawn, targeted by either
+ *   catch_spin's direct-map catch or the encounter module's open-encounter (the two
+ *   are mutually exclusive per policy).
+ * - [overworldCatchIntended]: whether a catch or an open was intended this cycle,
+ *   used by catch_spin to force a spin (farm balls) when the pouch is empty.
  */
 data class PlanningContext(
     val snapshot: AutomationSnapshot,
     val policy: AutomationPolicy,
-    /** Catch decision for the active encounter; null in overworld or when not catching. */
     val encounterCatchDecision: CatchDecision? = null,
+    val overworldTargetSpawn: NearbySpawn? = null,
+    val overworldCatchIntended: Boolean = false,
 )
 
 /**

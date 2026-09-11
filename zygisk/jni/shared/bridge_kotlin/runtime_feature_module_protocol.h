@@ -38,9 +38,6 @@ struct Request {
     std::string package_name;
 };
 
-/** Implemented by runtime_feature_modules.inc inside the injected process. */
-bool module_enabled(Module module);
-
 inline bool valid_module(uint32_t value) {
     return value >= static_cast<uint32_t>(Module::kCatchSpin) &&
         value <= static_cast<uint32_t>(Module::kEncounter);

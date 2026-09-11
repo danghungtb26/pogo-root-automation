@@ -1,6 +1,7 @@
-// Gameplay tags: 2 OpenEncounter, 3 Catch, 4 Spin, 9 Catch(close-preview),
-// 10 Catch(structured throw; also needs encounter), 11 reserved, 12 Catch(direct map).
-constexpr uint32_t kCatchSpinActionTags[] = {2U, 3U, 4U, 9U, 10U, 11U, 12U};
+// catch_spin owns the map-automation actions only: direct-map catch (12) and
+// spin (4). The encounter-based flow (open/throw/snapshot/berry) belongs to the
+// encounter module.
+constexpr uint32_t kCatchSpinActionTags[] = {4U, 12U};
 // Control actions: 5 = SCAN_MAP (pogo_runtime_control::Action::kScanMap).
 constexpr uint32_t kCatchSpinControlActions[] = {5U};
 
@@ -42,20 +43,14 @@ public:
 
     bool handle_action(
         ProbeContext &context,
-        uint32_t action_tag,
+        uint32_t /*action_tag*/,  // owner map routes only tags 4/12 here
         const std::vector<uint8_t> &command,
         RuntimeActionResult *result,
         std::string *command_id
     ) override {
-        // Structured throw (tag 10) drives the encounter throw hooks, so it also
-        // requires the encounter module to be enabled.
-        if (action_tag == 10U && !module_enabled(Module::kEncounter)) {
-            result->phase = kCommandPhaseRejected;
-            result->error_code = "runtime_module_disabled";
-            result->message = "structured throw requires the encounter module";
-            return true;
-        }
         RuntimeActionCommand action;
+        // Direct-map catch (tag 12). parse accepts the wider catch tag set, but the
+        // owner map only routes 12 here; execute_runtime_catch takes the direct path.
         if (parse_runtime_catch_command(command, &action)) {
             *command_id = action.command_id;
             *result = execute_runtime_catch(context, action);
@@ -64,11 +59,6 @@ public:
         if (parse_runtime_spin_command(command, &action)) {
             *command_id = action.command_id;
             *result = execute_runtime_spin(context, action);
-            return true;
-        }
-        if (parse_runtime_open_encounter_command(command, &action)) {
-            *command_id = action.command_id;
-            *result = execute_runtime_open_encounter(context, action);
             return true;
         }
         return false;

@@ -1,4 +1,8 @@
-constexpr uint32_t kEncounterActionTags[] = {8U};  // UseBerry
+// encounter owns the encounter-based flow: open the encounter (2), the in-encounter
+// catch throw (3 default, 9 close-preview, 10 structured throw), the berry assist
+// (8), and the GO snapshot (11; not yet executed natively). Direct-map catch (12)
+// and spin (4) stay with catch_spin.
+constexpr uint32_t kEncounterActionTags[] = {2U, 3U, 8U, 9U, 10U, 11U};
 
 class EncounterModule final : public RuntimeFeatureModuleBase {
 public:
@@ -49,10 +53,26 @@ public:
         std::string *command_id
     ) override {
         RuntimeActionCommand action;
-        if (!parse_runtime_use_berry_command(command, &action)) return false;
-        *command_id = action.command_id;
-        *result = execute_runtime_use_berry(context, action);
-        return true;
+        if (parse_runtime_use_berry_command(command, &action)) {
+            *command_id = action.command_id;
+            *result = execute_runtime_use_berry(context, action);
+            return true;
+        }
+        // Open the encounter (tag 2).
+        if (parse_runtime_open_encounter_command(command, &action)) {
+            *command_id = action.command_id;
+            *result = execute_runtime_open_encounter(context, action);
+            return true;
+        }
+        // In-encounter catch throw (tags 3/9/10). The owner map keeps direct-map
+        // catch (12) with catch_spin; execute_runtime_catch takes the encounter path
+        // for these tags.
+        if (parse_runtime_catch_command(command, &action)) {
+            *command_id = action.command_id;
+            *result = execute_runtime_catch(context, action);
+            return true;
+        }
+        return false;
     }
 };
 

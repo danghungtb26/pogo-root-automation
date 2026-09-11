@@ -1,7 +1,4 @@
 namespace pogo_runtime_module {
-// Defined below; forward-declared so a module.inc (included before the definition)
-// can query another module's enabled state for a cross-module action prerequisite.
-bool module_enabled(Module module);
 namespace {
 void clear_throw_events(ProbeContext &context) {
     RuntimeThrowEventRecord discarded{};
@@ -269,11 +266,6 @@ bool initialize_runtime_modules(int status_fd) {
 
 bool module_registry_initialized() {
     return g_registry_initialized;
-}
-
-bool module_enabled(Module module) {
-    RuntimeFeatureModuleBase *feature = resolve_module(module);
-    return feature != nullptr && feature->enabled();
 }
 
 const char *module_name(Module module) {

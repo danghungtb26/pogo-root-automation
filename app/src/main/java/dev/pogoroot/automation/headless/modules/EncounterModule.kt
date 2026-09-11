@@ -7,13 +7,14 @@ import dev.pogoroot.automation.headless.BerryMode
 import dev.pogoroot.automation.headless.RuntimeFeatureModuleDescriptor
 
 /**
- * encounter: in-encounter assistance — berry, throw profile/excellent (future AR).
- * Does not request or represent a guaranteed server-side capture result. Mirrors
- * the native modules/encounter ownership.
+ * encounter: the encounter-based flow — open encounter (2), catch throw (3 default,
+ * 9 close-preview, 10 structured throw), berry assist (8), GO snapshot (11).
+ * Does not represent a guaranteed server-side capture result. Mirrors the native
+ * modules/encounter ownership.
  */
 val EncounterModuleDescriptor = RuntimeFeatureModuleDescriptor(
     module = RuntimeFeatureModule.ENCOUNTER,
-    gameplayActionTags = setOf(8),
+    gameplayActionTags = setOf(2, 3, 8, 9, 10, 11),
     controlActions = emptySet(),
     isDesired = { config ->
         config.berryMode != BerryMode.NONE ||
