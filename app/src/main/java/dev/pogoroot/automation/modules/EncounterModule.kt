@@ -4,6 +4,8 @@ import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.core.automation.CurvePreference
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.config.BerryMode
+import dev.pogoroot.automation.runtime.ExecutionMode
+import dev.pogoroot.automation.runtime.ModuleTriggerType
 import dev.pogoroot.automation.runtime.RuntimeFeatureModuleDescriptor
 
 /**
@@ -16,6 +18,11 @@ val EncounterModuleDescriptor = RuntimeFeatureModuleDescriptor(
     module = RuntimeFeatureModule.ENCOUNTER,
     gameplayActionTags = setOf(2, 3, 8, 9, 10, 11),
     controlActions = emptySet(),
+    // Periodic: drives the encounter open/throw flow on its own cadence
+    // (coupled with catch_spin on the shared overworld target — see Phần 4).
+    triggerType = ModuleTriggerType.PERIODIC,
+    // Exclusive: encounter open/throw drives the world/encounter UI.
+    executionMode = ExecutionMode.EXCLUSIVE,
     isDesired = { config ->
         config.berryMode != BerryMode.NONE ||
             config.catchThrowQuality != ThrowQualityTarget.ANY ||

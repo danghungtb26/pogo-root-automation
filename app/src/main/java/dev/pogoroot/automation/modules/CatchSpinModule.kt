@@ -2,6 +2,8 @@ package dev.pogoroot.automation.modules
 
 import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
+import dev.pogoroot.automation.runtime.ExecutionMode
+import dev.pogoroot.automation.runtime.ModuleTriggerType
 import dev.pogoroot.automation.runtime.RuntimeFeatureModuleDescriptor
 
 /**
@@ -14,6 +16,11 @@ val CatchSpinModuleDescriptor = RuntimeFeatureModuleDescriptor(
     module = RuntimeFeatureModule.CATCH_SPIN,
     gameplayActionTags = setOf(4, 12),
     controlActions = setOf(ModuleControlAction.SCAN_MAP),
+    // Periodic: pulls its own SCAN_MAP world snapshot on a cadence.
+    triggerType = ModuleTriggerType.PERIODIC,
+    // Exclusive: TRY_CATCH/TRY_SPIN drive the world UI; block other modules
+    // for the action window (see docs/automation-flow.md — Phần 3.2c).
+    executionMode = ExecutionMode.EXCLUSIVE,
     isDesired = { config ->
         config.autoCatch || config.autoSpin
     },

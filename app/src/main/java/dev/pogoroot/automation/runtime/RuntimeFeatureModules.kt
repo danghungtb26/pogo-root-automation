@@ -25,13 +25,46 @@ data class RuntimeFeatureModuleSnapshot(
 )
 
 /**
+ * How a module's planning is triggered (see docs/automation-flow.md — Phần 3.2b).
+ * Orthogonal to [ExecutionMode].
+ */
+enum class ModuleTriggerType {
+    /** Driven purely by native-pushed lifecycle/observation events; no own cadence. */
+    REACTIVE,
+
+    /** Self-emits a request on its own cadence (e.g. catch_spin's SCAN_MAP pull). */
+    PERIODIC,
+}
+
+/**
+ * How a module's action execution interacts with other modules (see
+ * docs/automation-flow.md — Phần 3.2c). Orthogonal to [ModuleTriggerType].
+ */
+enum class ExecutionMode {
+    /**
+     * Holds an exclusive lock for its action window (dispatch → authoritative
+     * result or timeout); blocks every other module while held. Two EXCLUSIVE
+     * modules also mutually exclude.
+     */
+    EXCLUSIVE,
+
+    /**
+     * Runs concurrently with other CONCURRENT modules; only blocked while an
+     * EXCLUSIVE module is holding the lock.
+     */
+    CONCURRENT,
+}
+
+/**
  * Client-side per-module descriptor: the single source of truth for the concerns
  * the Kotlin controller owns — mirroring a native `module.inc`'s self-contained
  * declaration, for the client's role (configure + send, not route + execute).
- * Each module's descriptor lives in its own file under `headless/modules/`.
+ * Each module's descriptor lives in its own file under `modules/`.
  *
  * - [gameplayActionTags] / [controlActions]: which actions this module owns
  *   (mirror of the native per-module `action_ownership()`).
+ * - [triggerType] / [executionMode]: the two orthogonal classification axes that
+ *   drive how the module is scheduled and executed (see docs/automation-flow.md).
  * - [isDesired]: the config rule that makes this module a desired enable target.
  *
  * The wire codec ([dev.pogoroot.automation.bridge.BridgeActionCodec]) stays shared,
@@ -41,6 +74,8 @@ data class RuntimeFeatureModuleDescriptor(
     val module: RuntimeFeatureModule,
     val gameplayActionTags: Set<Int>,
     val controlActions: Set<ModuleControlAction>,
+    val triggerType: ModuleTriggerType,
+    val executionMode: ExecutionMode,
     val isDesired: (HeadlessAutomationConfig) -> Boolean,
 )
 
