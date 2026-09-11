@@ -37,6 +37,14 @@ data class RuntimeControlSnapshot(
  */
 class RuntimeLifecycleCoordinator(
     private val bridge: RuntimeBridgeClient,
+    /**
+     * Resolves which feature modules should be enabled for a given config. Injected
+     * so the service can gate catch_spin by the master arm (the 2-axis lifecycle in
+     * docs/automation-flow.md — Phần 1) without this control plane knowing about arm
+     * state. Defaults to the plain config-desired set.
+     */
+    private val desiredModulesFor: (HeadlessAutomationConfig) -> Set<RuntimeFeatureModule> =
+        { it.desiredRuntimeFeatureModules() },
 ) {
     private companion object {
         const val AUTO_DIAGNOSTIC_INITIAL_DELAY_MS = 3_000L
@@ -200,7 +208,7 @@ class RuntimeLifecycleCoordinator(
         ready: BridgeEvent.RuntimeReady,
         forceUnavailableRetry: Boolean = false,
     ) {
-        val desiredModules = config.desiredRuntimeFeatureModules()
+        val desiredModules = desiredModulesFor(config)
         RuntimeFeatureModule.entries.forEach { module ->
             val desired = module in desiredModules
             val current = modules[module]
