@@ -11,19 +11,23 @@ constexpr uint32_t kBridgeCommandType = 4U;
 constexpr uint32_t kPayloadVersion = 1U;
 constexpr uint32_t kMarker = 0x52544354U;  // ASCII "RTCT"
 
+// Runtime lifecycle control actions only. Feature-module control actions (e.g.
+// SCAN_MAP) are NOT listed here: they are plain wire numbers owned by a module's
+// declared control_actions and routed via the module owner map, exactly like
+// gameplay action tags. The transport carries the action as a raw number
+// (Request::action_wire) and never whitelists it.
 enum class Action : uint32_t {
     kStart = 1U,
     kStop = 2U,
     kDiagnostic = 3U,
-    kSnapshot = 4U,
-    kScanMap = 5U,
+    // 4U (snapshot) retired; 5U (scan map) is a module-owned control action.
 };
 
 struct Request {
     uint64_t message_seq = 0U;
     std::string runtime_session_id;
     std::string request_id;
-    Action action = Action::kDiagnostic;
+    uint32_t action_wire = static_cast<uint32_t>(Action::kDiagnostic);
     uint64_t expires_at_elapsed_ns = 0U;
     uint32_t pid = 0U;
     std::string process_name;
@@ -111,30 +115,14 @@ inline bool parse(const std::vector<uint8_t> &command, Request *request) {
         return false;
     }
 
-    switch (action_wire) {
-        case static_cast<uint32_t>(Action::kStart):
-            request->action = Action::kStart;
-            return true;
-        case static_cast<uint32_t>(Action::kStop):
-            request->action = Action::kStop;
-            return true;
-        case static_cast<uint32_t>(Action::kDiagnostic):
-            request->action = Action::kDiagnostic;
-            return true;
-        case static_cast<uint32_t>(Action::kSnapshot):
-            request->action = Action::kSnapshot;
-            break;
-        case static_cast<uint32_t>(Action::kScanMap):
-            request->action = Action::kScanMap;
-            break;
-        default:
-            return false;
-    }
-    if (offset < command.size()) {
-        if (!read_u64(command, &offset, &request->cycle_id)) return false;
-    }
-    if (offset != command.size()) return false;
-    return request->action != Action::kScanMap || request->cycle_id > 0U;
+    // The action is carried as a raw wire number and not whitelisted here: the
+    // dispatcher validates it (runtime lifecycle set + module owner map), exactly
+    // like a gameplay action tag. Unknown actions are rejected there, fail-closed.
+    request->action_wire = action_wire;
+    // cycle_id is a generic trailing field on every control frame (0 = unused);
+    // actions that need it validate it in their own handler.
+    if (!read_u64(command, &offset, &request->cycle_id)) return false;
+    return offset == command.size();
 }
 
 }  // namespace pogo_runtime_control

@@ -260,6 +260,7 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(field_static_get_value, Il2CppFieldStaticGetValue, "il2cpp_field_static_get_value");
     RESOLVE(type_get_class_or_element_class, Il2CppTypeGetClassOrElementClass, "il2cpp_type_get_class_or_element_class");
     RESOLVE(class_get_type, Il2CppClassGetType, "il2cpp_class_get_type");
+    RESOLVE(class_get_parent, Il2CppClassGetParent, "il2cpp_class_get_parent");
     RESOLVE(type_get_object, Il2CppTypeGetObject, "il2cpp_type_get_object");
     RESOLVE(object_new, Il2CppObjectNew, "il2cpp_object_new");
     RESOLVE(runtime_object_init, Il2CppRuntimeObjectInit, "il2cpp_runtime_object_init");

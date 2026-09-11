@@ -66,6 +66,56 @@ void log_direct_capture_method_metadata(const void *method) {
     );
 }
 
+// G1 Step 1 (read-only device diagnostic). TryCapture returns
+// RpcPromise<CatchPokemonOutProto> : Promise<CatchPokemonOutProto>. The dump has
+// no reliable field offsets for the generic promise, so log the runtime class +
+// parent chain field name/offset/type once to capture the completion/value layout
+// on the pinned build. This does not read game state and never mutates anything.
+void log_direct_catch_promise_layout(const Il2CppApi &api, void *promise) {
+    if (promise == nullptr || api.object_get_class == nullptr ||
+        api.class_get_fields == nullptr || api.field_get_name == nullptr ||
+        api.field_get_offset == nullptr) {
+        return;
+    }
+    Il2CppClass *klass = api.object_get_class(promise);
+    for (uint32_t depth = 0U; klass != nullptr && depth < 6U; ++depth) {
+        const char *class_name = api.class_get_name == nullptr ? nullptr : api.class_get_name(klass);
+        void *iterator = nullptr;
+        for (uint32_t field_count = 0U; field_count < 64U; ++field_count) {
+            const void *field = api.class_get_fields(klass, &iterator);
+            if (field == nullptr) break;
+            const char *field_name = api.field_get_name(field);
+            const int32_t offset = api.field_get_offset(field);
+            const Il2CppType *field_type = api.field_get_type == nullptr
+                ? nullptr : api.field_get_type(field);
+            const char *type_name = (field_type == nullptr || api.type_get_name == nullptr)
+                ? "<unknown>" : api.type_get_name(field_type);
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "direct catch promise layout depth=%u class=%s field=%s offset=0x%x type=%s",
+                depth,
+                class_name == nullptr ? "<unknown>" : class_name,
+                field_name == nullptr ? "<unknown>" : field_name,
+                offset,
+                type_name
+            );
+        }
+        klass = api.class_get_parent == nullptr ? nullptr : api.class_get_parent(klass);
+    }
+}
+
+// Fire WildMapPokemon.SendEncounterRequest (RPC Encounter=102) before a direct
+// catch when the target has no server-side encounter yet. Disable to fall back
+// to a bare CatchPokemon (103) attempt for A/B verification on device.
+constexpr bool kBackgroundEncounterEnabled = true;
+
+// WildMapPokemon field offsets (reverse-verified, build 0.427.0 arm64-v8a).
+// Only used after the object is exact-class verified as WildMapPokemon.
+constexpr size_t kWildMapPokemonLocationProviderOffset = 0x228U;  // egwm ILocationProvider
+constexpr size_t kWildMapPokemonEncounterRpcHandlerOffset = 0x230U;  // egwn IRpcHandler
+constexpr size_t kWildMapPokemonEncounterOutProtoOffset = 0x258U;  // egws EncounterOutProto
+
 MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     ProbeContext &context,
     uint64_t encounter_id
@@ -120,6 +170,72 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         return MainThreadActionOutcome::kRejected;
     }
 
+    // Background encounter gate. CatchPokemon (103) needs an encounter that the
+    // server has opened; WildMapPokemon caches the EncounterOutProto in field
+    // `egws` once SendEncounterRequest (102) resolves. If it is still null, fire
+    // the encounter request (a pure RPC, not the encounter UI) and ask the
+    // controller to retry the same target on a later cycle. The Unity main thread
+    // is never blocked on the async response: the game's own continuation fills
+    // `egws`, and the next cycle re-reads it here before throwing a ball.
+    auto read_wild_field = [map_pokemon](size_t offset) {
+        void *value = nullptr;
+        memcpy(&value, static_cast<const uint8_t *>(map_pokemon) + offset, sizeof(value));
+        return value;
+    };
+    void *encounter_out_proto = read_wild_field(kWildMapPokemonEncounterOutProtoOffset);
+    if (encounter_out_proto == nullptr) {
+        void *location_provider = read_wild_field(kWildMapPokemonLocationProviderOffset);
+        void *encounter_rpc_handler = read_wild_field(kWildMapPokemonEncounterRpcHandlerOffset);
+        if (!kBackgroundEncounterEnabled || !binding.background_encounter_verified ||
+            binding.map_pokemon_send_encounter_request == nullptr ||
+            !is_probable_managed_pointer(location_provider) ||
+            !is_probable_managed_pointer(encounter_rpc_handler)) {
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "direct map catch rejected id=%llu: no open encounter and background request unavailable (enabled=%d verified=%d loc=%p rpc=%p)",
+                static_cast<unsigned long long>(encounter_id),
+                kBackgroundEncounterEnabled ? 1 : 0,
+                binding.background_encounter_verified ? 1 : 0,
+                location_provider,
+                encounter_rpc_handler
+            );
+            return MainThreadActionOutcome::kRejected;
+        }
+        void *encounter_exception = nullptr;
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime action invoking action=DIRECT_MAP_SEND_ENCOUNTER id=%llu object=%p method=%p",
+            static_cast<unsigned long long>(encounter_id),
+            map_pokemon,
+            binding.map_pokemon_send_encounter_request
+        );
+        api.runtime_invoke(
+            binding.map_pokemon_send_encounter_request,
+            map_pokemon,
+            nullptr,
+            &encounter_exception
+        );
+        if (encounter_exception != nullptr) {
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "runtime action background encounter exception id=%llu exception=%p",
+                static_cast<unsigned long long>(encounter_id),
+                encounter_exception
+            );
+            return MainThreadActionOutcome::kIndeterminate;
+        }
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime action background encounter requested id=%llu; retry after server response",
+            static_cast<unsigned long long>(encounter_id)
+        );
+        return MainThreadActionOutcome::kEncounterRequested;
+    }
+
     void *spawn_point_id_object = invoke_runtime_method(
         api,
         binding.map_pokemon_get_spawn_point_id,
@@ -162,9 +278,22 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         return MainThreadActionOutcome::kOutOfBalls;
     }
 
-    // This is an ordinary Poke Ball intent. No hit, curve, excellent, or
-    // guaranteed-catch flag is synthesized by the native bridge.
+    // Poke Ball intent forced to a guaranteed Excellent + curveball + bullseye throw.
+    // Verified from libil2cpp.so (build 0.427.0, arm64-v8a):
+    //   PokeballThrow.get_ServerReticleSize @0x89F42D4:  serverReticle = 2.0 - ReticleSize
+    //   MapPokemon.TryCapture @0x7F91ECC builds CatchPokemonProto:
+    //     NormalizedReticleSize = serverReticle          (higher = better)
+    //     NormalizedHitPosition = HitBullseye ? 1.0 : 0.0
+    //     SpinModifier          = Spinning    ? 1.0 : 0.0
+    //     HitPokemon            = !Missed
+    //   PokeballThrow.GetGrade @0x89F0DA0: Excellent when
+    //     serverReticle >= EncounterSettingsProto.ExcellentThrowThreshold (~1.7).
+    // reticle_size = 0.05 -> serverReticle = 1.95: solidly Excellent without sending the
+    // physically-impossible perfect 2.0. Set 0.0 for the absolute maximum if desired.
     DirectMapPokeballThrow throw_data;
+    throw_data.reticle_size = 0.05F;
+    throw_data.hit_bullseye = 1U;
+    throw_data.spinning = 1U;
     const auto *method_view = reinterpret_cast<const DirectRuntimeMethodInfoView *>(
         binding.map_pokemon_try_capture
     );
@@ -210,6 +339,10 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         promise,
         exception
     );
+    // G1 Step 1: capture the RpcPromise<CatchPokemonOutProto> layout on the pinned
+    // build so the completion/value field offsets can be read for the outcome
+    // observer (Step 2). Read-only; safe to run every invocation.
+    log_direct_catch_promise_layout(api, promise);
     return promise == nullptr
         ? MainThreadActionOutcome::kIndeterminate
         : MainThreadActionOutcome::kInvoked;

@@ -6,22 +6,30 @@ import java.io.DataInputStream
 import java.io.DataOutputStream
 
 /**
- * Control-plane request carried inside the existing COMMAND frame for bridge-v2
- * compatibility. [MARKER] separates runtime lifecycle traffic from gameplay
- * [BridgeEvent.AutomationCommand] payloads without overloading an AutomationAction.
+ * Runtime lifecycle control actions only. Feature-module control actions (e.g.
+ * SCAN_MAP) are declared per-module in [ModuleControlAction], not here, so module
+ * actions stay out of the shared enum. The wire carries the action as a raw number
+ * ([RuntimeControlRequest.actionWire]); the native dispatcher validates it against
+ * this lifecycle set plus the module owner map, like a gameplay action tag.
  */
 enum class RuntimeControlAction(val wireValue: Int) {
     START(1),
     STOP(2),
     DIAGNOSTIC(3),
-    SNAPSHOT(4),
-    SCAN_MAP(5),
+    // 4 (snapshot) retired; 5 (scan map) is a module-owned control action.
 }
 
+/**
+ * Control-plane request carried inside the existing COMMAND frame for bridge-v2
+ * compatibility. [MARKER] separates runtime lifecycle traffic from gameplay
+ * [BridgeEvent.AutomationCommand] payloads without overloading an AutomationAction.
+ * [actionWire] is the raw action number (a [RuntimeControlAction] or a
+ * [ModuleControlAction] wire value); it is not whitelisted by the transport.
+ */
 data class RuntimeControlRequest(
     val runtimeSessionId: String,
     val requestId: String,
-    val action: RuntimeControlAction,
+    val actionWire: Int,
     val expiresAtElapsedNs: Long,
     val pid: Int,
     val processName: String,
@@ -43,11 +51,6 @@ object RuntimeControlPayloadCodec {
         require(request.pid > 0) { "runtime pid is required" }
         require(request.processName.isNotBlank()) { "runtime process is required" }
         require(request.packageName.isNotBlank()) { "runtime package is required" }
-        if (request.action == RuntimeControlAction.SCAN_MAP) {
-            require(request.cycleId != null && request.cycleId > 0L) {
-                "scan map cycle is required"
-            }
-        }
 
         ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
@@ -55,12 +58,13 @@ object RuntimeControlPayloadCodec {
                 codec.writeString(output, request.runtimeSessionId)
                 codec.writeString(output, request.requestId)
                 output.writeInt(MARKER)
-                output.writeInt(request.action.wireValue)
+                output.writeInt(request.actionWire)
                 output.writeLong(request.expiresAtElapsedNs)
                 output.writeInt(request.pid)
                 codec.writeString(output, request.processName)
                 codec.writeString(output, request.packageName)
-                request.cycleId?.let(output::writeLong)
+                // Generic trailing field on every control frame (0 = unused).
+                output.writeLong(request.cycleId ?: 0L)
             }
             bytes.toByteArray().also {
                 require(it.size <= BridgeProtocol.HARD_MESSAGE_BYTES) {
@@ -81,29 +85,25 @@ object RuntimeControlPayloadCodec {
             val runtimeSessionId = codec.readString(input)
             val requestId = codec.readString(input)
             require(input.readInt() == MARKER) { "invalid runtime control marker" }
+            // Raw action number (not whitelisted here); the native dispatcher
+            // validates it against the lifecycle set + module owner map.
             val actionWire = input.readInt()
-            val action = RuntimeControlAction.entries.firstOrNull { it.wireValue == actionWire }
-                ?: error("invalid runtime control action: $actionWire")
             val request = RuntimeControlRequest(
                 runtimeSessionId = runtimeSessionId,
                 requestId = requestId,
-                action = action,
+                actionWire = actionWire,
                 expiresAtElapsedNs = input.readLong(),
                 pid = input.readInt(),
                 processName = codec.readString(input),
                 packageName = codec.readString(input),
-                cycleId = if (input.available() > 0) input.readLong() else null,
+                // Generic trailing field on every control frame (0 = unused).
+                cycleId = input.readLong(),
             )
             require(input.available() == 0) { "trailing bytes in runtime control payload" }
             require(request.runtimeSessionId.isNotBlank()) { "runtime session is required" }
             require(request.requestId.isNotBlank()) { "runtime control request id is required" }
             require(request.expiresAtElapsedNs > 0L) { "runtime control expiry is required" }
             require(request.pid > 0) { "runtime pid is required" }
-            if (request.action == RuntimeControlAction.SCAN_MAP) {
-                require(request.cycleId != null && request.cycleId > 0L) {
-                    "scan map cycle is required"
-                }
-            }
             request
         }
     }

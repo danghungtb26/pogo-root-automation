@@ -177,9 +177,9 @@ bool read_active_runtime_encounter(
     return false;
 }
 
-// Mode B seam: mark the observed world as changed so the next observer cycle
-// re-reads it. Called by the periodic fallback today and by the map-query batch
-// callback hook once that is installed.
+// Mark the observed world as changed so the next observer cycle re-reads it.
+// Used only by the legacy push-observer path (a periodic fallback tick) when the
+// runtime is not in explicit SCAN_MAP pull mode.
 void mark_world_dirty(ProbeContext &context) {
     context.world_dirty.store(true, std::memory_order_relaxed);
 }
@@ -213,20 +213,18 @@ void *runtime_observation_thread(void *opaque_context) {
         }
         ++encounter_owner_refresh_ticks;
         const RuntimeBinding binding = runtime_binding_snapshot(*context);
-        // Mode B: re-read the world only when a map-change signal marked it dirty,
-        // plus a rare reconcile re-read for recovery. Forts do not depend on the
-        // cell traversal, so either reader source is enough; each payload is still
-        // published only under its own flag.
+        // Legacy push-observer path: re-read the world on the dirty flag plus a
+        // rare reconcile re-read for recovery. Disabled in explicit SCAN_MAP pull
+        // mode (nearby/forts are then read on demand per cycle). Forts do not
+        // depend on the cell traversal, so either reader source is enough; each
+        // payload is still published only under its own flag.
         const bool observe_source =
             !g_runtime_explicit_snapshot_mode.load() &&
             (binding.map_entity_read_verified || binding.forts_read_verified);
         if (observe_source && context->main_thread_bridge.ready) {
-            // Until the map-query batch callback is inline-hooked (it needs a
-            // build-specific prologue from the live libil2cpp.so), a periodic tick
-            // marks the world dirty so observation keeps running at the mode-C
-            // cadence. Once the hook is installed it becomes the dirty source and
-            // this fallback is skipped.
-            if (!binding.map_query_hook_installed && nearby_ticks >= kFallbackPollTicks) {
+            // A periodic tick marks the world dirty so the observer keeps re-reading
+            // at the fallback poll cadence.
+            if (nearby_ticks >= kFallbackPollTicks) {
                 mark_world_dirty(*context);
                 nearby_ticks = 0U;
             }
@@ -305,7 +303,7 @@ void *runtime_observation_thread(void *opaque_context) {
             if (left_encounter) context->active_encounter_id.store(0U);
             sent_initial_state = true;
         }
-        // Per-module observation (mode B: root orchestrates, modules trigger).
+        // Per-module observation (root orchestrates, modules trigger).
         // Each enabled module observes its own concern (e.g. discard -> inventory)
         // on an attached il2cpp thread; the root owns thread attach + cadence base.
         if (context->il2cpp_api_ready &&

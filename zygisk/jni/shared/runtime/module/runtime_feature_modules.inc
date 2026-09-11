@@ -1,10 +1,23 @@
 namespace pogo_runtime_module {
+// Defined below; forward-declared so a module.inc (included before the definition)
+// can query another module's enabled state for a cross-module action prerequisite.
+bool module_enabled(Module module);
 namespace {
 void clear_throw_events(ProbeContext &context) {
     RuntimeThrowEventRecord discarded{};
     while (context.throw_events.pop(&discarded)) {
     }
 }
+
+// Declarative action ownership. A module returns the gameplay action tags and
+// control actions it owns; the registry builds a direct owner map at registration
+// time so dispatch is an O(1) lookup instead of probing every module per command.
+struct ModuleActionOwnership {
+    const uint32_t *gameplay_tags = nullptr;
+    size_t gameplay_tag_count = 0U;
+    const uint32_t *control_actions = nullptr;
+    size_t control_action_count = 0U;
+};
 
 class RuntimeFeatureModuleBase {
 public:
@@ -19,6 +32,36 @@ public:
     // own cadence via ObserverTickContext::tick. Default: nothing to observe.
     virtual void observe(ObserverTickContext &) {}
 
+    // Declares the gameplay action tags and control actions this module owns.
+    // The registry reads it once at registration to build the owner map. Keeping
+    // ownership + parsing + execution inside the module means no central dispatch
+    // or gate switch has to know any module's commands.
+    virtual ModuleActionOwnership action_ownership() const { return ModuleActionOwnership{}; }
+    // Parse + execute a command this module owns. Called only when the registry
+    // routed this tag to this module and the module is enabled. *command_id is
+    // pre-set to the frame's command id (usable for rejections); overwrite it with
+    // the parsed action's id on success. Returns true if handled (result filled).
+    virtual bool handle_action(
+        ProbeContext & /*context*/,
+        uint32_t /*action_tag*/,
+        const std::vector<uint8_t> & /*command*/,
+        RuntimeActionResult * /*result*/,
+        std::string * /*command_id*/
+    ) {
+        return false;
+    }
+
+    // Handles a control action this module owns (declared via action_ownership).
+    // Some control actions (e.g. SCAN_MAP) belong to a module's automation loop
+    // rather than the runtime lifecycle (START/STOP/DIAGNOSTIC/SNAPSHOT).
+    virtual bool handle_control_action(
+        ProbeContext & /*context*/,
+        const char * /*request_id*/,
+        uint64_t /*cycle_id*/
+    ) {
+        return false;
+    }
+
     bool enabled() const { return enabled_.load(); }
     void set_enabled(bool value) { enabled_.store(value); }
 
@@ -26,12 +69,32 @@ private:
     std::atomic<bool> enabled_{false};
 };
 
+// Self-registration: each module.inc defines its own instance plus a static
+// registration entry appended to this intrusive list at static-init time. Adding
+// or removing a module is therefore a single-file change — the framework keeps no
+// hardcoded module list and no fixed module count.
+struct RuntimeModuleRegistration {
+    RuntimeFeatureModuleBase *module;
+    RuntimeModuleRegistration *next;
+};
+RuntimeModuleRegistration *g_runtime_module_registration_head = nullptr;
+bool append_runtime_module_registration(RuntimeModuleRegistration *entry) {
+    if (entry == nullptr || entry->module == nullptr) return false;
+    entry->next = g_runtime_module_registration_head;
+    g_runtime_module_registration_head = entry;
+    return true;
+}
+
 #include "../../../modules/catch_spin/module.inc"
 #include "../../../modules/discard/module.inc"
 #include "../../../modules/transfer/module.inc"
 #include "../../../modules/encounter/module.inc"
 
 constexpr size_t kMaxRuntimeFeatureModules = 8U;
+// Owner-map bounds: gameplay action tags and control actions index a direct table.
+// Grow if a new tag/action exceeds these; out-of-range values are simply unowned.
+constexpr uint32_t kMaxGameplayActionTag = 32U;
+constexpr uint32_t kMaxControlAction = 16U;
 constexpr uint32_t kModuleLoadCompletedPhase = 3U;
 constexpr uint32_t kModuleLoadFailedPhase = 5U;
 constexpr const char *kModuleLoadCommandPrefix = "runtime-module-load:";
@@ -41,6 +104,22 @@ public:
     bool register_module(RuntimeFeatureModuleBase &module) {
         if (count_ >= kMaxRuntimeFeatureModules || resolve(module.id()) != nullptr) {
             return false;
+        }
+        // Build the direct owner map from the module's declared ownership so
+        // dispatch is an O(1) lookup. First owner of a tag wins (registration
+        // order); a tag/action outside the table bounds stays unowned.
+        const ModuleActionOwnership ownership = module.action_ownership();
+        for (size_t i = 0U; i < ownership.gameplay_tag_count; ++i) {
+            const uint32_t tag = ownership.gameplay_tags[i];
+            if (tag < kMaxGameplayActionTag && gameplay_owner_[tag] == nullptr) {
+                gameplay_owner_[tag] = &module;
+            }
+        }
+        for (size_t i = 0U; i < ownership.control_action_count; ++i) {
+            const uint32_t action = ownership.control_actions[i];
+            if (action < kMaxControlAction && control_owner_[action] == nullptr) {
+                control_owner_[action] = &module;
+            }
         }
         modules_[count_++] = &module;
         return true;
@@ -52,6 +131,14 @@ public:
             if (feature != nullptr && feature->id() == module) return feature;
         }
         return nullptr;
+    }
+
+    RuntimeFeatureModuleBase *resolve_action_owner(uint32_t action_tag) const {
+        return action_tag < kMaxGameplayActionTag ? gameplay_owner_[action_tag] : nullptr;
+    }
+
+    RuntimeFeatureModuleBase *resolve_control_owner(uint32_t control_action) const {
+        return control_action < kMaxControlAction ? control_owner_[control_action] : nullptr;
     }
 
     bool any_enabled() const {
@@ -82,14 +169,12 @@ public:
 
 private:
     RuntimeFeatureModuleBase *modules_[kMaxRuntimeFeatureModules]{};
+    RuntimeFeatureModuleBase *gameplay_owner_[kMaxGameplayActionTag]{};
+    RuntimeFeatureModuleBase *control_owner_[kMaxControlAction]{};
     size_t count_ = 0U;
 };
 
 RuntimeModuleRegistry g_runtime_module_registry;
-CatchSpinModule g_catch_spin_module;
-DiscardModule g_discard_module;
-TransferModule g_transfer_module;
-EncounterModule g_encounter_module;
 bool g_registry_initialization_attempted = false;
 bool g_registry_initialized = false;
 
@@ -160,13 +245,16 @@ bool initialize_runtime_modules(int status_fd) {
     if (g_registry_initialization_attempted) return g_registry_initialized;
     g_registry_initialization_attempted = true;
 
-    bool registered = true;
-    registered = register_and_publish(status_fd, g_catch_spin_module) && registered;
-    registered = register_and_publish(status_fd, g_discard_module) && registered;
-    registered = register_and_publish(status_fd, g_transfer_module) && registered;
-    registered = register_and_publish(status_fd, g_encounter_module) && registered;
+    // Walk the self-registration list built at static-init by each module.inc.
+    // No hardcoded module list or fixed count: modules add themselves.
+    bool registered = g_runtime_module_registration_head != nullptr;
+    for (RuntimeModuleRegistration *entry = g_runtime_module_registration_head;
+         entry != nullptr; entry = entry->next) {
+        if (entry->module == nullptr) continue;
+        registered = register_and_publish(status_fd, *entry->module) && registered;
+    }
 
-    g_registry_initialized = registered && g_runtime_module_registry.size() == 4U;
+    g_registry_initialized = registered && g_runtime_module_registry.size() > 0U;
     __android_log_print(
         g_registry_initialized ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR,
         kLogTag,
@@ -272,37 +360,60 @@ void disable_all_modules(ProbeContext &context) {
     context.active_encounter_id.store(0U);
 }
 
-bool gameplay_action_allowed(uint32_t action_tag, std::string *reason) {
-    const bool catch_spin = module_enabled(Module::kCatchSpin);
-    const bool encounter = module_enabled(Module::kEncounter);
-    bool allowed = false;
-    switch (action_tag) {
-        case 2U:
-        case 3U:
-        case 4U:
-        case 9U:
-        case 11U:
-        case 12U:
-            allowed = catch_spin;
-            break;
-        case 10U:
-            allowed = catch_spin && encounter;
-            break;
-        case 5U:
-            allowed = module_enabled(Module::kDiscard);
-            break;
-        case 6U:
-            allowed = module_enabled(Module::kTransfer);
-            break;
-        case 8U:
-            allowed = encounter;
-            break;
-        default:
-            return true;
+enum class GameplayDispatchStatus { kUnowned, kModuleDisabled, kHandled };
+
+// Route a gameplay command to the module that owns its action tag via the O(1)
+// owner map. Ownership (action_ownership) and execution (handle_action) live inside
+// each module, so the control loop needs no per-action switch or gate. *command_id
+// is pre-set to the
+// frame command id for rejection messages; the owning module overwrites it on a
+// successful parse.
+GameplayDispatchStatus dispatch_gameplay_action(
+    ProbeContext &context,
+    uint32_t action_tag,
+    const std::vector<uint8_t> &command,
+    RuntimeActionResult *result,
+    std::string *command_id,
+    std::string *reject_reason
+) {
+    RuntimeFeatureModuleBase *owner = g_runtime_module_registry.resolve_action_owner(action_tag);
+    if (owner == nullptr) return GameplayDispatchStatus::kUnowned;
+    if (!owner->enabled()) {
+        if (reject_reason != nullptr) *reject_reason = "required runtime feature module is disabled";
+        return GameplayDispatchStatus::kModuleDisabled;
     }
-    if (!allowed && reason != nullptr) {
-        *reason = "required runtime feature module is disabled";
+    if (!owner->handle_action(context, action_tag, command, result, command_id)) {
+        // The owner claims the tag but could not parse the frame: keep the loop
+        // fail-closed rather than silently dropping the command.
+        return GameplayDispatchStatus::kUnowned;
     }
-    return allowed;
+    return GameplayDispatchStatus::kHandled;
+}
+
+// True when some module owns this control action, so the control dispatcher can
+// delegate it instead of handling it as a runtime lifecycle action.
+bool control_action_has_owner(uint32_t control_action) {
+    return g_runtime_module_registry.resolve_control_owner(control_action) != nullptr;
+}
+
+// Route a control action to the module that owns it (e.g. SCAN_MAP -> catch_spin).
+// Core lifecycle actions have no owner and stay in the control dispatcher. Returns
+// the module handler's result, or a fail-closed rejection if unowned.
+bool dispatch_control_action(
+    ProbeContext &context,
+    uint32_t control_action,
+    const char *request_id,
+    uint64_t cycle_id
+) {
+    RuntimeFeatureModuleBase *owner = g_runtime_module_registry.resolve_control_owner(control_action);
+    if (owner == nullptr) {
+        return send_runtime_rejected(
+            context.fd,
+            request_id,
+            "control_action_unowned",
+            "no runtime feature module owns this control action"
+        );
+    }
+    return owner->handle_control_action(context, request_id, cycle_id);
 }
 }  // namespace pogo_runtime_module

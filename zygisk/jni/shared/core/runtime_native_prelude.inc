@@ -180,6 +180,7 @@ using Il2CppFieldGetOffset = int32_t (*)(const void *);
 using Il2CppFieldStaticGetValue = void (*)(const void *, void *);
 using Il2CppTypeGetClassOrElementClass = Il2CppClass *(*)(const Il2CppType *);
 using Il2CppClassGetType = const Il2CppType *(*)(Il2CppClass *);
+using Il2CppClassGetParent = Il2CppClass *(*)(Il2CppClass *);
 using Il2CppTypeGetObject = void *(*)(const Il2CppType *);
 using Il2CppObjectNew = void *(*)(Il2CppClass *);
 using Il2CppRuntimeObjectInit = void (*)(void *);
@@ -225,6 +226,7 @@ struct Il2CppApi {
     Il2CppFieldStaticGetValue field_static_get_value = nullptr;
     Il2CppTypeGetClassOrElementClass type_get_class_or_element_class = nullptr;
     Il2CppClassGetType class_get_type = nullptr;
+    Il2CppClassGetParent class_get_parent = nullptr;
     Il2CppTypeGetObject type_get_object = nullptr;
     Il2CppObjectNew object_new = nullptr;
     Il2CppRuntimeObjectInit runtime_object_init = nullptr;
@@ -262,6 +264,14 @@ struct RuntimeBinding {
     const void *poi_item_spinner_spin = nullptr;
     const void *map_pokemon_try_capture = nullptr;
     const void *map_pokemon_get_spawn_point_id = nullptr;
+    // WildMapPokemon.SendEncounterRequest (RPC Encounter=102). Fired in the
+    // background before a direct catch so the server has an open encounter; it is
+    // a pure RPC sender and does not open the encounter UI.
+    const void *map_pokemon_send_encounter_request = nullptr;
+    bool background_encounter_verified = false;
+    // MapContentHandler.RegisterPokemonCaughtOrFled(ulong) — map synchronization
+    // after a terminal catch outcome (does NOT itself distinguish caught vs fled).
+    const void *map_content_handler_register_caught_or_fled = nullptr;
     Il2CppClass *ar_plus_encounter_values_class = nullptr;
     Il2CppClass *catch_pokemon_proto_class = nullptr;
     void *soft_sfida_rpc_handler = nullptr;
@@ -285,11 +295,6 @@ struct RuntimeBinding {
     bool forts_read_verified = false;
     bool spin_verified = false;
     bool exact_build_verified = false;
-    // Mode B: true once the map-query batch callback is inline-hooked so it marks
-    // the world dirty. While false, the observer uses a periodic dirty-tick
-    // fallback (mode-C cadence). Installing the hook needs a build-specific
-    // prologue captured from the live libil2cpp.so; see docs/architecture.
-    bool map_query_hook_installed = false;
     // Player position (Niantic.Holoholo.ILocationProvider -> LocationProviderAdapter).
     // get_CurrentLocation returns a Niantic.Platform.Ditto.Geo.Location value
     // struct exposing LatitudeDeg/LongitudeDeg (double).
@@ -298,11 +303,6 @@ struct RuntimeBinding {
     const void *location_get_latitude = nullptr;
     const void *location_get_longitude = nullptr;
     bool location_read_verified = false;
-    // Map-query batch callback (Niantic.Platform.GameMapObject.Map.S2CellManager
-    // .OnMapQueryResponse) used as the mode-B dirty trigger. Resolved to a method
-    // for inline hooking; see modules/catch_spin/map_hooks.inc.
-    const void *map_query_on_response = nullptr;
-    bool map_query_hook_binding_verified = false;
     // Inventory read (Niantic.Holoholo.IItemBag -> ItemBagImpl.GetItemCount(Item)).
     // item_bag is resolved in the IItemBag service block. Enables READ_INVENTORY
     // and populates AutomationSnapshot.inventory for auto-discard / ball gating.
@@ -345,6 +345,11 @@ enum class MainThreadActionOutcome : uint32_t {
     kInvoked = 1U,
     kIndeterminate = 2U,
     kOutOfBalls = 3U,
+    // Direct map catch needs a server-side encounter before CatchPokemon (103) is
+    // accepted. When the target has no EncounterOutProto yet, the background
+    // SendEncounterRequest (102) is fired and this non-terminal outcome asks the
+    // controller to retry the same target on a later cycle (no ball is thrown).
+    kEncounterRequested = 4U,
 };
 
 struct MainThreadBridge {
@@ -423,9 +428,10 @@ struct ProbeContext {
     std::atomic<bool> observation_running{false};
     pthread_t observation_thread{};
     bool observation_thread_started = false;
-    // Mode B (dirty-flag) observation: set when a map-change signal indicates the
-    // world may have changed. The observer re-reads the map only when this is set
-    // (plus a rare reconcile). Starts true so the first cycle always reads.
+    // Dirty-flag for the legacy push-observer path: set by the periodic fallback
+    // tick so the observer re-reads the map only when needed (plus a rare
+    // reconcile). Unused in explicit SCAN_MAP pull mode. Starts true so the first
+    // cycle always reads.
     std::atomic<bool> world_dirty{true};
 };
 
@@ -434,7 +440,7 @@ RuntimeBinding runtime_binding_snapshot(ProbeContext &context) {
     return context.binding;
 }
 
-// Per-module observation (mode B: root orchestrates, modules trigger). The shared
+// Per-module observation (root orchestrates, modules trigger). The shared
 // observer thread builds this once per tick and passes it to each enabled module's
 // observe() hook, which reads its own concern and decides its own cadence.
 struct ObserverTickContext {

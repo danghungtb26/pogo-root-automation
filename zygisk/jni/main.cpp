@@ -52,7 +52,6 @@
 #include "modules/catch_spin/catch.inc"
 #include "modules/catch_spin/spin.inc"
 #include "modules/catch_spin/open_encounter.inc"
-#include "modules/catch_spin/map_hooks.inc"
 #include "modules/discard/inventory_reader.inc"
 #include "shared/runtime/mainthread/runtime_inventory_request.inc"
 #include "shared/runtime/mainthread/runtime_player_position_request.inc"
@@ -65,9 +64,12 @@
 // Host publication/routing comes after feature implementations so capability
 // publication can describe the verified executors without owning them.
 #include "host/runtime_capabilities.inc"
+// The catch_spin module owns the SCAN_MAP control action; its handler is defined
+// in modules/catch_spin/scan_map.inc (below). Forward-declare it so the module's
+// handle_control_action can reference it from runtime_feature_modules.inc.
+bool run_runtime_scan_map(ProbeContext &context, const char *request_id, uint64_t cycle_id);
 #include "shared/runtime/module/runtime_feature_modules.inc"
-#include "shared/runtime/control/runtime_snapshot_control.inc"
-#include "shared/runtime/control/runtime_scan_map_control.inc"
+#include "modules/catch_spin/scan_map.inc"
 #include "shared/runtime/control/runtime_control.inc"
 }  // namespace
 

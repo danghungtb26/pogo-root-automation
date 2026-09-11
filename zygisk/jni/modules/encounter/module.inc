@@ -1,3 +1,5 @@
+constexpr uint32_t kEncounterActionTags[] = {8U};  // UseBerry
+
 class EncounterModule final : public RuntimeFeatureModuleBase {
 public:
     Module id() const override { return Module::kEncounter; }
@@ -31,4 +33,30 @@ public:
         g_throw_hook_context = nullptr;
         clear_throw_events(context);
     }
+
+    ModuleActionOwnership action_ownership() const override {
+        ModuleActionOwnership ownership;
+        ownership.gameplay_tags = kEncounterActionTags;
+        ownership.gameplay_tag_count = sizeof(kEncounterActionTags) / sizeof(uint32_t);
+        return ownership;
+    }
+
+    bool handle_action(
+        ProbeContext &context,
+        uint32_t /*action_tag*/,
+        const std::vector<uint8_t> &command,
+        RuntimeActionResult *result,
+        std::string *command_id
+    ) override {
+        RuntimeActionCommand action;
+        if (!parse_runtime_use_berry_command(command, &action)) return false;
+        *command_id = action.command_id;
+        *result = execute_runtime_use_berry(context, action);
+        return true;
+    }
 };
+
+EncounterModule g_encounter_module;
+RuntimeModuleRegistration g_encounter_module_registration{&g_encounter_module, nullptr};
+static const bool kEncounterModuleRegistered =
+    append_runtime_module_registration(&g_encounter_module_registration);

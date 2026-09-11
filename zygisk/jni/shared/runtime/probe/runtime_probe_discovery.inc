@@ -573,37 +573,6 @@ void discover_runtime_owners(
         api.class_get_field_from_name(pokemon_proto_class, "pokemonDisplay_") != nullptr &&
         api.class_get_field_from_name(pokemon_display_class, "Shiny") != nullptr;
     binding->encounter_read_verified = encounter_fields_verified;
-    // Mode B: resolve the map-query batch callback for inline hooking. The
-    // callback is implemented by S2CellManager, not MapQueryManager. The
-    // 2-parameter method (int rpcId, byte[] response) fires once per server
-    // map response. Only the MethodInfo is captured here; installing the hook
-    // (and capturing its prologue from live memory) happens in map_hooks.inc.
-    Il2CppClass *s2_cell_manager_class = find_runtime_class(
-        api, assemblies, assembly_count,
-        "Niantic.Platform.GameMapObject.Map", "S2CellManager", nullptr
-    );
-    if (s2_cell_manager_class != nullptr) {
-        const void *map_query_on_response = find_runtime_method_with_two_parameters(
-            api,
-            s2_cell_manager_class,
-            "OnMapQueryResponse",
-            "System.Int32",
-            "System.Byte[]"
-        );
-        if (map_query_on_response != nullptr && api.method_is_instance != nullptr &&
-            api.method_is_instance(map_query_on_response)) {
-            binding->map_query_on_response = map_query_on_response;
-        }
-    }
-    binding->map_query_hook_binding_verified = binding->map_query_on_response != nullptr;
-    __android_log_print(
-        binding->map_query_hook_binding_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "managed diagnostic: map query hook binding verified=%d class=%p method=%p signature=(System.Int32,System.Byte[])",
-        binding->map_query_hook_binding_verified ? 1 : 0,
-        s2_cell_manager_class,
-        binding->map_query_on_response
-    );
     __android_log_print(
         encounter_fields_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,

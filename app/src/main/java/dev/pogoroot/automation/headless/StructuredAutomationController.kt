@@ -389,6 +389,17 @@ class StructuredAutomationController(
         } else if (request.action is AutomationAction.Spin && phase.isTerminal) {
             outOfBalls = false
         }
+        // Background encounter step: the native side fired SendEncounterRequest (102)
+        // and threw no ball. This is non-terminal (REJECTED phase, no mutation); the
+        // same target is re-planned next cycle, by which point the server encounter
+        // response is cached and the direct catch throws. Informational only.
+        if (result.errorCode == "encounter_requested") {
+            Log.i(
+                LOG_TAG,
+                "automation direct catch opened background encounter " +
+                    "command=${request.commandId}; retrying after server response",
+            )
+        }
         if (resultStatus.isSuccess && isAuthoritativeCatchResult(request, result, phase)) {
             publishCatchOutcome(request, result)
         }

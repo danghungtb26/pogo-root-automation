@@ -12,6 +12,7 @@ import dev.pogoroot.automation.bridge.BridgePayloadCodec
 import dev.pogoroot.automation.bridge.BridgeProtocol
 import dev.pogoroot.automation.bridge.CommandPhase
 import dev.pogoroot.automation.bridge.RuntimeBridge
+import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeControlRequest
@@ -132,24 +133,11 @@ class RuntimeBridgeClient(
     fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
 
-    /** Pull one correlated world read after the native module is running. */
-    fun requestRuntimeSnapshot(cycleId: Long): Result<Unit> = runCatching {
-        require(cycleId > 0L) { "runtime snapshot cycle must be positive" }
-        val result = requestRuntimeControl(
-            action = RuntimeControlAction.SNAPSHOT,
-            requestIdSuffix = "cycle-$cycleId",
-        ).getOrThrow()
-        Log.i(
-            LOG_TAG,
-            "runtime snapshot acknowledged cycle=$cycleId message=${result.message}",
-        )
-    }
-
     /** Pull one correlated map/inventory read for the catch/spin automation loop. */
     fun requestRuntimeScanMap(cycleId: Long): Result<Unit> = runCatching {
         require(cycleId > 0L) { "scan map cycle must be positive" }
-        val result = requestRuntimeControl(
-            action = RuntimeControlAction.SCAN_MAP,
+        val result = requestModuleControl(
+            action = ModuleControlAction.SCAN_MAP,
             requestIdSuffix = "cycle-$cycleId",
             cycleId = cycleId,
         ).getOrThrow()
@@ -196,18 +184,35 @@ class RuntimeBridgeClient(
         pendingControlIds.clear()
     }
 
+    /** Send a runtime lifecycle control action (START/STOP/DIAGNOSTIC). */
     private fun requestRuntimeControl(
         action: RuntimeControlAction,
         requestIdSuffix: String? = null,
         cycleId: Long? = null,
+    ): Result<BridgeEvent.AutomationCommandResult> =
+        dispatchControlFrame(action.wireValue, action.name, requestIdSuffix, cycleId)
+
+    /** Send a module-owned control action (declared in [ModuleControlAction]). */
+    private fun requestModuleControl(
+        action: ModuleControlAction,
+        requestIdSuffix: String? = null,
+        cycleId: Long? = null,
+    ): Result<BridgeEvent.AutomationCommandResult> =
+        dispatchControlFrame(action.wireValue, action.name, requestIdSuffix, cycleId)
+
+    private fun dispatchControlFrame(
+        actionWire: Int,
+        actionLabel: String,
+        requestIdSuffix: String?,
+        cycleId: Long?,
     ): Result<BridgeEvent.AutomationCommandResult> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val suffix = requestIdSuffix ?: System.nanoTime().toString()
-        val requestId = "runtime-${action.name.lowercase()}-$suffix"
+        val requestId = "runtime-${actionLabel.lowercase()}-$suffix"
         val request = RuntimeControlRequest(
             runtimeSessionId = ready.runtimeSessionId,
             requestId = requestId,
-            action = action,
+            actionWire = actionWire,
             expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
             pid = ready.pid,
             processName = ready.processName,

@@ -160,23 +160,33 @@ bool handle_runtime_control(
         );
     }
 
-    switch (request.action) {
-        case pogo_runtime_control::Action::kStart:
+    // The action arrives as a raw wire number (not whitelisted by the transport).
+    // Module-owned control actions (e.g. SCAN_MAP) are routed by the registry's
+    // owner map; the dispatcher names no module action. Runtime lifecycle actions
+    // have no owner and fall through to the switch; anything else is rejected.
+    if (pogo_runtime_module::control_action_has_owner(request.action_wire)) {
+        return pogo_runtime_module::dispatch_control_action(
+            context,
+            request.action_wire,
+            request.request_id.c_str(),
+            request.cycle_id
+        );
+    }
+    switch (request.action_wire) {
+        case static_cast<uint32_t>(pogo_runtime_control::Action::kStart):
             return activate_runtime(context, request.request_id.c_str());
-        case pogo_runtime_control::Action::kStop:
+        case static_cast<uint32_t>(pogo_runtime_control::Action::kStop):
             return stop_runtime(context, request.request_id.c_str());
-        case pogo_runtime_control::Action::kDiagnostic:
+        case static_cast<uint32_t>(pogo_runtime_control::Action::kDiagnostic):
             return run_runtime_control_diagnostic(context, request.request_id.c_str());
-        case pogo_runtime_control::Action::kSnapshot:
-            return run_runtime_snapshot(context, request.request_id.c_str());
-        case pogo_runtime_control::Action::kScanMap:
-            return run_runtime_scan_map(
-                context,
+        default:
+            return send_runtime_rejected(
+                context.fd,
                 request.request_id.c_str(),
-                request.cycle_id
+                "unknown_control_action",
+                "control action is not a runtime lifecycle action and no module owns it"
             );
     }
-    return false;
 }
 
 bool handle_runtime_module_control(
@@ -282,7 +292,7 @@ void runtime_command_channel_loop(ProbeContext &context) {
                 "runtime control received seq=%llu request=%s action=%u",
                 static_cast<unsigned long long>(control.message_seq),
                 control.request_id.c_str(),
-                static_cast<unsigned int>(control.action)
+                static_cast<unsigned int>(control.action_wire)
             );
             if (!handle_runtime_control(context, control)) break;
             continue;
@@ -317,88 +327,39 @@ void runtime_command_channel_loop(ProbeContext &context) {
 
         uint32_t action_tag = 0U;
         if (!parse_gameplay_action_tag(command, &action_tag)) break;
-        std::string module_reason;
-        if (!pogo_runtime_module::gameplay_action_allowed(action_tag, &module_reason)) {
+        // Route to the module that owns this action tag via the registry owner map.
+        // Ownership (action_ownership), parsing and execution live inside each
+        // module; the control loop keeps no per-action switch or enable gate.
+        RuntimeActionResult action_result;
+        std::string action_command_id = prefix.command_id;
+        std::string reject_reason;
+        const pogo_runtime_module::GameplayDispatchStatus dispatch_status =
+            pogo_runtime_module::dispatch_gameplay_action(
+                context, action_tag, command, &action_result, &action_command_id, &reject_reason
+            );
+        if (dispatch_status == pogo_runtime_module::GameplayDispatchStatus::kModuleDisabled) {
             if (!send_runtime_rejected(
                     context.fd,
-                    prefix.command_id.c_str(),
+                    action_command_id.c_str(),
                     "runtime_module_disabled",
-                    module_reason.c_str()
+                    reject_reason.c_str()
                 )) break;
             continue;
         }
-
-        RuntimeActionCommand action;
-        if (parse_runtime_catch_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_catch(context, action);
+        if (dispatch_status == pogo_runtime_module::GameplayDispatchStatus::kHandled) {
             if (!send_runtime_result(
                     context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message,
-                    result.catch_outcome_wire,
-                    result.captured_pokemon_id.c_str()
+                    action_command_id.c_str(),
+                    action_result.phase,
+                    action_result.error_code,
+                    action_result.message,
+                    action_result.catch_outcome_wire,
+                    action_result.captured_pokemon_id.c_str()
                 )) break;
             continue;
         }
-        if (parse_runtime_spin_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_spin(context, action);
-            if (!send_runtime_result(
-                    context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message
-                )) break;
-            continue;
-        }
-        if (parse_runtime_open_encounter_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_open_encounter(context, action);
-            if (!send_runtime_result(
-                    context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message
-                )) break;
-            continue;
-        }
-        if (parse_runtime_use_berry_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_use_berry(context, action);
-            if (!send_runtime_result(
-                    context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message
-                )) break;
-            continue;
-        }
-        if (parse_runtime_discard_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_discard(context, action);
-            if (!send_runtime_result(
-                    context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message
-                )) break;
-            continue;
-        }
-        if (parse_runtime_transfer_command(command, &action)) {
-            const RuntimeActionResult result = execute_runtime_transfer(context, action);
-            if (!send_runtime_result(
-                    context.fd,
-                    action.command_id.c_str(),
-                    result.phase,
-                    result.error_code,
-                    result.message
-                )) break;
-            continue;
-        }
-        // Any other gameplay action remains fail-closed until a verified native
-        // client-owned executor is added.
+        // Unowned action tag (or the owning module could not parse the frame):
+        // fail-closed until a verified native client-owned executor is added.
         if (!send_runtime_rejected(
                 context.fd,
                 prefix.command_id.c_str(),

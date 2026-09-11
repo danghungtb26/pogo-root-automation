@@ -129,6 +129,12 @@ RuntimeActionResult execute_runtime_catch(
         } else if (outcome == MainThreadActionOutcome::kOutOfBalls) {
             direct_result.error_code = "out_of_balls";
             direct_result.message = "no Poké Balls remain; catch skipped so the service can spin";
+        } else if (outcome == MainThreadActionOutcome::kEncounterRequested) {
+            // Non-terminal: the background SendEncounterRequest (102) was fired and
+            // no ball was thrown. The controller should retry the same target on a
+            // later cycle, by which point the server encounter response is cached.
+            direct_result.error_code = "encounter_requested";
+            direct_result.message = "background encounter opened; retry catch once the server response is cached";
         } else {
             direct_result.error_code = "catch_target_unavailable";
             direct_result.message = "the requested map Pokémon is no longer available";

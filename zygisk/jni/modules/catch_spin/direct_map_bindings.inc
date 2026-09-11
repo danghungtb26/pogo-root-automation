@@ -94,6 +94,22 @@ void discover_direct_map_bindings(
     );
     binding->direct_catch_verified = binding->map_pokemon_try_capture != nullptr &&
         binding->map_pokemon_get_spawn_point_id != nullptr;
+    // Background encounter: SendEncounterRequest (RPC Encounter=102) on WildMapPokemon.
+    // Overrides MapPokemon.SendEncounterRequest (Slot 41), zero managed parameters.
+    binding->map_pokemon_send_encounter_request = find_direct_map_instance_method(
+        api, wild_map_pokemon_class, "SendEncounterRequest", 0U
+    );
+    binding->background_encounter_verified = binding->direct_catch_verified &&
+        binding->map_pokemon_send_encounter_request != nullptr;
+    // Map sync after a terminal outcome. Resolved from the live MapContentHandler
+    // owner (bound during scene/nearby discovery) so the exact instantiated class is used.
+    if (binding->map_content_handler != nullptr && api.object_get_class != nullptr) {
+        Il2CppClass *content_handler_class = api.object_get_class(binding->map_content_handler);
+        binding->map_content_handler_register_caught_or_fled =
+            find_direct_map_instance_method(
+                api, content_handler_class, "RegisterPokemonCaughtOrFled", 1U
+            );
+    }
     // The current binding has no verified way to observe the returned
     // IPromise/CatchPokemon result. Keep invocation evidence separate from the
     // capability advertised to the controller; disappearance from the map is
@@ -183,6 +199,14 @@ void discover_direct_map_bindings(
         kLogTag,
         "managed diagnostic: direct map catch outcome observer verified=%d",
         binding->direct_catch_outcome_verified ? 1 : 0
+    );
+    __android_log_print(
+        binding->background_encounter_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: background encounter binding verified=%d send_encounter=%p register_caught_or_fled=%p",
+        binding->background_encounter_verified ? 1 : 0,
+        binding->map_pokemon_send_encounter_request,
+        binding->map_content_handler_register_caught_or_fled
     );
     __android_log_print(
         binding->soft_sfida_capture_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
