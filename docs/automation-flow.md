@@ -221,13 +221,18 @@ interface AutomationModule {
 ```
 Module tự planning (`onWorldSnapshot` → tính action) nhưng thực thi qua `host.submit()`.
 
-### 3.3 Lifecycle = reducer 2 trục
+### 3.3 Lifecycle = mỗi module tự khai `isActive` (KHÔNG special-case ở trung tâm)
+Không có reducer nào hardcode `if module == CATCH_SPIN`. Mỗi module tự khai luật kích hoạt của nó
+trên một `ModuleActivationContext(config, armed)`:
+```kotlin
+// catch_spin (module DUY NHẤT đọc arm):
+isActive = { it.armed && (it.config.autoCatch || it.config.autoSpin) }
+// transfer/discard/encounter — bỏ qua arm:
+isActive = { it.config.autoTransfer }
 ```
-desiredActive(module) = gameReady && (module != CATCH_SPIN || automationOn)
-```
-`ModuleLifecycleController` nghe GO-presence (`JoystickAutoStartCoordinator`/`GameForegroundDetector`)
-và `AutomationState`; mỗi lần đổi thì diff desired vs current → `start()`/`stop()`. Catchspin chỉ khác
-đúng một điều kiện `automationOn`, không rải code đặc biệt.
+Trung tâm chỉ còn generic: `RuntimeFeatureModuleCatalog.activeModules(context) = descriptors.filter { it.isActive(context) }`.
+Game-presence là on/off ở tầng engine (GO thoát → `ensureIdle()` tắt tất cả) nên luôn override, không cần
+lặp lại trong từng module.
 
 ### 3.4 Engine gốc co lại
 `HeadlessAutomationEngine.runLoop` + `AutomationCycle` (double-tick, scan-gating) **biến mất**.
@@ -282,8 +287,9 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 | Phase 1 | 2 trục `ModuleTriggerType` + `ExecutionMode` thành field trên descriptor | `f1e20ec` | ✅ |
 | Phase 2a | `ExecutionLock` (shared/exclusive) | `1cdb96c` | ✅ additive |
 | Phase 2b | `RuntimeEventDispatcher` + `ownerOfObservationType` | `d031319` | ✅ additive |
-| Phase 3a | `ModuleLifecycleController` (reducer 2 trục) | `64ccac5` | ✅ additive |
-| Phase 3b | Wire reducer → native enable (catch_spin theo arm) | `70a0f66` | ✅ **live behavior** |
+| Phase 3a | ~~`ModuleLifecycleController`~~ → thay bằng per-module `isActive(context)` | `64ccac5`→refactor | ✅ |
+| Phase 3b | Wire `activeModules(context)` → native enable (catch_spin đọc arm) | `70a0f66`→refactor | ✅ **live behavior** |
+| Phase 3c | Bỏ special-case `if CATCH_SPIN`; mỗi module tự khai `isActive`; xoá `ModuleLifecycleController` unused | (kế tiếp) | ✅ |
 
 **Đã đạt:** package sạch theo tầng; taxonomy 2 trục trong code; đủ kernel primitive (lock/dispatcher/reducer);
 lifecycle 2 trục **đã chạy thật** — disarm giờ **stop** native catch_spin module (đúng Phần 1), GO-absent vẫn

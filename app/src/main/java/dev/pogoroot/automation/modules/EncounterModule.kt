@@ -23,9 +23,10 @@ val EncounterModuleDescriptor = RuntimeFeatureModuleDescriptor(
     triggerType = ModuleTriggerType.PERIODIC,
     // Exclusive: encounter open/throw drives the world/encounter UI.
     executionMode = ExecutionMode.EXCLUSIVE,
-    isDesired = { config ->
-        config.berryMode != BerryMode.NONE ||
-            config.catchThrowQuality != ThrowQualityTarget.ANY ||
-            config.catchCurvePreference != CurvePreference.ANY
+    // Ignores the master arm — driven purely by encounter-shaping config.
+    isActive = {
+        it.config.berryMode != BerryMode.NONE ||
+            it.config.catchThrowQuality != ThrowQualityTarget.ANY ||
+            it.config.catchCurvePreference != CurvePreference.ANY
     },
 )

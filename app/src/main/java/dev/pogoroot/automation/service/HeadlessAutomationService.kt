@@ -22,8 +22,8 @@ import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.engine.AutomationRunState
 import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.engine.HeadlessAutomationEngine
-import dev.pogoroot.automation.kernel.ModuleLifecycleController
-import dev.pogoroot.automation.kernel.ModuleLifecycleInputs
+import dev.pogoroot.automation.runtime.ModuleActivationContext
+import dev.pogoroot.automation.runtime.RuntimeFeatureModuleCatalog
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.AutomationEventType
@@ -32,7 +32,6 @@ import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
 import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
 
 class HeadlessAutomationService : Service() {
-    private val lifecycleController = ModuleLifecycleController()
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
@@ -63,16 +62,12 @@ class HeadlessAutomationService : Service() {
             bridge = runtimeBridge!!,
             // 2-axis lifecycle (docs/automation-flow.md — Phần 1): this provider is
             // consulted only on the running path (ensureRunning); GO-absent is handled
-            // by engine.deactivate() -> ensureIdle() which disables every module. So
-            // gameReady is true here and the reducer applies the arm gate: catch_spin
-            // is a desired-enable target only while the master arm is on.
+            // by engine.deactivate() -> ensureIdle() which disables every module. Each
+            // module's own isActive rule decides — catch_spin reads `armed`, others
+            // ignore it — so nothing here special-cases a module.
             desiredModulesFor = { config ->
-                lifecycleController.desiredActive(
-                    ModuleLifecycleInputs(
-                        gameReady = true,
-                        automationOn = CatchSpinArmState.isArmed(),
-                    ),
-                    config,
+                RuntimeFeatureModuleCatalog.activeModules(
+                    ModuleActivationContext(config, armed = CatchSpinArmState.isArmed()),
                 )
             },
         )

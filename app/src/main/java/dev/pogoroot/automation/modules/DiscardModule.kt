@@ -14,5 +14,6 @@ val DiscardModuleDescriptor = RuntimeFeatureModuleDescriptor(
     triggerType = ModuleTriggerType.REACTIVE,
     // Concurrent: operates on inventory, not the world UI — runs alongside transfer.
     executionMode = ExecutionMode.CONCURRENT,
-    isDesired = { it.autoDiscard },
+    // Ignores the master arm.
+    isActive = { it.config.autoDiscard },
 )

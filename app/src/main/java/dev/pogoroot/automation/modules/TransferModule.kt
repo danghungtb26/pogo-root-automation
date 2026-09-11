@@ -14,5 +14,6 @@ val TransferModuleDescriptor = RuntimeFeatureModuleDescriptor(
     triggerType = ModuleTriggerType.REACTIVE,
     // Concurrent: operates on storage, not the world UI — runs alongside discard.
     executionMode = ExecutionMode.CONCURRENT,
-    isDesired = { it.autoTransfer },
+    // Ignores the master arm.
+    isActive = { it.config.autoTransfer },
 )

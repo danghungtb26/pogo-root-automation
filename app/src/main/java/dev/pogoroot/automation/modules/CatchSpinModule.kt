@@ -21,7 +21,8 @@ val CatchSpinModuleDescriptor = RuntimeFeatureModuleDescriptor(
     // Exclusive: TRY_CATCH/TRY_SPIN drive the world UI; block other modules
     // for the action window (see docs/automation-flow.md — Phần 3.2c).
     executionMode = ExecutionMode.EXCLUSIVE,
-    isDesired = { config ->
-        config.autoCatch || config.autoSpin
-    },
+    // catch_spin is the ONLY module that depends on the master arm: it activates
+    // only while armed AND a catch/spin behaviour is on. This rule lives here, not
+    // in any central reducer.
+    isActive = { it.armed && (it.config.autoCatch || it.config.autoSpin) },
 )

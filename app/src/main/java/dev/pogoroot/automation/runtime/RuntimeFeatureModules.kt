@@ -66,7 +66,10 @@ enum class ExecutionMode {
  *   (mirror of the native per-module `action_ownership()`).
  * - [triggerType] / [executionMode]: the two orthogonal classification axes that
  *   drive how the module is scheduled and executed (see docs/automation-flow.md).
- * - [isDesired]: the config rule that makes this module a desired enable target.
+ * - [isActive]: the module's OWN activation rule over a [ModuleActivationContext].
+ *   Each module decides its own dependencies — e.g. catch_spin also requires the
+ *   master arm, other modules ignore it — so no central code special-cases a
+ *   module by identity.
  *
  * The wire codec ([dev.pogoroot.automation.bridge.BridgeActionCodec]) stays shared,
  * mirroring native keeping its wire protocol shared rather than per-module.
@@ -77,7 +80,25 @@ data class RuntimeFeatureModuleDescriptor(
     val controlActions: Set<ModuleControlAction>,
     val triggerType: ModuleTriggerType,
     val executionMode: ExecutionMode,
-    val isDesired: (HeadlessAutomationConfig) -> Boolean,
+    val isActive: (ModuleActivationContext) -> Boolean,
+)
+
+/**
+ * Everything a module reads to decide whether it should be active right now
+ * (see docs/automation-flow.md — Phần 1). Passed in (not read from globals) so
+ * each module's [RuntimeFeatureModuleDescriptor.isActive] stays a pure predicate.
+ *
+ * - [config]: the user-facing switches.
+ * - [armed]: the master arm (AutomationState / overlay Automation button). Only
+ *   catch_spin's own rule reads it; every other module ignores it.
+ *
+ * Game-presence is NOT here: it is an engine-level on/off (GO foreground toggles
+ * the whole engine, which disables every module via `ensureIdle()`), so it always
+ * overrides and never needs to be re-checked per module.
+ */
+data class ModuleActivationContext(
+    val config: HeadlessAutomationConfig,
+    val armed: Boolean,
 )
 
 /** Aggregates the per-module descriptors. Adding a module = one file + one entry. */
@@ -124,13 +145,14 @@ object RuntimeFeatureModuleCatalog {
     /** Modules whose action execution holds the exclusive world-UI lock. */
     fun modulesWithExecution(mode: ExecutionMode): Set<RuntimeFeatureModule> =
         descriptors.filter { it.executionMode == mode }.mapTo(linkedSetOf()) { it.module }
-}
 
-/**
- * Convert user-facing switches into native feature-group intent, driven by the
- * per-module [RuntimeFeatureModuleCatalog.descriptors].
- */
-fun HeadlessAutomationConfig.desiredRuntimeFeatureModules(): Set<RuntimeFeatureModule> =
-    RuntimeFeatureModuleCatalog.descriptors
-        .filter { it.isDesired(this) }
-        .mapTo(linkedSetOf()) { it.module }
+    /**
+     * The modules that want to be active for [context] — each module's own
+     * [RuntimeFeatureModuleDescriptor.isActive] rule decides. The single source of
+     * truth for "which modules should be enabled" (the 2-axis lifecycle in
+     * docs/automation-flow.md — Phần 1). Game-presence is handled at the engine
+     * level and overrides this.
+     */
+    fun activeModules(context: ModuleActivationContext): Set<RuntimeFeatureModule> =
+        descriptors.filter { it.isActive(context) }.mapTo(linkedSetOf()) { it.module }
+}
