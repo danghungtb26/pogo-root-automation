@@ -80,6 +80,7 @@ public:
     // infra (main-thread bridge, map/inventory readers), not module-private state.
     bool handle_control_action(
         ProbeContext &context,
+        uint32_t /*control_action*/,  // only SCAN_MAP is owned
         const char *request_id,
         uint64_t cycle_id
     ) override {

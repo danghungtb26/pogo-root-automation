@@ -52,10 +52,11 @@ public:
     }
 
     // Handles a control action this module owns (declared via action_ownership).
-    // Some control actions (e.g. SCAN_MAP) belong to a module's automation loop
-    // rather than the runtime lifecycle (START/STOP/DIAGNOSTIC/SNAPSHOT).
+    // control_action is the raw wire value so a module owning several actions
+    // (e.g. the runtime-core module: START/STOP/DIAGNOSTIC) can tell them apart.
     virtual bool handle_control_action(
         ProbeContext & /*context*/,
+        uint32_t /*control_action*/,
         const char * /*request_id*/,
         uint64_t /*cycle_id*/
     ) {
@@ -89,6 +90,7 @@ bool append_runtime_module_registration(RuntimeModuleRegistration *entry) {
 #include "../../../modules/discard/module.inc"
 #include "../../../modules/transfer/module.inc"
 #include "../../../modules/encounter/module.inc"
+#include "../../../modules/core/module.inc"
 
 constexpr size_t kMaxRuntimeFeatureModules = 8U;
 // Owner-map bounds: gameplay action tags and control actions index a direct table.
@@ -390,14 +392,8 @@ GameplayDispatchStatus dispatch_gameplay_action(
     return GameplayDispatchStatus::kHandled;
 }
 
-// True when some module owns this control action, so the control dispatcher can
-// delegate it instead of handling it as a runtime lifecycle action.
-bool control_action_has_owner(uint32_t control_action) {
-    return g_runtime_module_registry.resolve_control_owner(control_action) != nullptr;
-}
-
-// Route a control action to the module that owns it (e.g. SCAN_MAP -> catch_spin).
-// Core lifecycle actions have no owner and stay in the control dispatcher. Returns
+// Route a control action to the module that owns it (e.g. SCAN_MAP -> catch_spin,
+// START/STOP/DIAGNOSTIC -> runtime-core). Returns
 // the module handler's result, or a fail-closed rejection if unowned.
 bool dispatch_control_action(
     ProbeContext &context,
@@ -414,6 +410,6 @@ bool dispatch_control_action(
             "no runtime feature module owns this control action"
         );
     }
-    return owner->handle_control_action(context, request_id, cycle_id);
+    return owner->handle_control_action(context, control_action, request_id, cycle_id);
 }
 }  // namespace pogo_runtime_module

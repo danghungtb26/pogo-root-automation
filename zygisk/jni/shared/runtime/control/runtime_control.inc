@@ -160,33 +160,17 @@ bool handle_runtime_control(
         );
     }
 
-    // The action arrives as a raw wire number (not whitelisted by the transport).
-    // Module-owned control actions (e.g. SCAN_MAP) are routed by the registry's
-    // owner map; the dispatcher names no module action. Runtime lifecycle actions
-    // have no owner and fall through to the switch; anything else is rejected.
-    if (pogo_runtime_module::control_action_has_owner(request.action_wire)) {
-        return pogo_runtime_module::dispatch_control_action(
-            context,
-            request.action_wire,
-            request.request_id.c_str(),
-            request.cycle_id
-        );
-    }
-    switch (request.action_wire) {
-        case static_cast<uint32_t>(pogo_runtime_control::Action::kStart):
-            return activate_runtime(context, request.request_id.c_str());
-        case static_cast<uint32_t>(pogo_runtime_control::Action::kStop):
-            return stop_runtime(context, request.request_id.c_str());
-        case static_cast<uint32_t>(pogo_runtime_control::Action::kDiagnostic):
-            return run_runtime_control_diagnostic(context, request.request_id.c_str());
-        default:
-            return send_runtime_rejected(
-                context.fd,
-                request.request_id.c_str(),
-                "unknown_control_action",
-                "control action is not a runtime lifecycle action and no module owns it"
-            );
-    }
+    // Every control action is module-owned: the runtime-core module owns the
+    // lifecycle actions (START/STOP/DIAGNOSTIC) and feature modules own theirs
+    // (e.g. catch_spin owns SCAN_MAP). The action arrives as a raw wire number and
+    // is routed uniformly through the owner map; an action no module owns is
+    // rejected fail-closed inside dispatch_control_action. No lifecycle switch.
+    return pogo_runtime_module::dispatch_control_action(
+        context,
+        request.action_wire,
+        request.request_id.c_str(),
+        request.cycle_id
+    );
 }
 
 bool handle_runtime_module_control(

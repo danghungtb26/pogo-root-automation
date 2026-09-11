@@ -15,6 +15,10 @@ enum class Module : uint32_t {
     kDiscard = 2U,
     kTransfer = 3U,
     kEncounter = 4U,
+    // System module owning the runtime lifecycle control actions (START/STOP/
+    // DIAGNOSTIC). Always present, never user enable/disable'd, so it is above the
+    // feature-module enable/disable range checked by is_valid_module below.
+    kRuntimeCore = 100U,
 };
 
 enum class Action : uint32_t {

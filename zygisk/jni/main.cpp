@@ -68,6 +68,12 @@
 // in modules/catch_spin/scan_map.inc (below). Forward-declare it so the module's
 // handle_control_action can reference it from runtime_feature_modules.inc.
 bool run_runtime_scan_map(ProbeContext &context, const char *request_id, uint64_t cycle_id);
+// The runtime-core module owns START/STOP/DIAGNOSTIC; the lifecycle handlers are
+// defined in runtime_control.inc (below). Forward-declare them so the module can
+// reference them from runtime_feature_modules.inc.
+bool activate_runtime(ProbeContext &context, const char *request_id);
+bool stop_runtime(ProbeContext &context, const char *request_id);
+bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id);
 #include "shared/runtime/module/runtime_feature_modules.inc"
 #include "modules/catch_spin/scan_map.inc"
 #include "shared/runtime/control/runtime_control.inc"
