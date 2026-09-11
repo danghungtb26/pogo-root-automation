@@ -27,8 +27,12 @@ internal class ShortcutMenuView(
 
     val view: LinearLayout = buildView()
 
-    fun render(config: HeadlessAutomationConfig, speedPresetIndex: Int) {
-        setToggleShortcut("automation", "Automation", config.enabled)
+    fun render(
+        config: HeadlessAutomationConfig,
+        speedPresetIndex: Int,
+        automationActive: Boolean,
+    ) {
+        setToggleShortcut("automation", "Automation", automationActive)
         setToggleShortcut("catch", "Catch", config.autoCatch)
         setToggleShortcut("spin", "Spin", config.autoSpin)
         setToggleShortcut("encounter", "Encounter", config.autoEncounter)

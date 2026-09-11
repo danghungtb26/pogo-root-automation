@@ -17,8 +17,10 @@ object BridgeProtocol {
     const val VERSION = 2
     const val OBSERVATION_PAYLOAD_VERSION = 1
     const val RUNTIME_ENCOUNTER_PAYLOAD_VERSION = 2
-    const val RUNTIME_NEARBY_PAYLOAD_VERSION = 1
+    const val RUNTIME_NEARBY_PAYLOAD_VERSION = 2
     const val RUNTIME_FORTS_PAYLOAD_VERSION = 1
+    const val RUNTIME_INVENTORY_PAYLOAD_VERSION = 1
+    const val RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION = 1
     const val NORMAL_MESSAGE_BYTES = 1 * 1024 * 1024
     const val HARD_MESSAGE_BYTES = 4 * 1024 * 1024
     const val FRAME_HEADER_BYTES = 4 + 2 + 2 + 8
@@ -55,6 +57,8 @@ enum class ObservationType(val wireValue: Int) {
     MAP_TARGET(7),
     /** Read-only throw-pipeline diagnostics from the verified runtime. */
     THROW_DIAGNOSTIC(8),
+    /** Correlated map/inventory snapshot used as the automation filter trigger. */
+    REQUEST_CATCH_SPIN(9),
 }
 
 enum class CommandPhase(val wireValue: Int) {
@@ -223,6 +227,13 @@ sealed interface BridgeEvent {
         val throwOutcome: ThrowOutcome? = null,
         /** Optional metadata from a completed GO Snapshot action. */
         val snapshotResult: EncounterSnapshotResult? = null,
+        /**
+         * Optional storage id of the Pokémon captured by a Catch. A verified
+         * runtime that reads the catch-result proto reports it so the controller
+         * can target that specific Pokémon for a post-catch transfer. Absent
+         * until the native catch-outcome observer provides it.
+         */
+        val capturedPokemonId: String? = null,
         val observedAtEpochMs: Long = System.currentTimeMillis(),
         val observedAtElapsedNs: Long = System.nanoTime(),
     ) : BridgeEvent {
@@ -232,6 +243,9 @@ sealed interface BridgeEvent {
             require(commandId.isNotBlank()) { "commandId must not be blank" }
             if (snapshotResult != null) {
                 require(snapshotResult.encounterId.isNotBlank()) { "snapshot encounterId must not be blank" }
+            }
+            require(capturedPokemonId == null || capturedPokemonId.isNotBlank()) {
+                "capturedPokemonId must not be blank when present"
             }
         }
     }

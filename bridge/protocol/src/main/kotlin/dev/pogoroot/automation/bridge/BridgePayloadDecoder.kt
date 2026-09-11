@@ -104,10 +104,20 @@ internal object BridgePayloadDecoder {
         return if (input.available() == 0) {
             base
         } else {
-            require(input.readBoolean()) { "invalid command result extension marker" }
+            // Marker tells whether a throw/snapshot outcome is present; the
+            // captured pokemon id is a trailing optional read whenever bytes
+            // remain (absent in older frames that predate it).
+            val hasThrowOrSnapshot = input.readBoolean()
+            val throwOutcome = if (hasThrowOrSnapshot) codec.readNullableThrowOutcome(input) else null
+            val snapshotResult = if (hasThrowOrSnapshot) codec.readNullableSnapshotResult(input) else null
             base.copy(
-                throwOutcome = codec.readNullableThrowOutcome(input),
-                snapshotResult = codec.readNullableSnapshotResult(input),
+                throwOutcome = throwOutcome,
+                snapshotResult = snapshotResult,
+                capturedPokemonId = if (input.available() > 0) {
+                    codec.readNullableString(input)
+                } else {
+                    null
+                },
             )
         }
     }

@@ -13,6 +13,7 @@ import dev.pogoroot.automation.overlay.JoystickOverlayService
 internal class JoystickAutoStartCoordinator(
     context: Context,
     private val foregroundDetector: GameForegroundDetector = GameForegroundDetector(context),
+    private val onGameUnavailable: () -> Unit = {},
     private val hasOverlayPermission: () -> Boolean = {
         Settings.canDrawOverlays(context)
     },
@@ -31,6 +32,13 @@ internal class JoystickAutoStartCoordinator(
     fun sync() {
         val eligible = foregroundDetector.read() == GameForegroundDetector.State.FOREGROUND &&
             hasOverlayPermission()
+        if (!eligible) {
+            // This is intentionally checked on every poll. Automation may be
+            // enabled through the local API while PoGo is already in the
+            // background, in which case there is no foreground transition to
+            // trigger the safety stop.
+            runCatching { onGameUnavailable() }
+        }
         if (eligible == lastEligible) return
 
         if (eligible) {

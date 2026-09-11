@@ -8,8 +8,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
+import android.util.Log
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.root.RuntimeBridgeClient
+import dev.pogoroot.automation.root.RuntimeModuleLoadStatus
 import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -19,7 +21,9 @@ class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
+    private lateinit var eventSink: AutomationEventSink
     private var runtimeBridge: RuntimeBridgeClient? = null
+    private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
     private lateinit var structuredController: StructuredAutomationController
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
     private lateinit var mapTargetRepository: MapTargetRepository
@@ -31,14 +35,19 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
+        AutomationRunState.setActive(false)
+        eventSink = ToastAutomationEventSink(this, configRepository)
         lastActiveLocationRepository = LastActiveLocationRepository(this)
         mapTargetRepository = MapTargetRepository(this)
         scanResultRepository = ScanResultRepository()
         scanResultRepository.clear()
-        runtimeBridge = RuntimeBridgeClient()
+        runtimeBridge = RuntimeBridgeClient(
+            onModuleLoadStatus = ::publishRuntimeModuleLoadStatus,
+        )
+        runtimeCoordinator = RuntimeLifecycleCoordinator(runtimeBridge!!)
         structuredController = StructuredAutomationController(
             bridge = runtimeBridge!!,
-            eventSink = ToastAutomationEventSink(this, configRepository),
+            eventSink = eventSink,
             // A verified fingerprint must be explicitly provisioned per device/build.
             // Empty means structured observation is available but mutations stay disabled.
             allowedBuildFingerprintsProvider = {
@@ -54,18 +63,19 @@ class HeadlessAutomationService : Service() {
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
+            runtimeCoordinator = runtimeCoordinator,
             structuredController = structuredController,
-            eventSink = ToastAutomationEventSink(this, configRepository),
+            eventSink = eventSink,
         )
         apiServer = AutomationControlServer(
             configRepository = configRepository,
             engine = engine,
-            runtimeDiagnostic = {
-                runtimeBridge?.requestRuntimeDiagnostic()
-                    ?: Result.failure(IllegalStateException("runtime bridge is not initialized"))
-            },
+            runtimeDiagnostic = { runtimeCoordinator.runDiagnostic(configRepository.read()) },
         )
-        joystickAutoStartCoordinator = JoystickAutoStartCoordinator(this)
+        joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
+            context = this,
+            onGameUnavailable = ::disableAutomationForGameExit,
+        )
 
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
@@ -82,24 +92,27 @@ class HeadlessAutomationService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_ENABLE -> {
+                Log.i(LOG_TAG, "automation master enable requested from overlay")
                 configRepository.update { current ->
                     current.copy(
-                        enabled = true,
                         autoCatch = intent.booleanExtraOrNull(EXTRA_AUTO_CATCH) ?: current.autoCatch,
                         autoSpin = intent.booleanExtraOrNull(EXTRA_AUTO_SPIN) ?: current.autoSpin,
                         autoEncounter = intent.booleanExtraOrNull(EXTRA_AUTO_ENCOUNTER)
                             ?: current.autoEncounter,
                     )
                 }
-                engine.start()
+                engine.activate()
             }
 
             ACTION_DISABLE -> {
-                configRepository.update { it.copy(enabled = false) }
+                Log.i(LOG_TAG, "automation master disable requested from overlay")
+                // The worker remains alive. Its next loop sends STOP_RUNTIME and
+                // leaves the injected process in ATTACHED_IDLE for fast restart.
+                engine.deactivate()
             }
 
             ACTION_STOP_SERVICE -> {
-                configRepository.update { it.copy(enabled = false) }
+                engine.deactivate()
                 stopSelf()
             }
         }
@@ -109,6 +122,7 @@ class HeadlessAutomationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        AutomationRunState.setActive(false)
         joystickAutoStartPoll?.cancel(true)
         joystickAutoStartExecutor.shutdownNow()
         if (::joystickAutoStartCoordinator.isInitialized) {
@@ -116,13 +130,46 @@ class HeadlessAutomationService : Service() {
         }
         apiServer.stop()
         engine.shutdown()
-        structuredController.stop()
-        runtimeBridge?.disconnect()
         super.onDestroy()
+    }
+
+    private fun publishRuntimeModuleLoadStatus(status: RuntimeModuleLoadStatus) {
+        val moduleName = status.module.name
+        if (status.loaded) {
+            eventSink.publish(
+                AutomationEvent(
+                    type = AutomationEventType.MODULE_LOADED,
+                    message = "$moduleName module loaded",
+                ),
+            )
+            return
+        }
+
+        val detail = status.errorCode
+            ?: status.message
+            ?: "unknown error"
+        eventSink.publish(
+            AutomationEvent(
+                type = AutomationEventType.MODULE_LOAD_FAILED,
+                message = "$moduleName module load failed: $detail",
+            ),
+        )
     }
 
     private fun syncJoystickAutoStart() {
         runCatching { joystickAutoStartCoordinator.sync() }
+    }
+
+    private fun disableAutomationForGameExit() {
+        if (!AutomationRunState.isActive()) return
+        Log.i(LOG_TAG, "automation auto-disabled: Pokémon GO is no longer foreground")
+        eventSink.publish(
+            AutomationEvent(
+                type = AutomationEventType.INFO,
+                message = "Automation disabled because Pokémon GO was closed",
+            ),
+        )
+        engine.deactivate()
     }
 
     private fun createNotificationChannel() {
@@ -183,6 +230,7 @@ class HeadlessAutomationService : Service() {
         private const val JOYSTICK_AUTO_START_POLL_MS = 750L
         private const val CHANNEL_ID = "pogo_headless_automation"
         private const val NOTIFICATION_ID = 2102
+        private const val LOG_TAG = "PogoRootAutomation"
 
         fun start(context: Context) {
             context.startForegroundService(
@@ -196,6 +244,7 @@ class HeadlessAutomationService : Service() {
             autoSpin: Boolean = true,
             autoEncounter: Boolean = false,
         ) {
+            AutomationRunState.setActive(true)
             context.startForegroundService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_ENABLE)
@@ -206,6 +255,7 @@ class HeadlessAutomationService : Service() {
         }
 
         fun disable(context: Context) {
+            AutomationRunState.setActive(false)
             context.startService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_DISABLE),

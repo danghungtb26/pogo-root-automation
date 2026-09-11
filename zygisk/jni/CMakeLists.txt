@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(pogo_root_automation_zygisk LANGUAGES CXX)
 
+# Default to the vendored Zygisk API header (third_party/zygisk.hpp). Override
+# with -DZYGISK_API_DIR=<dir> to point at a different copy.
 if(NOT DEFINED ZYGISK_API_DIR)
-    message(FATAL_ERROR "Set -DZYGISK_API_DIR to the directory containing zygisk.hpp")
+    set(ZYGISK_API_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party")
+endif()
+if(NOT EXISTS "${ZYGISK_API_DIR}/zygisk.hpp")
+    message(FATAL_ERROR "zygisk.hpp not found in ${ZYGISK_API_DIR}; set -DZYGISK_API_DIR")
 endif()
 
 add_library(pogo_root_automation SHARED main.cpp)
@@ -16,14 +21,3 @@ target_include_directories(
 target_compile_features(pogo_root_automation PRIVATE cxx_std_17)
 target_compile_options(pogo_root_automation PRIVATE -Wall -Wextra -Werror)
 target_link_libraries(pogo_root_automation log dl)
-
-option(POGO_BUILD_PROTOCOL_TESTS "Build host-side native protocol tests" OFF)
-if(POGO_BUILD_PROTOCOL_TESTS)
-    add_executable(runtime_command_protocol_test runtime_command_protocol_test.cpp)
-    target_compile_features(runtime_command_protocol_test PRIVATE cxx_std_17)
-    target_compile_options(runtime_command_protocol_test PRIVATE -Wall -Wextra -Werror)
-
-    add_executable(runtime_observation_protocol_test runtime_observation_protocol_test.cpp)
-    target_compile_features(runtime_observation_protocol_test PRIVATE cxx_std_17)
-    target_compile_options(runtime_observation_protocol_test PRIVATE -Wall -Wextra -Werror)
-endif()
