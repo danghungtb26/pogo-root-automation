@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.config
 
 import android.content.Context
 import dev.pogoroot.automation.core.automation.CurvePreference
@@ -7,6 +7,7 @@ import dev.pogoroot.automation.core.automation.DEFAULT_SPIN_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.EncounterMode
 import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
+import dev.pogoroot.automation.engine.AutomationRunState
 
 enum class BerryMode {
     NONE,

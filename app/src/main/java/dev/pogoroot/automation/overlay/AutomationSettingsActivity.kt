@@ -8,7 +8,7 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
-import dev.pogoroot.automation.headless.AutomationConfigRepository
+import dev.pogoroot.automation.config.AutomationConfigRepository
 
 class AutomationSettingsActivity : Activity() {
     companion object {

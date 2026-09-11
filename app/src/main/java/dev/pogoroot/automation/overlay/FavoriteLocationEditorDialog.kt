@@ -8,7 +8,7 @@ import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
 import dev.pogoroot.automation.core.model.GeoPoint
-import dev.pogoroot.automation.headless.FavoriteLocation
+import dev.pogoroot.automation.data.FavoriteLocation
 import java.util.Locale
 
 internal class FavoriteLocationEditorDialog(

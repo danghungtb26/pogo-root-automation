@@ -1,7 +1,7 @@
-package dev.pogoroot.automation.headless.modules
+package dev.pogoroot.automation.modules
 
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
-import dev.pogoroot.automation.headless.RuntimeFeatureModuleDescriptor
+import dev.pogoroot.automation.runtime.RuntimeFeatureModuleDescriptor
 
 /** discard: recycle inventory items. Mirrors the native modules/discard ownership. */
 val DiscardModuleDescriptor = RuntimeFeatureModuleDescriptor(

@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime.structured
 
 import android.util.Log
 import dev.pogoroot.automation.adapter.GameCapability

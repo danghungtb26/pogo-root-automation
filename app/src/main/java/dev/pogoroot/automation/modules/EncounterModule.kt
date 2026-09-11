@@ -1,10 +1,10 @@
-package dev.pogoroot.automation.headless.modules
+package dev.pogoroot.automation.modules
 
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.core.automation.CurvePreference
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
-import dev.pogoroot.automation.headless.BerryMode
-import dev.pogoroot.automation.headless.RuntimeFeatureModuleDescriptor
+import dev.pogoroot.automation.config.BerryMode
+import dev.pogoroot.automation.runtime.RuntimeFeatureModuleDescriptor
 
 /**
  * encounter: the encounter-based flow — open encounter (2), catch throw (3 default,

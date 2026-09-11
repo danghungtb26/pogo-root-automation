@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime.structured
 
 import dev.pogoroot.automation.core.model.GameLifecycleState
 

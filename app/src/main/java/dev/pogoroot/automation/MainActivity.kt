@@ -13,10 +13,10 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
-import dev.pogoroot.automation.headless.AutomationConfigRepository
-import dev.pogoroot.automation.headless.AutomationControlServer
-import dev.pogoroot.automation.headless.AutomationRunState
-import dev.pogoroot.automation.headless.HeadlessAutomationService
+import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.service.AutomationControlServer
+import dev.pogoroot.automation.engine.AutomationRunState
+import dev.pogoroot.automation.service.HeadlessAutomationService
 import dev.pogoroot.automation.overlay.GameForegroundDetector
 import dev.pogoroot.automation.overlay.JoystickOverlayService
 

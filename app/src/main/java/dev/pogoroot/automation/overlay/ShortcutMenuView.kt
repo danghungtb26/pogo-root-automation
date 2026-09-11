@@ -9,7 +9,7 @@ import android.view.ViewGroup
 import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import dev.pogoroot.automation.headless.HeadlessAutomationConfig
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
 
 internal class ShortcutMenuView(
     private val context: Context,

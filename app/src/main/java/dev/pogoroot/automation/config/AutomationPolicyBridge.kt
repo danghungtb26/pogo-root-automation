@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.config
 
 import dev.pogoroot.automation.core.automation.AutomationPolicy
 import dev.pogoroot.automation.core.automation.AutomationTimingPolicy

@@ -1,9 +1,10 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime
 
 import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.root.RuntimeBridgeClient
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
 
 enum class RuntimeControlState {
     DETACHED,

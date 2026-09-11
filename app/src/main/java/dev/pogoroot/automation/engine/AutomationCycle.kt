@@ -1,7 +1,10 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.engine
 
 import android.util.Log
 import java.util.concurrent.atomic.AtomicLong
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
+import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
+import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
 
 /** How the engine loop should pace itself after one cycle. */
 internal enum class CycleWait { NORMAL, WAIT_FOR_RESULT, WAIT_AFTER_ACTION }

@@ -13,7 +13,7 @@ import android.widget.TextView
 import dev.pogoroot.automation.core.location.GeoMath
 import dev.pogoroot.automation.core.time.TeleportCooldownService
 import dev.pogoroot.automation.core.model.GeoPoint
-import dev.pogoroot.automation.headless.FavoriteLocation
+import dev.pogoroot.automation.data.FavoriteLocation
 import java.util.Locale
 
 internal class FavoriteLocationAdapter(

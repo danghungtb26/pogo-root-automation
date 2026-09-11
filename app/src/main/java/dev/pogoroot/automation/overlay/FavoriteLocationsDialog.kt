@@ -11,8 +11,8 @@ import android.widget.ListView
 import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.core.model.GeoPoint
-import dev.pogoroot.automation.headless.FavoriteLocation
-import dev.pogoroot.automation.headless.FavoriteLocationRepository
+import dev.pogoroot.automation.data.FavoriteLocation
+import dev.pogoroot.automation.data.FavoriteLocationRepository
 
 internal class FavoriteLocationsDialog(
     private val context: Context,

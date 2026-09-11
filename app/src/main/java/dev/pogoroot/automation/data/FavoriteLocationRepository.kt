@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.data
 
 import android.content.Context
 import dev.pogoroot.automation.core.model.GeoPoint

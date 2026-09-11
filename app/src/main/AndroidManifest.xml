@@ -35,7 +35,7 @@
             android:exported="false" />
 
         <receiver
-            android:name=".headless.AutomationBootReceiver"
+            android:name=".service.AutomationBootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter>
@@ -44,7 +44,7 @@
         </receiver>
 
         <service
-            android:name=".headless.HeadlessAutomationService"
+            android:name=".service.HeadlessAutomationService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property

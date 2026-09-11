@@ -1,7 +1,12 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.engine
 
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
+import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.runtime.RuntimeControlState
+import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
+import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
 
 data class HeadlessAutomationStatus(
     val running: Boolean = false,

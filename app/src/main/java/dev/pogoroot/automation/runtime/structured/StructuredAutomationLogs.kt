@@ -1,9 +1,12 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime.structured
 
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.core.automation.ActionExecutionPhase
 import dev.pogoroot.automation.core.automation.ActionRequest
 import dev.pogoroot.automation.core.automation.AutomationAction
+import dev.pogoroot.automation.events.AutomationEvent
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.events.AutomationEventType
 
 internal fun AutomationAction.structuredSemanticName(): String = when (this) {
     is AutomationAction.Catch -> "TRY_CATCH"

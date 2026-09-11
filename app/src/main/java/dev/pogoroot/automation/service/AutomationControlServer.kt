@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.service
 
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -11,6 +11,11 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
+import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.config.BerryMode
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
+import dev.pogoroot.automation.engine.HeadlessAutomationEngine
+import dev.pogoroot.automation.engine.HeadlessAutomationStatus
 
 class AutomationControlServer(
     private val configRepository: AutomationConfigRepository,

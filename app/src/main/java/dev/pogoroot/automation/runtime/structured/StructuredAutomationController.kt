@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime.structured
 
 import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
@@ -25,6 +25,13 @@ import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
 import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
+import dev.pogoroot.automation.config.toCorePolicy
+import dev.pogoroot.automation.data.LastActiveGameAction
+import dev.pogoroot.automation.engine.CatchSpinArmState
+import dev.pogoroot.automation.events.AutomationEvent
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.events.AutomationEventType
 /** Structured policy loop; all state comes from the runtime bridge. */
 class StructuredAutomationController(
     private val bridge: RuntimeBridge,

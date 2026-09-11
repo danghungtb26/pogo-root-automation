@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.service
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -16,6 +16,17 @@ import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
+import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.data.LastActiveLocationRepository
+import dev.pogoroot.automation.data.MapTargetRepository
+import dev.pogoroot.automation.engine.AutomationRunState
+import dev.pogoroot.automation.engine.HeadlessAutomationEngine
+import dev.pogoroot.automation.events.AutomationEvent
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.events.AutomationEventType
+import dev.pogoroot.automation.events.ToastAutomationEventSink
+import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
+import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository

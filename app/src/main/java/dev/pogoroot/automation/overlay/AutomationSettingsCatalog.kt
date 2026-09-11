@@ -2,8 +2,8 @@ package dev.pogoroot.automation.overlay
 
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
-import dev.pogoroot.automation.headless.AutomationConfigRepository
-import dev.pogoroot.automation.headless.BerryMode
+import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.config.BerryMode
 
 internal data class AutomationSettingsCategory(
     val id: String,

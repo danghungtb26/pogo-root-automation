@@ -11,7 +11,7 @@ import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
-import dev.pogoroot.automation.headless.HeadlessAutomationConfig
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.location.JoystickLocationController
 import kotlin.math.max
 

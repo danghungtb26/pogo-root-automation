@@ -1,7 +1,7 @@
 package dev.pogoroot.automation
 
 import android.app.Application
-import dev.pogoroot.automation.headless.AutomationRunState
+import dev.pogoroot.automation.engine.AutomationRunState
 import dev.pogoroot.automation.location.RootMockLocationProvider
 
 class AutomationApplication : Application() {

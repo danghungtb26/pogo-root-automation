@@ -1,8 +1,8 @@
-package dev.pogoroot.automation.headless.modules
+package dev.pogoroot.automation.modules
 
 import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
-import dev.pogoroot.automation.headless.RuntimeFeatureModuleDescriptor
+import dev.pogoroot.automation.runtime.RuntimeFeatureModuleDescriptor
 
 /**
  * catch_spin: map automation only — direct-map catch (TRY_CATCH, 12) and spin

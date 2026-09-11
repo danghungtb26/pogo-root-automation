@@ -1,11 +1,12 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime
 
 import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
-import dev.pogoroot.automation.headless.modules.CatchSpinModuleDescriptor
-import dev.pogoroot.automation.headless.modules.DiscardModuleDescriptor
-import dev.pogoroot.automation.headless.modules.EncounterModuleDescriptor
-import dev.pogoroot.automation.headless.modules.TransferModuleDescriptor
+import dev.pogoroot.automation.modules.CatchSpinModuleDescriptor
+import dev.pogoroot.automation.modules.DiscardModuleDescriptor
+import dev.pogoroot.automation.modules.EncounterModuleDescriptor
+import dev.pogoroot.automation.modules.TransferModuleDescriptor
+import dev.pogoroot.automation.config.HeadlessAutomationConfig
 
 enum class RuntimeFeatureModuleState {
     DISABLED,

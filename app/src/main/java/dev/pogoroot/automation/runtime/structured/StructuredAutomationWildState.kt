@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.runtime.structured
 
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.core.automation.ActionExecutionPhase
@@ -9,6 +9,9 @@ import dev.pogoroot.automation.core.automation.AutomationSnapshot
 import dev.pogoroot.automation.core.model.PokemonIv
 import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
 import dev.pogoroot.automation.core.model.StoredPokemon
+import dev.pogoroot.automation.events.AutomationEvent
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.events.AutomationEventType
 
 /** Tracks wild catches that may become transfer candidates after capture. */
 internal class StructuredAutomationWildState(

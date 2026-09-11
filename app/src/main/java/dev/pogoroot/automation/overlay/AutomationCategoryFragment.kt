@@ -17,7 +17,7 @@ import android.widget.TextView
 import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
-import dev.pogoroot.automation.headless.BerryMode
+import dev.pogoroot.automation.config.BerryMode
 
 class AutomationCategoryFragment : Fragment() {
     companion object {

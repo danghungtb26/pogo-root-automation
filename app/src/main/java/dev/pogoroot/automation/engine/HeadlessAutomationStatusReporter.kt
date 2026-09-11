@@ -1,6 +1,13 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.engine
 
 import java.util.concurrent.atomic.AtomicReference
+import dev.pogoroot.automation.events.AutomationEvent
+import dev.pogoroot.automation.events.AutomationEventSink
+import dev.pogoroot.automation.events.AutomationEventType
+import dev.pogoroot.automation.runtime.RuntimeControlSnapshot
+import dev.pogoroot.automation.runtime.RuntimeFeatureModuleSnapshot
+import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
+import dev.pogoroot.automation.runtime.structured.StructuredAutomationTick
 
 /**
  * Owns the observable [HeadlessAutomationStatus] and all of its transitions

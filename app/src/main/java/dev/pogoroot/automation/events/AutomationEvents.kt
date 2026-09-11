@@ -1,10 +1,11 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.events
 
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
+import dev.pogoroot.automation.config.AutomationConfigRepository
 
 enum class AutomationEventType {
     CATCH_THROWN,

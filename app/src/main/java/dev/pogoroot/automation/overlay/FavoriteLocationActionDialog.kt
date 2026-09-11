@@ -3,7 +3,7 @@ package dev.pogoroot.automation.overlay
 import android.app.AlertDialog
 import android.content.Context
 import android.view.ContextThemeWrapper
-import dev.pogoroot.automation.headless.FavoriteLocation
+import dev.pogoroot.automation.data.FavoriteLocation
 
 internal class FavoriteLocationActionDialog(
     private val context: Context,

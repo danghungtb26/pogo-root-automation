@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.headless
+package dev.pogoroot.automation.service
 
 import android.content.BroadcastReceiver
 import android.content.Context
