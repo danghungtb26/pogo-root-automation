@@ -20,6 +20,8 @@ class CatchSpinActionPlanner : ModuleActionPlanner {
     override fun plan(context: PlanningContext): List<AutomationAction> {
         val snapshot = context.snapshot
         val policy = context.policy
+        // Master arm: the cluster does nothing until the Automation switch is on.
+        if (!snapshot.catchSpinArmed) return emptyList()
         if (snapshot.lifecycleState != GameLifecycleState.OVERWORLD) return emptyList()
 
         val outOfBalls = snapshot.outOfBalls

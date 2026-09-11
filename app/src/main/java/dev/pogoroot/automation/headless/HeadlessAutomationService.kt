@@ -74,6 +74,7 @@ class HeadlessAutomationService : Service() {
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
+            onGameAvailable = ::enableAutomationForGameForeground,
             onGameUnavailable = ::disableAutomationForGameExit,
         )
 
@@ -158,6 +159,18 @@ class HeadlessAutomationService : Service() {
 
     private fun syncJoystickAutoStart() {
         runCatching { joystickAutoStartCoordinator.sync() }
+    }
+
+    private fun enableAutomationForGameForeground() {
+        if (AutomationRunState.isActive()) return
+        Log.i(LOG_TAG, "automation auto-enabled: Pokémon GO is foreground")
+        eventSink.publish(
+            AutomationEvent(
+                type = AutomationEventType.INFO,
+                message = "Automation running while Pokémon GO is open",
+            ),
+        )
+        engine.activate()
     }
 
     private fun disableAutomationForGameExit() {

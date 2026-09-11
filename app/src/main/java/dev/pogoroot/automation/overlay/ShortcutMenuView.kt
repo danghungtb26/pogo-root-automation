@@ -47,7 +47,7 @@ internal class ShortcutMenuView(
             useDefaultMargins = false
         }
 
-        addShortcut(grid, "automation", "⏻", "Automation") { onToggle("automation") }
+        addShortcut(grid, "automation", "🔴", "Automation") { onToggle("automation") }
         addShortcut(grid, "catch", "C", "Catch") { onToggle("catch") }
         addShortcut(grid, "spin", "↻", "Spin") { onToggle("spin") }
         addShortcut(grid, "encounter", "◎", "Encounter") { onToggle("encounter") }

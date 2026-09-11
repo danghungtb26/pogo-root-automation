@@ -15,13 +15,12 @@ import dev.pogoroot.automation.core.time.TeleportCooldown
 import dev.pogoroot.automation.core.time.TeleportCooldownMode
 import dev.pogoroot.automation.core.time.TeleportCooldownService
 import dev.pogoroot.automation.headless.AutomationConfigRepository
-import dev.pogoroot.automation.headless.AutomationRunState
+import dev.pogoroot.automation.headless.CatchSpinArmState
 import dev.pogoroot.automation.headless.FavoriteLocation
 import dev.pogoroot.automation.headless.FavoriteLocationRepository
 import dev.pogoroot.automation.headless.LastActiveGameAction
 import dev.pogoroot.automation.headless.LastActiveLocationRepository
 import dev.pogoroot.automation.headless.MapTargetRepository
-import dev.pogoroot.automation.headless.HeadlessAutomationService
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
@@ -255,13 +254,13 @@ class JoystickOverlayService : Service() {
     private fun renderShortcutStates() {
         if (!::mainOverlay.isInitialized) return
         val config = automationConfigRepository.read()
-        mainOverlay.render(config, speedPresetIndex, AutomationRunState.isActive())
+        mainOverlay.render(config, speedPresetIndex, CatchSpinArmState.isArmed())
     }
 
     private fun toggleAutomation(key: String) {
         val current = automationConfigRepository.read()
         val currentValue = when (key) {
-            "automation" -> AutomationRunState.isActive()
+            "automation" -> CatchSpinArmState.isArmed()
             "catch" -> current.autoCatch
             "spin" -> current.autoSpin
             "encounter" -> current.autoEncounter
@@ -288,17 +287,11 @@ class JoystickOverlayService : Service() {
 
     private fun applyAutomationToggle(key: String, enabled: Boolean) {
         if (key == "automation") {
-            val current = automationConfigRepository.read()
-            if (enabled) {
-                HeadlessAutomationService.enable(
-                    this,
-                    autoCatch = current.autoCatch,
-                    autoSpin = current.autoSpin,
-                    autoEncounter = current.autoEncounter,
-                )
-            } else {
-                HeadlessAutomationService.disable(this)
-            }
+            // Master arm for the catch_spin cluster: a volatile, default-off RAM
+            // switch (never persisted). The engine itself runs while Pokémon GO is
+            // foreground (started by the service); this only gates whether catch/
+            // spin act. Catch/Spin toggles select what the armed cluster does.
+            CatchSpinArmState.setArmed(enabled)
             renderShortcutStates()
             return
         }

@@ -27,6 +27,13 @@ data class AutomationSnapshot(
      * forced to farm balls. Cleared once a spin completes.
      */
     val outOfBalls: Boolean = false,
+    /**
+     * Runtime master arm for the catch_spin cluster (volatile, default off). While
+     * false the catch_spin planner produces no catch/spin actions regardless of the
+     * autoCatch/autoSpin behaviour flags. Set by the controller from the in-memory
+     * arm switch (the overlay's Automation button).
+     */
+    val catchSpinArmed: Boolean = false,
 )
 
 /**

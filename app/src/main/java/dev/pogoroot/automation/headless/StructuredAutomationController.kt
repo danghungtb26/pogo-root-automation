@@ -151,6 +151,7 @@ class StructuredAutomationController(
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
                         val snapshot = adapter.readStructuredSnapshot(
                             outOfBalls = outOfBalls,
+                            catchSpinArmed = CatchSpinArmState.isArmed(),
                             mergeStorage = wildState::mergePendingWildTransfers,
                             excludedSpawnIds = requestedCatchPokemonIds,
                         )
