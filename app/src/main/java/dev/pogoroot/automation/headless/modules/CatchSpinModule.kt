@@ -13,7 +13,6 @@ val CatchSpinModuleDescriptor = RuntimeFeatureModuleDescriptor(
     gameplayActionTags = setOf(2, 3, 4, 9, 10, 11, 12),
     controlActions = setOf(ModuleControlAction.SCAN_MAP),
     isDesired = { config ->
-        config.mapTapWalkEnabled || config.autoCatch || config.autoSpin ||
-            config.autoEncounter || config.autoSnapshotDuringEncounter
+        config.autoEncounter && (config.autoCatch || config.autoSpin)
     },
 )
