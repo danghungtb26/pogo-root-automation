@@ -13,6 +13,9 @@ zygisk/module/obj/
 !/reverse/pogo-0.427.0/
 /reverse/pogo-0.427.0/*
 !/reverse/pogo-0.427.0/*.gz
+!/reverse/pogo-0.427.0/classes/
+/reverse/pogo-0.427.0/classes/*
+!/reverse/pogo-0.427.0/classes/*.cs
 !/reverse/pogo-0.427.0/DummyDll/
 !/reverse/pogo-0.427.0/DummyDll/**
 /tools/il2cppdumper/
