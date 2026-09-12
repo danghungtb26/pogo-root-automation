@@ -296,13 +296,16 @@ void *find_item_data_in_managed_list(
         : api.class_get_name(list_class);
     int32_t count = 0;
     if (!read_managed_list_count(api, list, exception, &count) || count <= 0) {
+        int32_t raw_size = 0;
+        (void)read_runtime_field(api, list, "_size", &raw_size);
         __android_log_print(
             ANDROID_LOG_WARN,
             kLogTag,
-            "native discard inventory list empty list=%p class=%s count=%d",
+            "native discard inventory list empty list=%p class=%s count=%d _size=%d",
             list,
             list_class_name,
-            count
+            count,
+            raw_size
         );
         return nullptr;
     }
@@ -345,8 +348,16 @@ void *invoke_inventory_list_sorted(
     void **exception
 ) {
     if (exception != nullptr) *exception = nullptr;
-    if (!is_probable_managed_pointer(service) || list_sorted == nullptr ||
-        api.runtime_invoke == nullptr) return nullptr;
+    if (!is_probable_managed_pointer(service) || api.runtime_invoke == nullptr) return nullptr;
+    const void *resolved_list_sorted = list_sorted;
+    if (resolved_list_sorted == nullptr && api.object_get_class != nullptr &&
+        api.class_get_method_from_name != nullptr) {
+        Il2CppClass *service_class = api.object_get_class(service);
+        resolved_list_sorted = service_class == nullptr
+            ? nullptr
+            : api.class_get_method_from_name(service_class, "ListSortedPlayerInventory", 5);
+    }
+    if (resolved_list_sorted == nullptr) return nullptr;
     uint8_t cannot_delete_items = 0U;
     void *arguments[] = {
         filter_delegate,
@@ -355,7 +366,7 @@ void *invoke_inventory_list_sorted(
         nullptr,
         nullptr,
     };
-    return api.runtime_invoke(list_sorted, service, arguments, exception);
+    return api.runtime_invoke(resolved_list_sorted, service, arguments, exception);
 }
 
 void *lookup_recycle_item_data_from_inventory_service(
@@ -367,27 +378,31 @@ void *lookup_recycle_item_data_from_inventory_service(
     if (exception != nullptr) *exception = nullptr;
     if (binding.item_inventory_list_sorted == nullptr || item_id <= 0) return nullptr;
 
-    if (binding.item_inventory_filter_delegate == nullptr &&
-        api_has_assemblies(context.il2cpp_api)) {
-        Il2CppDomain *domain = context.il2cpp_api.domain_get();
-        size_t assembly_count = 0U;
-        const Il2CppAssembly **assemblies = domain == nullptr
-            ? nullptr
-            : context.il2cpp_api.domain_get_assemblies(domain, &assembly_count);
-        if (assemblies != nullptr) {
-            resolve_discard_inventory_filter_delegate(
-                context.il2cpp_api,
-                assemblies,
-                assembly_count,
-                &binding
-            );
-        }
-    }
-
     const Il2CppApi &api = context.il2cpp_api;
     void *service = resolve_item_inventory_service_on_main_thread(context, binding, exception);
     if (exception != nullptr && *exception != nullptr) return nullptr;
     if (!is_probable_managed_pointer(service)) return nullptr;
+
+    if (binding.item_inventory_filter_delegate == nullptr && api_has_assemblies(api)) {
+        Il2CppDomain *domain = api.domain_get();
+        size_t assembly_count = 0U;
+        const Il2CppAssembly **assemblies = domain == nullptr
+            ? nullptr
+            : api.domain_get_assemblies(domain, &assembly_count);
+        if (assemblies != nullptr) {
+            resolve_discard_inventory_filter_delegate(
+                api,
+                assemblies,
+                assembly_count,
+                &binding
+            );
+            if (binding.item_inventory_filter_delegate != nullptr) {
+                std::lock_guard<std::mutex> lock(context.binding_mutex);
+                context.binding.item_inventory_filter_delegate =
+                    binding.item_inventory_filter_delegate;
+            }
+        }
+    }
 
     void *filter_delegate = binding.item_inventory_filter_delegate;
     void *list = invoke_inventory_list_sorted(
