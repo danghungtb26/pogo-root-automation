@@ -357,6 +357,31 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
     if (direct_catch_status_removes_map_entity(status)) {
         refresh_map_after_direct_catch(context, pending.encounter_id, status);
     }
+    // Native auto-catch has no Kotlin command id, so publish a dedicated
+    // telemetry event for the app-owned custom toast. Manual command catches
+    // already produce their normal controller result and must not duplicate it.
+    if (pending.command_id.empty()) {
+        if (status == 1U) {
+            (void)send_runtime_automation_event(
+                context,
+                pogo_runtime::RuntimeAutomationEventType::kPokemonCaught,
+                pending.encounter_id,
+                captured_pokemon_id
+            );
+        } else if (status == 3U) {
+            (void)send_runtime_automation_event(
+                context,
+                pogo_runtime::RuntimeAutomationEventType::kPokemonFled,
+                pending.encounter_id
+            );
+        }
+    }
+    if (status == 1U && captured_pokemon_id != 0U) {
+        // The native transfer module consumes the same authoritative catch
+        // result before this Promise is released. Kotlin is not involved in
+        // the auto-transfer decision or trigger.
+        on_runtime_catch_succeeded_on_main_thread(context, captured_pokemon_id);
+    }
     set_pending_direct_catch_terminal(
         context,
         kCommandPhaseCompleted,

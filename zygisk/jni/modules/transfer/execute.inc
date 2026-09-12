@@ -1,47 +1,6 @@
-// Transfer command execution via Niantic.Holoholo.Internal.PokemonBagImpl
-// (IPokemonBag). Per the 0.427.0 dump the release path is UI-independent:
-//   PokemonProto GetPokemon(ulong id)
-//   IPromise<ReleasePokemonOutProto> ReleasePokemon(PokemonProto pokemon)
-// so the executor resolves the proto by storage id then releases it.
-//
-// Execution is DISABLED (kTransferExecutionEnabled = false) until the release
-// promise post-condition is verified on device, exactly like the discard and
-// catch paths. While disabled the executor returns a clean binding_unavailable
-// rejection. The binding is still resolved so the diagnostic log shows whether
-// the build is wireable.
-
-constexpr bool kTransferExecutionEnabled = true;
-
-MainThreadActionOutcome release_runtime_pokemon(
-    ProbeContext &context,
-    uint64_t pokemon_id
-) {
-    const RuntimeBinding binding = runtime_binding_snapshot(context);
-    const Il2CppApi &api = context.il2cpp_api;
-    if (!binding.transfer_verified || binding.pokemon_inventory == nullptr ||
-        binding.pokemon_inventory_get_pokemon == nullptr ||
-        binding.pokemon_inventory_release == nullptr || api.runtime_invoke == nullptr) {
-        return MainThreadActionOutcome::kRejected;
-    }
-    // PokemonProto GetPokemon(ulong id): resolve the stored Pokémon by storage id.
-    void *get_arguments[] = {&pokemon_id};
-    void *exception = nullptr;
-    void *pokemon = api.runtime_invoke(
-        binding.pokemon_inventory_get_pokemon, binding.pokemon_inventory, get_arguments, &exception
-    );
-    if (exception != nullptr) return MainThreadActionOutcome::kIndeterminate;
-    if (!is_probable_managed_pointer(pokemon)) return MainThreadActionOutcome::kRejected;
-    // IPromise<ReleasePokemonOutProto> ReleasePokemon(PokemonProto pokemon).
-    void *release_arguments[] = {pokemon};
-    exception = nullptr;
-    void *promise = api.runtime_invoke(
-        binding.pokemon_inventory_release, binding.pokemon_inventory, release_arguments, &exception
-    );
-    if (exception != nullptr) return MainThreadActionOutcome::kIndeterminate;
-    return promise == nullptr
-        ? MainThreadActionOutcome::kIndeterminate
-        : MainThreadActionOutcome::kInvoked;
-}
+// Manual transfer command execution. The actual GetPokemon -> ReleasePokemon
+// call and Promise lifecycle are shared with auto transfer and are marshalled
+// to Unity's main thread through the transfer observer state machine.
 
 RuntimeActionResult execute_runtime_transfer(
     ProbeContext &context,
@@ -88,11 +47,15 @@ RuntimeActionResult execute_runtime_transfer(
         return result;
     }
     context.last_action_command_id = command.command_id;
-    const MainThreadActionOutcome outcome = release_runtime_pokemon(context, pokemon_id);
+    const MainThreadActionOutcome outcome = request_main_thread_start_runtime_transfer(
+        context,
+        pokemon_id,
+        command.command_id.c_str()
+    );
     if (outcome == MainThreadActionOutcome::kInvoked) {
-        result.phase = kCommandPhaseCompleted;
-        result.error_code = "transfer_invoked";
-        result.message = "pokemon release was invoked; storage refreshes on the next observation";
+        result.phase = kCommandPhaseIndeterminate;
+        result.error_code = "transfer_promise_pending";
+        result.message = "pokemon release was invoked; native is waiting for ReleasePokemon Promise";
     } else if (outcome == MainThreadActionOutcome::kIndeterminate) {
         result.phase = kCommandPhaseIndeterminate;
         result.error_code = "invoke_outcome_indeterminate";

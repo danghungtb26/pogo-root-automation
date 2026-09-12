@@ -12,4 +12,7 @@ package dev.pogoroot.automation.bridge
 enum class ModuleControlAction(val wireValue: Int, val owner: RuntimeFeatureModule) {
     /** Replace the validated catch_spin runtime configuration snapshot. */
     CATCH_SPIN_CONFIG_SET(6, RuntimeFeatureModule.CATCH_SPIN),
+
+    /** Replace the validated transfer keep-policy snapshot. */
+    TRANSFER_CONFIG_SET(7, RuntimeFeatureModule.TRANSFER),
 }

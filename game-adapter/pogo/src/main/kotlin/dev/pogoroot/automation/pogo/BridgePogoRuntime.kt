@@ -237,9 +237,11 @@ class BridgePogoRuntimeSource(
             event.payloadVersion == BridgeProtocol.RUNTIME_INVENTORY_PAYLOAD_VERSION
         val structuredCatchSpin = event.observationType == ObservationType.REQUEST_CATCH_SPIN &&
             event.payloadVersion == BridgeProtocol.RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION
+        val structuredAutomationEvent = event.observationType == ObservationType.AUTOMATION_EVENT &&
+            event.payloadVersion == BridgeProtocol.OBSERVATION_PAYLOAD_VERSION
         if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION &&
             !structuredEncounter && !structuredNearby && !structuredForts && !structuredInventory &&
-            !structuredCatchSpin) {
+            !structuredCatchSpin && !structuredAutomationEvent) {
             lastError = "unsupported observation payload version ${event.payloadVersion}"
             return
         }
@@ -338,6 +340,7 @@ class BridgePogoRuntimeSource(
             ObservationType.POKEMON_STORAGE,
             ObservationType.MAP_TARGET,
             ObservationType.THROW_DIAGNOSTIC,
+            ObservationType.AUTOMATION_EVENT,
             -> Unit
         }
         observationStates[event.messageSeq] =

@@ -12,13 +12,13 @@ import android.view.Gravity
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.service.AutomationControlServer
 import dev.pogoroot.automation.engine.AutomationRunState
 import dev.pogoroot.automation.service.HeadlessAutomationService
 import dev.pogoroot.automation.overlay.GameForegroundDetector
 import dev.pogoroot.automation.overlay.JoystickOverlayService
+import dev.pogoroot.automation.overlay.CustomToast
 
 class MainActivity : Activity() {
     private val handler = Handler(Looper.getMainLooper())
@@ -95,7 +95,7 @@ class MainActivity : Activity() {
                         autoSpin = true,
                         autoEncounter = false,
                     )
-                    Toast.makeText(context, "Headless automation enabled", Toast.LENGTH_SHORT).show()
+                    CustomToast.show(context, "Headless automation enabled")
                     renderStatus()
                 }
             })
@@ -104,7 +104,7 @@ class MainActivity : Activity() {
                 text = "Disable automation"
                 setOnClickListener {
                     HeadlessAutomationService.disable(context)
-                    Toast.makeText(context, "Automation disabled; API service stays available", Toast.LENGTH_SHORT).show()
+                    CustomToast.show(context, "Automation disabled; API service stays available")
                     renderStatus()
                 }
             })
@@ -161,11 +161,11 @@ class MainActivity : Activity() {
     private fun requestOverlayAndStartJoystick() {
         if (!Settings.canDrawOverlays(this)) {
             startJoystickAfterOverlayGrant = true
-            Toast.makeText(
+            CustomToast.show(
                 this,
                 "Allow display over other apps, then return to PoGo Root Automation.",
-                Toast.LENGTH_LONG,
-            ).show()
+                CustomToast.LONG_DURATION_MS,
+            )
             startActivity(
                 Intent(
                     Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
@@ -177,11 +177,11 @@ class MainActivity : Activity() {
 
         if (!GameForegroundDetector.hasUsageAccess(this)) {
             startJoystickAfterUsageGrant = true
-            Toast.makeText(
+            CustomToast.show(
                 this,
                 "Allow usage access so the overlay only appears over Pokémon GO.",
-                Toast.LENGTH_LONG,
-            ).show()
+                CustomToast.LONG_DURATION_MS,
+            )
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
             return
         }
@@ -194,6 +194,6 @@ class MainActivity : Activity() {
             Intent(this, JoystickOverlayService::class.java)
                 .setAction(JoystickOverlayService.ACTION_START),
         )
-        Toast.makeText(this, "Built-in joystick started", Toast.LENGTH_SHORT).show()
+        CustomToast.show(this, "Built-in joystick started")
     }
 }

@@ -262,6 +262,7 @@ void discover_runtime_owners(
     static const ServiceCandidate services[] = {
         {"Niantic.Holoholo", "IItemBag", "IItemBag", "ItemBagImpl"},
         {"Niantic.Holoholo", "IPokemonBag", "IPokemonBag", "PokemonBagImpl"},
+        {"", "IGameMasterData", "IGameMasterData", "GameMasterData"},
         {"Niantic.Holoholo", "ILocationProvider", "ILocationProvider", "LocationProviderAdapter"},
         {"Niantic.Holoholo.Encounter", "IEncounterPokemon", "IEncounterPokemon", "EncounterPokemon"},
         {"Niantic.Holoholo.Encounter", "IEncounterState", "IEncounterState", "EncounterState"},
@@ -389,6 +390,16 @@ void discover_runtime_owners(
                 kLogTag,
                 "managed diagnostic: transfer binding verified=%d bag=%p get_pokemon=%p release=%p",
                 binding->transfer_verified ? 1 : 0, owner, get_pokemon, release
+            );
+        }
+        if (strcmp(service.label, "IGameMasterData") == 0 && owner != nullptr &&
+            runtime_object_is_exact_class(api, owner, "", "GameMasterData")) {
+            binding->game_master_data = owner;
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "managed diagnostic: game master data owner=%p",
+                owner
             );
         }
         if (strcmp(service.label, "IEncounterPokemon") == 0 && owner != nullptr &&
@@ -573,6 +584,25 @@ void discover_runtime_owners(
         api.class_get_field_from_name(pokemon_proto_class, "pokemonDisplay_") != nullptr &&
         api.class_get_field_from_name(pokemon_display_class, "Shiny") != nullptr;
     binding->encounter_read_verified = encounter_fields_verified;
+    if (pokemon_proto_class != nullptr && binding->game_master_data != nullptr) {
+        const void *is_legendary = find_runtime_method_with_parameter(
+            api, pokemon_proto_class, "IsLegendary", "IGameMasterData"
+        );
+        const void *is_mythic = find_runtime_method_with_parameter(
+            api, pokemon_proto_class, "IsMythic", "IGameMasterData"
+        );
+        binding->pokemon_proto_is_legendary = is_legendary;
+        binding->pokemon_proto_is_mythic = is_mythic;
+        __android_log_print(
+            is_legendary != nullptr && is_mythic != nullptr
+                ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+            kLogTag,
+            "managed diagnostic: pokemon classification binding legendary=%p mythic=%p gmt=%p",
+            is_legendary,
+            is_mythic,
+            binding->game_master_data
+        );
+    }
     __android_log_print(
         encounter_fields_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,

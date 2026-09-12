@@ -135,6 +135,12 @@ void runtime_catch_spin_execute_catch(
         runtime_catch_spin_log_rejected("catch", "direct_catch_promise_pending");
         return;
     }
+    (void)send_runtime_automation_event(
+        context,
+        pogo_runtime::RuntimeAutomationEventType::kPokemonFound,
+        target.spawn_id,
+        static_cast<uint64_t>(target.species_id)
+    );
     const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
         context, target.spawn_id
     );
@@ -227,14 +233,21 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         PendingDirectCatch terminal;
         if (consume_terminal_pending_direct_catch(tick.context, &terminal)) {
             std::lock_guard<std::mutex> lock(g_runtime_catch_spin_coordinator.mutex);
+            const bool transfer_busy = runtime_transfer_blocks_catch_spin();
+            // A transfer in flight is a separate native gate. Do not copy it
+            // into `suspended`, whose indeterminate state is intentionally
+            // sticky; otherwise a successful ReleasePokemon Promise would
+            // leave catch-spin suspended forever.
             g_runtime_catch_spin_coordinator.suspended = false;
             runtime_catch_spin_settle(1000U);
             __android_log_print(
                 terminal.catch_outcome_wire == 1U ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                 kLogTag,
-                "native catch_spin TryCapture Promise settled spawn=%llu outcome=%u; map sync attempted",
+                "native catch_spin TryCapture Promise settled spawn=%llu outcome=%u "
+                "map sync attempted transfer_busy=%d",
                 static_cast<unsigned long long>(terminal.encounter_id),
-                terminal.catch_outcome_wire
+                terminal.catch_outcome_wire,
+                transfer_busy ? 1 : 0
             );
         }
     }
@@ -244,7 +257,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     if (!g_runtime_active.load() || !config.configured || !config.armed ||
         !((config.auto_catch && config.catch_all) || config.auto_spin)) return;
     if (tick.context.active_encounter_id.load() != 0U) return;
-    if (g_runtime_catch_spin_coordinator.suspended) return;
+    if (g_runtime_catch_spin_coordinator.suspended || runtime_transfer_blocks_catch_spin()) return;
 
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
     if (now < g_runtime_catch_spin_coordinator.settle_until_ns) return;

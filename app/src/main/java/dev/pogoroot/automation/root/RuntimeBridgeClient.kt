@@ -19,6 +19,9 @@ import dev.pogoroot.automation.bridge.RuntimeControlRequest
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfig
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigRequest
+import dev.pogoroot.automation.bridge.RuntimeTransferConfig
+import dev.pogoroot.automation.bridge.RuntimeTransferConfigPayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeTransferConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.bridge.RuntimeModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeModuleControlPayloadCodec
@@ -159,6 +162,33 @@ class RuntimeBridgeClient(
         Log.i(
             LOG_TAG,
             "runtime catch_spin config acknowledged revision=${config.configRevision} " +
+                "phase=${result.phase} message=${result.message}",
+        )
+    }
+
+    /** Apply the complete, revisioned transfer keep policy to native. */
+    fun setTransferConfig(config: RuntimeTransferConfig): Result<Unit> = runCatching {
+        val ready = currentRuntimeReady() ?: connect().getOrThrow()
+        val requestId = "runtime-transfer-config-${config.configRevision}-${System.nanoTime()}"
+        val request = RuntimeTransferConfigRequest(
+            runtimeSessionId = ready.runtimeSessionId,
+            requestId = requestId,
+            config = config,
+            expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
+            pid = ready.pid,
+            processName = ready.processName,
+            packageName = ready.packageName,
+            buildFingerprint = ready.buildFingerprint,
+        )
+        val result = awaitControlResult(requestId) {
+            sendPayload(
+                messageType = BridgeMessageType.COMMAND,
+                payload = RuntimeTransferConfigPayloadCodec.encode(request).getOrThrow(),
+            )
+        }.getOrThrow()
+        Log.i(
+            LOG_TAG,
+            "runtime transfer config acknowledged revision=${config.configRevision} " +
                 "phase=${result.phase} message=${result.message}",
         )
     }

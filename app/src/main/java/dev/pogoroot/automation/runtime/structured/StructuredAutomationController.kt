@@ -24,6 +24,9 @@ import dev.pogoroot.automation.pogo.BridgeBackedPogoActionExecutor
 import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
 import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayload
+import dev.pogoroot.automation.bridge.RuntimeAutomationEventType
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.config.toCorePolicy
 import dev.pogoroot.automation.data.LastActiveGameAction
@@ -68,7 +71,6 @@ class StructuredAutomationController(
     private val catchLabelsByCommand = mutableMapOf<String, String>()
     private val publishedCatchOutcomeCommands = mutableSetOf<String>()
     private val requestedCatchPokemonIds = linkedSetOf<String>()
-    private val wildState = StructuredAutomationWildState(eventSink)
     private var resetRunnerOnNextAttach = false
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
         syncSafetyConfig()
@@ -87,6 +89,17 @@ class StructuredAutomationController(
                     if (event.messageSeq <= processedObservationSeq) continue
                     source.selectObservation(event.messageSeq).getOrThrow()
                     try {
+                        if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.AUTOMATION_EVENT) {
+                            RuntimeAutomationEventPayloadCodec.decode(event.payload)
+                                .onSuccess { eventSink.publish(it.toAutomationEvent()) }
+                                .onFailure { error ->
+                                    lastError = "automation event decode: ${error.message}"
+                                    eventSink.publish(AutomationEvent(AutomationEventType.ERROR, lastError!!))
+                                }
+                            processedObservationSeq = event.messageSeq
+                            observationSeq = event.messageSeq
+                            continue
+                        }
                         if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.MAP_TARGET) {
                             if (GameCapability.READ_MAP_TARGET !in adapter.capabilities) {
                                 lastError = "map target ignored: runtime did not advertise READ_MAP_TARGET"
@@ -135,7 +148,6 @@ class StructuredAutomationController(
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
                         val snapshot = adapter.readStructuredSnapshot(
                             outOfBalls = outOfBalls,
-                            mergeStorage = wildState::mergePendingWildTransfers,
                             excludedSpawnIds = requestedCatchPokemonIds,
                         )
                         Log.i(
@@ -194,7 +206,6 @@ class StructuredAutomationController(
                                 requestedCatchPokemonIds += it
                             }
                             rememberCatchLabel(it, snapshot)
-                            wildState.rememberCatchTemplate(it, snapshot)
                             submitted = true
                             lastAction = it.action::class.simpleName
                             Log.i(
@@ -249,7 +260,6 @@ class StructuredAutomationController(
         recordedGameActionCommands.clear()
         catchLabelsByCommand.clear()
         publishedCatchOutcomeCommands.clear()
-        wildState.clear()
     }
 
     fun stop() = resetForAutomationDisable()
@@ -266,7 +276,6 @@ class StructuredAutomationController(
         recordedGameActionCommands.clear()
         catchLabelsByCommand.clear()
         publishedCatchOutcomeCommands.clear()
-        wildState.clear()
         connected = true
         lastError = null
     }
@@ -330,7 +339,6 @@ class StructuredAutomationController(
                 observedAtElapsedNs = result.observedAtElapsedNs,
             ),
         ).onFailure { lastError = it.message }
-        val catchAction = request.action as? AutomationAction.Catch
         if (resultStatus.isSuccess && phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
             recordGameActionIfNeeded(request, result)
         }
@@ -366,10 +374,6 @@ class StructuredAutomationController(
         if (resultStatus.isSuccess && isAuthoritativeCatchResult(request, result, phase)) {
             publishCatchOutcome(request, result)
         }
-        if (resultStatus.isSuccess && phase.isDefinitive) {
-            wildState.registerIfCaught(request, result, phase)
-            wildState.resolveTransfer(request, phase)
-        }
     }
 
     private fun rememberCatchLabel(
@@ -387,6 +391,29 @@ class StructuredAutomationController(
                 ?.takeIf { it.isNotBlank() }
             ?: action.encounterId
         catchLabelsByCommand[request.commandId] = label
+    }
+
+    private fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent = when (type) {
+        RuntimeAutomationEventType.POKEMON_FOUND -> AutomationEvent(
+            AutomationEventType.INFO,
+            "Found Pokémon #$secondaryId to catch",
+        )
+        RuntimeAutomationEventType.POKEMON_CAUGHT -> AutomationEvent(
+            AutomationEventType.CAUGHT,
+            if (secondaryId > 0L) {
+                "Catch success: Pokémon #$secondaryId"
+            } else {
+                "Catch success"
+            },
+        )
+        RuntimeAutomationEventType.POKEMON_FLED -> AutomationEvent(
+            AutomationEventType.RAN_AWAY,
+            "Pokémon fled",
+        )
+        RuntimeAutomationEventType.POKEMON_TRANSFERRED -> AutomationEvent(
+            AutomationEventType.TRANSFERRED,
+            "Transfer success: Pokémon #$primaryId",
+        )
     }
 
     private fun isAuthoritativeCatchResult(

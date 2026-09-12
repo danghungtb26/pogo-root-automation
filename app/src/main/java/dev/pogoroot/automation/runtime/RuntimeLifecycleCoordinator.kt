@@ -60,6 +60,7 @@ class RuntimeLifecycleCoordinator(
     private var nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
     private val modules = linkedMapOf<RuntimeFeatureModule, RuntimeFeatureModuleSnapshot>()
     private val catchSpinConfigDispatcher = CatchSpinConfigDispatcher(bridge)
+    private val transferConfigDispatcher = TransferConfigDispatcher(bridge)
 
     val connected: Boolean
         get() = bridge.connected
@@ -72,6 +73,7 @@ class RuntimeLifecycleCoordinator(
         if (sessionChanged) {
             resetModules()
             resetCatchSpinConfig()
+            resetTransferConfig()
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
@@ -92,6 +94,7 @@ class RuntimeLifecycleCoordinator(
             lastError = null
             resetModules()
             resetCatchSpinConfig()
+            resetTransferConfig()
         }
 
         var advertisedReady = bridge.currentRuntimeReady() ?: ready
@@ -127,6 +130,7 @@ class RuntimeLifecycleCoordinator(
             lastError = null
             resetModules()
             resetCatchSpinConfig()
+            resetTransferConfig()
             return@runCatching
         }
 
@@ -144,6 +148,7 @@ class RuntimeLifecycleCoordinator(
         lastError = null
         resetModules()
         resetCatchSpinConfig()
+        resetTransferConfig()
     }.onFailure(::recordFailure)
 
     @Synchronized
@@ -186,6 +191,15 @@ class RuntimeLifecycleCoordinator(
     }.onFailure(::recordFailure)
 
     @Synchronized
+    fun syncTransferConfig(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
+        val module = modules[RuntimeFeatureModule.TRANSFER]
+        transferConfigDispatcher.sync(
+            config = config,
+            moduleEnabled = module?.state == RuntimeFeatureModuleState.ENABLED,
+        ).getOrThrow()
+    }.onFailure(::recordFailure)
+
+    @Synchronized
     fun snapshot(): RuntimeControlSnapshot = RuntimeControlSnapshot(
         state = if (!bridge.connected && state != RuntimeControlState.ERROR) {
             RuntimeControlState.DETACHED
@@ -215,6 +229,7 @@ class RuntimeLifecycleCoordinator(
         state = RuntimeControlState.DETACHED
         resetModules()
         resetCatchSpinConfig()
+        resetTransferConfig()
     }
 
     private fun syncModules(
@@ -358,6 +373,10 @@ class RuntimeLifecycleCoordinator(
         catchSpinConfigDispatcher.reset()
     }
 
+    private fun resetTransferConfig() {
+        transferConfigDispatcher.reset()
+    }
+
     private fun recordFailure(error: Throwable) {
         lastError = error.message ?: error::class.java.simpleName
         if (bridge.connected) {
@@ -373,6 +392,7 @@ class RuntimeLifecycleCoordinator(
             state = RuntimeControlState.DETACHED
             resetModules()
             resetCatchSpinConfig()
+            resetTransferConfig()
         }
     }
 

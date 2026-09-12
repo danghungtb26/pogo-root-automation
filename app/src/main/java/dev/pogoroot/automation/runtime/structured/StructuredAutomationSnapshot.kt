@@ -4,12 +4,10 @@ import android.util.Log
 import dev.pogoroot.automation.adapter.GameCapability
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
-import dev.pogoroot.automation.core.model.PokemonStorageSnapshot
 import dev.pogoroot.automation.pogo.PogoGameAdapter
 
 internal fun PogoGameAdapter.readStructuredSnapshot(
     outOfBalls: Boolean,
-    mergeStorage: (PokemonStorageSnapshot?) -> PokemonStorageSnapshot?,
     excludedSpawnIds: Set<String> = emptySet(),
 ): AutomationSnapshot {
     val lifecycle = lifecycleState()
@@ -42,18 +40,16 @@ internal fun PogoGameAdapter.readStructuredSnapshot(
     } else {
         null
     }
-    val runtimeStorage = if (GameCapability.READ_POKEMON_STORAGE in capabilities) {
-        readPokemonStorage().getOrNull()
-    } else {
-        null
-    }
     return AutomationSnapshot(
         lifecycleState = lifecycle,
         nearby = nearby,
         encounter = encounter,
         forts = forts,
         inventory = inventory,
-        storage = mergeStorage(runtimeStorage),
+        // Storage is deliberately not read in the structured loop. Native
+        // transfer resolves the just-caught Pokemon directly from the verified
+        // PokemonBag binding after the authoritative catch Promise.
+        storage = null,
         outOfBalls = outOfBalls,
     )
 }

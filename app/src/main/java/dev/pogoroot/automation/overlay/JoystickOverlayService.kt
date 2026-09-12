@@ -361,7 +361,7 @@ class JoystickOverlayService : Service() {
     }
 
     private fun showLocationToast(message: String) {
-        android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show()
+        CustomToast.show(this, message)
     }
 
     private fun showOverlayDialog(dialog: AlertDialog, onDismissed: () -> Unit = {}) {

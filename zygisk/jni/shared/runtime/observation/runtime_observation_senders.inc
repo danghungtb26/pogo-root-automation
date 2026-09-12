@@ -119,6 +119,37 @@ bool send_runtime_catch_spin_payload(
     return sent;
 }
 
+bool send_runtime_automation_event(
+    ProbeContext &context,
+    pogo_runtime::RuntimeAutomationEventType type,
+    uint64_t primary_id,
+    uint64_t secondary_id = 0U
+) {
+    const pogo_runtime::RuntimeAutomationEvent event{type, primary_id, secondary_id};
+    std::vector<uint8_t> envelope;
+    if (!pogo_runtime::encode_runtime_automation_event(
+            event,
+            static_cast<uint64_t>(now_epoch_millis()),
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            &envelope
+        )) return false;
+    const bool sent = send_internal_message(
+        context.fd,
+        pogo_runtime::kRuntimeObservationMagic,
+        envelope
+    );
+    __android_log_print(
+        sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "runtime automation event type=%u primary=%llu secondary=%llu sent=%d",
+        static_cast<unsigned>(type),
+        static_cast<unsigned long long>(primary_id),
+        static_cast<unsigned long long>(secondary_id),
+        sent ? 1 : 0
+    );
+    return sent;
+}
+
 bool send_runtime_lifecycle(
     ProbeContext &context,
     uint32_t lifecycle_wire

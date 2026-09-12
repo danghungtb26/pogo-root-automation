@@ -195,12 +195,16 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     MainThreadActionOutcome action_outcome = MainThreadActionOutcome::kRejected;
     uint64_t encounter_id = 0U;
     std::string fort_id;
+    uint64_t pokemon_id = 0U;
+    std::string transfer_command_id;
     double player_latitude = 0.0;
     double player_longitude = 0.0;
     {
         std::lock_guard<std::mutex> lock(context->main_thread_bridge.mutex);
         encounter_id = context->main_thread_bridge.pending_encounter_id;
         fort_id = context->main_thread_bridge.pending_fort_id;
+        pokemon_id = context->main_thread_bridge.pending_pokemon_id;
+        transfer_command_id = context->main_thread_bridge.pending_transfer_command_id;
     }
     if (task_type == MainThreadTaskType::kFindObject) {
         result = find_unity_object_on_main_thread(*context, name_space.c_str(), class_name.c_str());
@@ -245,6 +249,23 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
             : poll_result == RuntimeDirectCatchPromisePollResult::kNoPending
                 ? MainThreadActionOutcome::kRejected
                 : MainThreadActionOutcome::kIndeterminate;
+    } else if (task_type == MainThreadTaskType::kPollTransfer) {
+        const RuntimeTransferPromisePollResult poll_result =
+            poll_pending_runtime_transfer_on_main_thread(*context);
+        task_success = poll_result != RuntimeTransferPromisePollResult::kNoPending;
+        action_outcome = poll_result == RuntimeTransferPromisePollResult::kWaiting ||
+                poll_result == RuntimeTransferPromisePollResult::kCompleted
+            ? MainThreadActionOutcome::kInvoked
+            : poll_result == RuntimeTransferPromisePollResult::kNoPending
+                ? MainThreadActionOutcome::kRejected
+                : MainThreadActionOutcome::kIndeterminate;
+    } else if (task_type == MainThreadTaskType::kStartTransfer) {
+        action_outcome = start_runtime_transfer_on_main_thread(
+            *context,
+            pokemon_id,
+            transfer_command_id.c_str()
+        );
+        task_success = action_outcome == MainThreadActionOutcome::kInvoked;
     } else if (task_type == MainThreadTaskType::kSpin) {
         action_outcome = spin_runtime_pokestop_on_main_thread(*context, fort_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
@@ -357,6 +378,8 @@ void shutdown_main_thread_bridge(ProbeContext &context) {
         context.main_thread_bridge.pending_token = 0U;
         context.main_thread_bridge.pending_done = true;
         context.main_thread_bridge.pending_item_id = 0;
+        context.main_thread_bridge.pending_pokemon_id = 0U;
+        context.main_thread_bridge.pending_transfer_command_id.clear();
         context.main_thread_bridge.pending_forts.forts.clear();
         context.main_thread_bridge.pending_inventory.items.clear();
     }

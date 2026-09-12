@@ -335,6 +335,9 @@ struct RuntimeBinding {
     const void *pokemon_inventory_get_pokemon = nullptr;
     const void *pokemon_inventory_release = nullptr;
     bool transfer_verified = false;
+    void *game_master_data = nullptr;
+    const void *pokemon_proto_is_legendary = nullptr;
+    const void *pokemon_proto_is_mythic = nullptr;
 };
 
 enum class MainThreadTaskType : uint32_t {
@@ -348,6 +351,8 @@ enum class MainThreadTaskType : uint32_t {
     kReadInventory = 8U,
     kReadPlayerPosition = 9U,
     kPollDirectCatch = 10U,
+    kPollTransfer = 11U,
+    kStartTransfer = 12U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -376,6 +381,8 @@ struct MainThreadBridge {
     void *pending_result = nullptr;
     uint64_t pending_encounter_id = 0U;
     std::string pending_fort_id;
+    uint64_t pending_pokemon_id = 0U;
+    std::string pending_transfer_command_id;
     int32_t pending_item_id = 0;
     pogo_runtime::RuntimeNearbyObservation pending_nearby;
     pogo_runtime::RuntimeFortsObservation pending_forts;
@@ -561,6 +568,14 @@ enum class RuntimeDirectCatchPromisePollResult : uint32_t {
     kTimedOut = 4U,
 };
 
+enum class RuntimeTransferPromisePollResult : uint32_t {
+    kNoPending = 0U,
+    kWaiting = 1U,
+    kCompleted = 2U,
+    kFailed = 3U,
+    kTimedOut = 4U,
+};
+
 bool begin_pending_direct_catch(
     ProbeContext &context,
     const std::string &command_id,
@@ -584,6 +599,36 @@ bool consume_terminal_pending_direct_catch(
     ProbeContext &context,
     PendingDirectCatch *terminal
 );
+
+// Transfer module entry points. The implementations are included after the
+// catch Promise observer so catch-spin can emit a native success event without
+// owning transfer policy or Promise lifecycle.
+void on_runtime_catch_succeeded_on_main_thread(
+    ProbeContext &context,
+    uint64_t captured_pokemon_id
+);
+
+RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
+    ProbeContext &context
+);
+
+MainThreadActionOutcome start_runtime_transfer_on_main_thread(
+    ProbeContext &context,
+    uint64_t pokemon_id,
+    const char *command_id
+);
+
+MainThreadActionOutcome request_main_thread_poll_runtime_transfer(ProbeContext &context);
+
+MainThreadActionOutcome request_main_thread_start_runtime_transfer(
+    ProbeContext &context,
+    uint64_t pokemon_id,
+    const char *command_id
+);
+
+bool runtime_transfer_blocks_catch_spin();
+bool runtime_transfer_has_pending();
+void reset_runtime_transfer_state(ProbeContext &context);
 
 MainThreadActionOutcome request_main_thread_spin(
     ProbeContext &context,

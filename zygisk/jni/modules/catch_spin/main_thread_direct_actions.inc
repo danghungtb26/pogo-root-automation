@@ -2,11 +2,14 @@ MainThreadActionOutcome request_main_thread_direct_action(
     ProbeContext &context,
     MainThreadTaskType task_type,
     uint64_t encounter_id,
-    const std::string &fort_id
+    const std::string &fort_id,
+    uint64_t pokemon_id = 0U,
+    const char *transfer_command_id = nullptr
 ) {
     if (!context.main_thread_bridge.ready || context.main_thread_bridge.java_vm == nullptr ||
         (task_type == MainThreadTaskType::kDirectCatch && encounter_id == 0U) ||
-        (task_type == MainThreadTaskType::kSpin && fort_id.empty())) {
+        (task_type == MainThreadTaskType::kSpin && fort_id.empty()) ||
+        (task_type == MainThreadTaskType::kStartTransfer && pokemon_id == 0U)) {
         return MainThreadActionOutcome::kRejected;
     }
     std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
@@ -18,6 +21,9 @@ MainThreadActionOutcome request_main_thread_direct_action(
     context.main_thread_bridge.pending_class_name.clear();
     context.main_thread_bridge.pending_encounter_id = encounter_id;
     context.main_thread_bridge.pending_fort_id = fort_id;
+    context.main_thread_bridge.pending_pokemon_id = pokemon_id;
+    context.main_thread_bridge.pending_transfer_command_id =
+        transfer_command_id == nullptr ? "" : transfer_command_id;
     context.main_thread_bridge.pending_result = nullptr;
     context.main_thread_bridge.pending_done = false;
     context.main_thread_bridge.pending_success = false;
@@ -61,12 +67,15 @@ MainThreadActionOutcome request_main_thread_direct_action(
     context.main_thread_bridge.pending_done = false;
     context.main_thread_bridge.pending_encounter_id = 0U;
     context.main_thread_bridge.pending_fort_id.clear();
+    context.main_thread_bridge.pending_pokemon_id = 0U;
+    context.main_thread_bridge.pending_transfer_command_id.clear();
     __android_log_print(
         outcome == MainThreadActionOutcome::kInvoked ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "main-thread direct map action type=%u encounter=%llu fort=%s outcome=%u",
+        "main-thread action type=%u encounter=%llu pokemon=%llu fort=%s outcome=%u",
         static_cast<unsigned>(task_type),
         static_cast<unsigned long long>(encounter_id),
+        static_cast<unsigned long long>(pokemon_id),
         fort_id.c_str(),
         static_cast<unsigned>(outcome)
     );
@@ -85,6 +94,27 @@ MainThreadActionOutcome request_main_thread_direct_catch(
 MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &context) {
     return request_main_thread_direct_action(
         context, MainThreadTaskType::kPollDirectCatch, 0U, ""
+    );
+}
+
+MainThreadActionOutcome request_main_thread_poll_runtime_transfer(ProbeContext &context) {
+    return request_main_thread_direct_action(
+        context, MainThreadTaskType::kPollTransfer, 0U, ""
+    );
+}
+
+MainThreadActionOutcome request_main_thread_start_runtime_transfer(
+    ProbeContext &context,
+    uint64_t pokemon_id,
+    const char *command_id
+) {
+    return request_main_thread_direct_action(
+        context,
+        MainThreadTaskType::kStartTransfer,
+        0U,
+        "",
+        pokemon_id,
+        command_id
     );
 }
 

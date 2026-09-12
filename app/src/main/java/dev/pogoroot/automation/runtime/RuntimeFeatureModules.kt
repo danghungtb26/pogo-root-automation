@@ -138,6 +138,7 @@ object RuntimeFeatureModuleCatalog {
             ObservationType.LIFECYCLE,
             ObservationType.MAP_TARGET,
             ObservationType.THROW_DIAGNOSTIC,
+            ObservationType.AUTOMATION_EVENT,
             -> null
         }
 

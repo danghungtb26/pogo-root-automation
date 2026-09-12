@@ -152,6 +152,15 @@ bool handle_controller(int fd, BrokerContext &context) {
                             observed_at_epoch_ms,
                             observed_at_elapsed_ns
                         )) return false;
+                } else if (observation_type == pogo_runtime::kAutomationEventObservationType &&
+                    payload_version == pogo_runtime::kRuntimeAutomationEventPayloadVersion) {
+                    if (!send_runtime_automation_event_observation(
+                            fd,
+                            context,
+                            map_target_payload,
+                            observed_at_epoch_ms,
+                            observed_at_elapsed_ns
+                        )) return false;
                 } else if (observation_type == pogo_runtime::kLifecycleObservationType &&
                     payload_version == pogo_runtime::kLifecyclePayloadVersion &&
                     map_target_payload.size() == 4U) {

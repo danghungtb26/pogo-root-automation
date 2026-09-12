@@ -7,6 +7,7 @@ import dev.pogoroot.automation.core.automation.ThrowProfile
 import dev.pogoroot.automation.core.automation.InventoryPolicy
 import dev.pogoroot.automation.core.automation.TransferPolicy
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfig
+import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 
 fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy(
     autoEncounter = autoEncounter,
@@ -66,4 +67,18 @@ fun HeadlessAutomationConfig.toRuntimeCatchSpinConfig(armed: Boolean): RuntimeCa
         catchAll = catchAll,
         spinSettleDelayMs = spinSettleDelayMs,
         catchSettleDelayMs = catchSettleDelayMs,
+    )
+
+fun HeadlessAutomationConfig.toRuntimeTransferConfig(): RuntimeTransferConfig =
+    RuntimeTransferConfig(
+        configRevision = configRevision,
+        autoTransfer = autoTransfer,
+        keepUnknownIv = true,
+        minimumIvPercentToKeep = transferMinimumIvPercent,
+        keepShiny = transferKeepShiny,
+        keepHundo = transferKeepHundo,
+        keepSpecialBackground = transferKeepSpecialBackground,
+        keepFavorite = transferKeepFavorite,
+        keepLegendary = true,
+        keepMythical = true,
     )

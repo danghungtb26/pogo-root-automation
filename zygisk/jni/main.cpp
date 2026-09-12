@@ -3,11 +3,14 @@
 #include <sys/mman.h>
 #include "shared/bridge_kotlin/runtime_catch_spin_protocol.h"
 #include "shared/bridge_kotlin/runtime_catch_spin_config_protocol.h"
+#include "shared/bridge_kotlin/runtime_automation_event_protocol.h"
+#include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
 #include "shared/bridge_kotlin/runtime_feature_module_protocol.h"
 #include "shared/core/runtime_native_common.inc"
 #include "shared/bridge_kotlin/runtime_bridge_protocol.inc"
 #include "shared/bridge_kotlin/runtime_catch_spin_bridge.inc"
+#include "shared/bridge_kotlin/runtime_automation_event_bridge.inc"
 #include "shared/bridge_kotlin/runtime_bridge_broker.inc"
 #include "shared/core/runtime_probe_elf.inc"
 #include "shared/runtime/probe/runtime_probe_inspection.inc"
@@ -62,13 +65,17 @@
 #include "modules/discard/parse.inc"
 #include "modules/discard/execute.inc"
 #include "modules/transfer/parse.inc"
-#include "modules/transfer/execute.inc"
 #include "modules/encounter/berry.inc"
 
 // The catch_spin config mirror is separate from gameplay execution. It is
 // included before the module registry so catch_spin can own CONFIG_SET through
 // the same module dispatch boundary as the other feature controls.
 #include "modules/catch_spin/config.inc"
+#include "modules/transfer/config.inc"
+#include "modules/transfer/metadata.inc"
+#include "modules/transfer/promise_observer.inc"
+#include "modules/transfer/execute.inc"
+#include "modules/transfer/coordinator.inc"
 
 // Host publication/routing comes after feature implementations so capability
 // publication can describe the verified executors without owning them.

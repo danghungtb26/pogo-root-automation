@@ -40,6 +40,17 @@ internal class AutomationCycle(
                     )
                     return@onSuccess
                 }
+                val transferConfigSync = runtimeCoordinator.syncTransferConfig(config)
+                if (transferConfigSync.isFailure) {
+                    val error = transferConfigSync.exceptionOrNull()
+                    structuredController.stop()
+                    statusReporter.recordError(
+                        message = "transfer config sync: " +
+                            (error?.message ?: error?.javaClass?.simpleName ?: "unknown error"),
+                        runtimeSessionId = ready.runtimeSessionId,
+                    )
+                    return@onSuccess
+                }
                 if (!ready.strongIdentityVerified || ready.capabilities.isEmpty()) {
                     // START is intentionally probe-only. Do not let the structured
                     // adapter refresh or submit commands until the delayed automatic
