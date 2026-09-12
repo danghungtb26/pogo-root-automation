@@ -4,6 +4,7 @@
 #include "shared/bridge_kotlin/runtime_catch_spin_protocol.h"
 #include "shared/bridge_kotlin/runtime_catch_spin_config_protocol.h"
 #include "shared/bridge_kotlin/runtime_automation_event_protocol.h"
+#include "shared/bridge_kotlin/runtime_discard_config_protocol.h"
 #include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
 #include "shared/runtime/inventory/runtime_inventory_common.inc"
@@ -51,6 +52,7 @@
 #include "modules/catch_spin/map_actions.inc"
 #include "modules/catch_spin/encounter_promise_observer.inc"
 #include "modules/catch_spin/direct_map_actions.inc"
+#include "modules/catch_spin/fort_cooldown.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
 #include "modules/catch_spin/spin_promise_observer.inc"
@@ -62,6 +64,8 @@
 #include "modules/catch_spin/catch.inc"
 #include "modules/catch_spin/spin.inc"
 #include "modules/catch_spin/open_encounter.inc"
+#include "modules/catch_spin/config.inc"
+#include "modules/discard/config.inc"
 #include "modules/discard/inventory_reader.inc"
 #include "shared/runtime/mainthread/runtime_inventory_request.inc"
 #include "shared/runtime/mainthread/runtime_player_position_request.inc"
@@ -70,10 +74,6 @@
 #include "modules/transfer/parse.inc"
 #include "modules/encounter/berry.inc"
 
-// The catch_spin config mirror is separate from gameplay execution. It is
-// included before the module registry so catch_spin can own CONFIG_SET through
-// the same module dispatch boundary as the other feature controls.
-#include "modules/catch_spin/config.inc"
 #include "modules/transfer/config.inc"
 #include "modules/transfer/metadata.inc"
 #include "modules/transfer/promise_observer.inc"

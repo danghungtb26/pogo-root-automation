@@ -1,7 +1,3 @@
-// Native catch-spin owner. This is deliberately driven from the shared observer
-// tick: Kotlin supplies a revisioned policy snapshot, while native reads the
-// verified game state, filters candidates, and invokes the matching action.
-
 namespace {
 constexpr uint64_t kCatchSpinScanEveryTicks = 20U;  // ~2 s at a 100 ms tick.
 constexpr uint64_t kCatchSpinActionRetryDelayNs = 250000000ULL;
@@ -15,7 +11,7 @@ struct RuntimeCatchSpinCoordinatorState {
     bool suspended = false;
     bool out_of_balls = false;
     std::unordered_set<uint64_t> requested_catch_ids;
-    std::unordered_set<std::string> successful_spin_fort_ids;
+    RuntimeFortCooldownDeadlines fort_cooldown_deadlines;
 };
 
 RuntimeCatchSpinCoordinatorState g_runtime_catch_spin_coordinator;
@@ -42,7 +38,8 @@ const pogo_runtime::RuntimeNearbySpawnObservation *select_catch_target(
 
 const pogo_runtime::RuntimeFortObservation *select_spin_target(
     const pogo_runtime::RuntimeCatchSpinObservation &snapshot,
-    const std::unordered_set<std::string> &successful_spin_fort_ids,
+    RuntimeFortCooldownDeadlines *fort_cooldown_deadlines,
+    uint64_t now_epoch_ms,
     double *selected_distance_meters,
     size_t *in_range_count
 ) {
@@ -62,7 +59,14 @@ const pogo_runtime::RuntimeFortObservation *select_spin_target(
     for (const auto &fort : snapshot.forts.forts) {
         if (fort.fort_id.empty() || !fort.spin_available ||
             !runtime_catch_spin_valid_coordinate(fort.latitude, fort.longitude)) continue;
-        if (successful_spin_fort_ids.find(fort.fort_id) != successful_spin_fort_ids.end()) continue;
+        if (runtime_fort_cooldown_active(
+                fort_cooldown_deadlines,
+                fort.fort_id,
+                now_epoch_ms,
+                nullptr
+            )) {
+            continue;
+        }
         const double fort_latitude = fort.latitude * kDegreesToRadians;
         const double fort_longitude = fort.longitude * kDegreesToRadians;
         const double delta_latitude = fort_latitude - player_latitude;
@@ -278,7 +282,7 @@ void reset_runtime_catch_spin_coordinator() {
     g_runtime_catch_spin_coordinator.suspended = false;
     g_runtime_catch_spin_coordinator.out_of_balls = false;
     g_runtime_catch_spin_coordinator.requested_catch_ids.clear();
-    g_runtime_catch_spin_coordinator.successful_spin_fort_ids.clear();
+    g_runtime_catch_spin_coordinator.fort_cooldown_deadlines.clear();
 }
 
 void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
@@ -327,22 +331,33 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         if (spin_poll != MainThreadActionOutcome::kRejected) {
             std::string fort_id;
             int32_t server_result = 0;
-            if (consume_terminal_runtime_spin(tick.context, &fort_id, &server_result)) {
+            int64_t cooldown_complete_ms = 0;
+            if (consume_terminal_runtime_spin(
+                    tick.context, &fort_id, &server_result, &cooldown_complete_ms
+                )) {
                 std::lock_guard<std::mutex> lock(g_runtime_catch_spin_coordinator.mutex);
-                if (server_result == 1) {
-                    g_runtime_catch_spin_coordinator.successful_spin_fort_ids.insert(fort_id);
-                }
+                const long long epoch_now = now_epoch_millis();
+                const uint64_t now_epoch_ms = epoch_now > 0
+                    ? static_cast<uint64_t>(epoch_now) : 0U;
+                remember_runtime_fort_cooldown(
+                    &g_runtime_catch_spin_coordinator.fort_cooldown_deadlines,
+                    fort_id,
+                    cooldown_complete_ms,
+                    now_epoch_ms
+                );
                 runtime_catch_spin_settle(
                     runtime_catch_spin_config_snapshot().spin_settle_delay_ms
                 );
                 __android_log_print(
                     server_result == 1 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
-                    "native catch_spin FortSearch Promise settled fort=%s result=%d(%s) success=%d",
+                    "native catch_spin FortSearch Promise settled fort=%s result=%d(%s) success=%d "
+                    "cooldown_complete_ms=%lld",
                     fort_id.c_str(),
                     server_result,
                     server_result == 1 ? "SUCCESS" : "REJECTED_OR_FAILED",
-                    server_result == 1 ? 1 : 0
+                    server_result == 1 ? 1 : 0,
+                    static_cast<long long>(cooldown_complete_ms)
                 );
             }
         }
@@ -368,7 +383,8 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         runtime_catch_spin_log_rejected("scan", "encounter_promise_pending");
         return;
     }
-    if (g_runtime_catch_spin_coordinator.suspended || runtime_transfer_blocks_catch_spin()) return;
+    if (g_runtime_catch_spin_coordinator.suspended || runtime_transfer_blocks_catch_spin() ||
+        runtime_discard_blocks_catch_spin()) return;
 
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
     if (now < g_runtime_catch_spin_coordinator.settle_until_ns) return;
@@ -396,9 +412,6 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         snapshot.nearby.is_complete ? 1 : 0,
         snapshot.has_player_position ? 1 : 0
     );
-    // Keep the observation as best-effort telemetry for encounter/discard/transfer
-    // consumers. The catch/spin decision below must not depend on Kotlin or on the
-    // bridge socket being connected.
     (void)send_runtime_catch_spin_payload(tick.context, snapshot);
 
     const int32_t ball_count = runtime_pokeball_count(snapshot);
@@ -443,9 +456,13 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     if (!config.auto_spin && !force_spin_for_balls) return;
     double fort_distance_meters = 0.0;
     size_t in_range_forts = 0U;
+    const long long epoch_now = now_epoch_millis();
+    const uint64_t now_epoch_ms = epoch_now > 0
+        ? static_cast<uint64_t>(epoch_now) : 0U;
     const auto *fort = select_spin_target(
         snapshot,
-        g_runtime_catch_spin_coordinator.successful_spin_fort_ids,
+        &g_runtime_catch_spin_coordinator.fort_cooldown_deadlines,
+        now_epoch_ms,
         &fort_distance_meters,
         &in_range_forts
     );

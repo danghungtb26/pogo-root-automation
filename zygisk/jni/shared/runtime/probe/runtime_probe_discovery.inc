@@ -343,16 +343,18 @@ void discover_runtime_owners(
                     binding->inventory_read_verified ? 1 : 0, owner, get_item_count
                 );
                 // Discard executor binding (RecycleItem + the ItemData data class).
-                // ItemData is a nested type (ItemInventoryItemWidget.ItemData); the
-                // (namespace,name) lookup may miss it, in which case discard stays
-                // unavailable. Execution is gated behind kDiscardExecutionEnabled.
+                // ItemData is a nested type with an empty namespace in this build;
+                // resolve the actual parameter class from RecycleItem instead of
+                // guessing a namespace/name pair.
                 const void *recycle_item = api.class_get_method_from_name == nullptr
                     ? nullptr
                     : api.class_get_method_from_name(owner_class, "RecycleItem", 3);
-                Il2CppClass *item_data_class = find_runtime_class(
-                    api, assemblies, assembly_count,
-                    "Niantic.Holoholo.Inventory", "ItemData", nullptr
-                );
+                const Il2CppType *item_data_type = recycle_item == nullptr ||
+                    api.method_get_param == nullptr
+                    ? nullptr : api.method_get_param(recycle_item, 0U);
+                Il2CppClass *item_data_class = item_data_type == nullptr ||
+                    api.type_get_class_or_element_class == nullptr
+                    ? nullptr : api.type_get_class_or_element_class(item_data_type);
                 if (recycle_item != nullptr && item_data_class != nullptr) {
                     binding->item_bag_recycle_item = recycle_item;
                     binding->item_data_class = item_data_class;

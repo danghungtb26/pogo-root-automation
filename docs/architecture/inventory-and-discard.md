@@ -2,18 +2,14 @@
 
 ## Summary
 
-Auto-discard is split into the same two directions as the rest of the runtime:
-native observes inventory and publishes it; the Kotlin service decides what to
-discard; native executes the discard.
+Auto-discard is fully native after Kotlin sends the current policy snapshot:
+native observes inventory, applies the limits, invokes the recycle request and
+polls its Promise. Kotlin persists the settings and mirrors them to native.
 
-As of this change the **observation half is implemented** (inventory is read and
-published, `READ_INVENTORY` is advertised, and `AutomationSnapshot.inventory` is
-populated). The **execution half is scaffolded but disabled** — the executor,
-parser, binding, and dispatch exist, but `kDiscardExecutionEnabled = false` keeps
-`DiscardModule` unavailable and `DiscardItem` actions rejected until the
-`RecycleItem`/`ItemData` construction is verified on device. Wiring the read path
-also activates the out-of-balls → spin gate, which depends on
-`snapshot.inventory`.
+The native module reads and publishes inventory for diagnostics, then uses the
+revisioned `RuntimeDiscardConfig` to select one over-limit stack at a time.
+`RecycleItem` is invoked on Unity's main thread and its Promise is retained and
+polled before another discard is queued. The binding guard remains fail-closed.
 
 ## Ball check is on-demand, not observed
 
@@ -27,13 +23,13 @@ direct-catch path also retains its last-moment `kOutOfBalls` guard. Kotlin's
 
 ## Observe: poll, not event-driven, and owned by the discard module
 
-Inventory observation now has a single consumer — discard planning — so it is a
-per-module observer: `DiscardModule::observe(ObserverTickContext&)` reads
+Inventory observation is owned by the native discard module:
+`DiscardModule::observe(ObserverTickContext&)` reads
 inventory at its own low cadence (~30 s) on the shared observer's attached
 thread. The root observer thread only dispatches ticks to enabled modules'
 `observe()` hooks; it does not read inventory itself. `DiscardModule::available()`
-is gated on `inventory_read_verified` so enabling it turns inventory observation
-on (discard execution stays gated separately by `kDiscardExecutionEnabled`).
+is gated on both inventory-read and `RecycleItem` bindings so the auto path
+cannot activate partially.
 
 Inventory is **polled at a low cadence**, not driven by an item-added event.
 
@@ -73,14 +69,15 @@ BridgePogoRuntimeSource
     v
 PogoGameAdapter.readInventory -> PogoInventoryMapper -> InventorySnapshot
     v
-AutomationCoordinator.plan
-    -> InventoryPlanner (discard by InventoryPolicy.maxCountByItemId)
-    v
-AutomationAction.DiscardItem   (execution still blocked, see below)
+native discard module
+    -> compare against RuntimeDiscardConfig.maxCountByItemId
+    -> main-thread IItemBag.RecycleItem + Promise polling
 ```
 
 The catch-spin coordinator consumes its own native snapshot directly; the
-snapshot telemetry sent to Kotlin is not a catch/spin decision input.
+snapshot telemetry sent to Kotlin is not a catch/spin or discard decision input.
+Kotlin persists the discard settings and mirrors them into the native module
+through `DISCARD_CONFIG_SET`; it no longer plans automatic discard actions.
 
 ## Native reader details
 
@@ -107,24 +104,21 @@ itemCount x { u32 itemId, u32 count }
 
 Item names are not sent; the Kotlin mapper fills `#<id>` when blank.
 
-## Execute: scaffolded but DISABLED (device verification required)
+## Execute: native main-thread Promise state machine
 
-The executor is written and wired but gated off, mirroring the encounter catch
-path (`kCatchExecutionEnabled = false`):
+The executor is wired like native transfer:
 
 - `modules/discard/parse.inc` — `parse_runtime_discard_command` (action tag 5,
   reads `itemId`/`amount` from the frame `BridgeActionCodec` already produces).
-- `modules/discard/execute.inc` — `execute_runtime_discard` + `recycle_runtime_item`
-  and the `kDiscardExecutionEnabled` gate; dispatched in `runtime_control.inc`.
+- `modules/discard/execute.inc` — auto/manual queueing, `RecycleItem` invocation,
+  GC-handle retention and Promise polling; dispatched in `runtime_control.inc`.
 - Binding: `IItemBag.RecycleItem(ItemData, int, ISet<Item>)` + the `ItemData`
   class are resolved in `runtime_probe_discovery.inc`, setting `discard_verified`.
-- `recycle_runtime_item` constructs `ItemData` via `object_new` + field writes
+- `recycle_runtime_item_on_main_thread` constructs `ItemData` via `object_new` + field writes
   (`item`@0x10, `count`@0x1C, `recyclable`@0x21 from the 0.427.0 dump) and calls
   `RecycleItem(itemData, amount, null)`.
-- `kDiscardExecutionEnabled = false` — the executor returns `binding_unavailable`,
-  and `DiscardModule::available()` gates on this flag, so the module stays
-  unavailable and `DiscardItem` actions are cleanly rejected. No behavior change
-  until the flag is flipped.
+- `kDiscardExecutionEnabled` is a compile-time safety gate; the runtime binding
+  diagnostic must still verify `RecycleItem` and its `ItemData` parameter class.
 
 The **only** recycle entry point is `IItemBag.RecycleItem` — there is no
 lower-level `(itemId, count)` overload (the `RecycleInventoryItem` RPC, Method
@@ -134,17 +128,15 @@ nested `ItemInventoryItemWidget.ItemData` and the third argument is an
 
 To finish (on device):
 
-1. Confirm `find_runtime_class("Niantic.Holoholo.Inventory", "ItemData")` resolves
-   the nested type (nested-class lookup may need the enclosing type); the
-   diagnostic log line reports `discard binding verified`.
+1. Confirm the `RecycleItem` first parameter resolves to the nested `ItemData`
+   class; the diagnostic log line reports `discard binding verified`.
 2. Verify the `ItemData` field offsets and whether `RecycleItem` reads more than
    `item`/`count`/`recyclable` (e.g. `type`), and whether the `ISet<Item>` may be
    null (construct an empty `HashSet<Item>` if not).
-3. Confirm the recycle post-condition, then flip `kDiscardExecutionEnabled` to
-   `true`.
+3. Confirm the recycle post-condition and Promise result on device.
 
-Until then, inventory read, discard planning, and the ball gate all work; only
-the actual recycle is withheld.
+Inventory read and the ball gate remain independent; native discard stays
+fail-closed whenever its mutation binding is not verified.
 
 ## Verification status
 

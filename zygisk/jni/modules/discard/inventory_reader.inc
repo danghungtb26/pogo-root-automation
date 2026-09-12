@@ -20,10 +20,30 @@ bool read_runtime_inventory(
         201, 202,                 // Revive / Max Revive
         701, 703, 705, 706, 708,  // Razz / Nanab / Pinap / Golden Razz / Silver Pinap
     };
+    int32_t item_ids[sizeof(kInventoryItemIds) / sizeof(int32_t) + kMaxRuntimeDiscardLimits]{};
+    size_t item_id_count = 0U;
+    for (int32_t item_id : kInventoryItemIds) item_ids[item_id_count++] = item_id;
+    const RuntimeDiscardConfig discard_config = runtime_discard_config_snapshot();
+    if (discard_config.configured) {
+        for (uint32_t index = 0U; index < discard_config.limit_count; ++index) {
+            const int32_t configured_item_id = discard_config.limits[index].item_id;
+            bool already_present = false;
+            for (size_t existing = 0U; existing < item_id_count; ++existing) {
+                if (item_ids[existing] == configured_item_id) {
+                    already_present = true;
+                    break;
+                }
+            }
+            if (!already_present && item_id_count < sizeof(item_ids) / sizeof(int32_t)) {
+                item_ids[item_id_count++] = configured_item_id;
+            }
+        }
+    }
     observation->items.clear();
     int64_t total = 0;
     bool read_failed = false;
-    for (int32_t item_id : kInventoryItemIds) {
+    for (size_t index = 0U; index < item_id_count; ++index) {
+        const int32_t item_id = item_ids[index];
         const int32_t count = read_runtime_item_count(api, binding, item_id);
         if (count < 0) {
             read_failed = true;

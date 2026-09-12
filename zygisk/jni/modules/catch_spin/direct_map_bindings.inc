@@ -227,6 +227,12 @@ void discover_direct_map_bindings(
         binding->map_pokestop_get_is_cooling_down = find_direct_map_instance_method(
             api, pokestop_class, "get_IsCoolingDown", 0U
         );
+        // AbstractMapPlace.SetCooldownTime(long) is the game's authoritative
+        // local refresh hook after FortSearch returns CooldownComplete.
+        binding->map_pokestop_set_cooldown_time =
+            find_direct_map_instance_method_with_parameter(
+                api, pokestop_class, "SetCooldownTime", "System.Int64"
+            );
         binding->map_pokestop_start_interactive = find_direct_map_instance_method(
             api, pokestop_class, "StartInteractiveMode", 0U
         );
@@ -303,14 +309,15 @@ void discover_direct_map_bindings(
     __android_log_print(
         binding->forts_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "managed diagnostic: fort reader verified=%d directory=%p pokestops=%p active=%p id=%p location=%p cooldown=%p",
+        "managed diagnostic: fort reader verified=%d directory=%p pokestops=%p active=%p id=%p location=%p cooldown=%p set_cooldown=%p",
         binding->forts_read_verified ? 1 : 0,
         binding->map_place_directory_service,
         binding->map_place_directory_pokestops,
         binding->map_place_directory_get_active_pokestops,
         binding->map_pokestop_get_id,
         binding->map_pokestop_get_location,
-        binding->map_pokestop_get_is_cooling_down
+        binding->map_pokestop_get_is_cooling_down,
+        binding->map_pokestop_set_cooldown_time
     );
     __android_log_print(
         binding->spin_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,

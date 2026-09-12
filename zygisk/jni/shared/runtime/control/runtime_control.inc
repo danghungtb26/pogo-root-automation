@@ -77,6 +77,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     g_runtime_active.store(true);
     g_runtime_explicit_snapshot_mode.store(true);
     reset_runtime_transfer_config();
+    reset_runtime_discard_config();
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -98,6 +99,7 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     discard_pending_throw_events(context);
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
+    reset_runtime_discard_config();
     return send_runtime_control_completed(
         context.fd,
         request_id,
@@ -316,6 +318,18 @@ void runtime_command_channel_loop(ProbeContext &context) {
                     pogo_runtime_transfer_config::kConfigSetAction,
                     command,
                     transfer_config.request_id.c_str(),
+                    0U
+                )) break;
+            continue;
+        }
+
+        pogo_runtime_discard_config::Request discard_config;
+        if (pogo_runtime_discard_config::parse(command, &discard_config)) {
+            if (!pogo_runtime_module::dispatch_control_action(
+                    context,
+                    pogo_runtime_discard_config::kConfigSetAction,
+                    command,
+                    discard_config.request_id.c_str(),
                     0U
                 )) break;
             continue;

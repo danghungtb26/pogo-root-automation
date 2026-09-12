@@ -144,11 +144,13 @@ bool read_runtime_map_forts(
         return false;
     }
     size_t readable_count = 0U;
+    size_t spin_available_count = 0U;
     for (const MapDictionaryEntry &entry : entries) {
         void *pokestop = entry.value;
         pogo_runtime::RuntimeFortObservation fort{};
         if (!read_runtime_map_pokestop(api, binding, pokestop, &fort)) continue;
         ++readable_count;
+        if (fort.spin_available) ++spin_available_count;
         const bool duplicate = std::any_of(
             observation->forts.begin(),
             observation->forts.end(),
@@ -159,10 +161,14 @@ bool read_runtime_map_forts(
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "runtime map forts complete dictionary_entries=%zu readable=%zu forts=%zu",
+        "runtime map forts complete dictionary_entries=%zu readable=%zu forts=%zu "
+        "spin_available=%zu cooling_down=%zu",
         entries.size(),
         readable_count,
-        observation->forts.size()
+        observation->forts.size(),
+        spin_available_count,
+        readable_count >= spin_available_count
+            ? readable_count - spin_available_count : 0U
     );
     return true;
 }

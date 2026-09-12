@@ -15,6 +15,7 @@ struct PendingRuntimeSpin {
     uint64_t requested_at_ns = 0U;
     uint32_t poll_count = 0U;
     int32_t server_result = 0;
+    int64_t cooldown_complete_ms = 0;
     std::string error_code;
     std::string message;
 };
@@ -297,6 +298,7 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         return RuntimeSpinPromisePollResult::kFailed;
     }
     int32_t server_result = 0;
+    int64_t cooldown_complete_ms = 0;
     if (!read_runtime_field(api, completed_value, "Result", &server_result)) {
         mark_runtime_spin_terminal(
             context,
@@ -306,17 +308,35 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         );
         return RuntimeSpinPromisePollResult::kFailed;
     }
+    const bool cooldown_read = read_runtime_field(
+        api, completed_value, "CooldownComplete", &cooldown_complete_ms
+    );
+    if (!cooldown_read) cooldown_complete_ms = 0;
     std::string response_fort_id;
-    (void)read_runtime_managed_ascii_string(completed_value, &response_fort_id);
+    void *managed_response_fort_id = nullptr;
+    if (read_runtime_field(api, completed_value, "FortId", &managed_response_fort_id)) {
+        (void)read_runtime_managed_ascii_string(managed_response_fort_id, &response_fort_id);
+    }
     __android_log_print(
         server_result == 1 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "native spin FortSearch Promise result fort=%s response_fort=%s result=%d(%s)",
+        "native spin FortSearch Promise result fort=%s response_fort=%s result=%d(%s) "
+        "cooldown_complete_ms=%lld cooldown_read=%d",
         pending.fort_id.c_str(),
         response_fort_id.empty() ? "<empty>" : response_fort_id.c_str(),
         server_result,
-        runtime_spin_result_name(server_result)
+        runtime_spin_result_name(server_result),
+        static_cast<long long>(cooldown_complete_ms),
+        cooldown_read ? 1 : 0
     );
+
+    {
+        std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
+        if (g_runtime_spin.active &&
+            g_runtime_spin.promise_gc_handle == pending.promise_gc_handle) {
+            g_runtime_spin.cooldown_complete_ms = cooldown_complete_ms;
+        }
+    }
 
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     if (server_result == 1 && binding.poi_item_spinner_result_callback != nullptr) {
@@ -350,6 +370,11 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
             );
         }
     }
+    if ((server_result == 1 || server_result == 3) && cooldown_complete_ms > 0) {
+        refresh_runtime_pokestop_cooldown(
+            context, pending.fort_id, cooldown_complete_ms
+        );
+    }
     mark_runtime_spin_terminal(
         context,
         server_result,
@@ -364,9 +389,12 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
 bool consume_terminal_runtime_spin(
     ProbeContext &context,
     std::string *fort_id,
-    int32_t *server_result
+    int32_t *server_result,
+    int64_t *cooldown_complete_ms
 ) {
-    if (fort_id == nullptr || server_result == nullptr) return false;
+    if (fort_id == nullptr || server_result == nullptr || cooldown_complete_ms == nullptr) {
+        return false;
+    }
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
     {
@@ -374,6 +402,7 @@ bool consume_terminal_runtime_spin(
         if (!g_runtime_spin.active || !g_runtime_spin.terminal) return false;
         *fort_id = g_runtime_spin.fort_id;
         *server_result = g_runtime_spin.server_result;
+        *cooldown_complete_ms = g_runtime_spin.cooldown_complete_ms;
         promise_handle = g_runtime_spin.promise_gc_handle;
         spinner_handle = g_runtime_spin.spinner_gc_handle;
         g_runtime_spin = PendingRuntimeSpin{};

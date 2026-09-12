@@ -35,6 +35,18 @@ internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent?
         AutomationEventType.ERROR,
         "Transfer failed: Pokémon #${primaryId.toUnsignedDecimal()}",
     )
+    RuntimeAutomationEventType.ITEM_DISCARD_TRIGGERED -> AutomationEvent(
+        AutomationEventType.INFO,
+        "Discard started: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+    )
+    RuntimeAutomationEventType.ITEM_DISCARDED -> AutomationEvent(
+        AutomationEventType.DISCARDED,
+        "Discard success: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+    )
+    RuntimeAutomationEventType.ITEM_DISCARD_FAILED -> AutomationEvent(
+        AutomationEventType.ERROR,
+        "Discard failed: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+    )
     RuntimeAutomationEventType.UNKNOWN -> null
 }
 

@@ -238,8 +238,8 @@ Timeout vẫn là backstop.
 |--------|---------|-----------|
 | CatchSpin | **B — periodic** | **EXCLUSIVE** |
 | Encounter | **B — periodic** | **EXCLUSIVE** |
-| Transfer  | **A — reactive** | **CONCURRENT** |
-| Discard   | **A — reactive** | **CONCURRENT** |
+| Transfer  | **A — native catch-success event** | **CONCURRENT** |
+| Discard   | **B — native inventory periodic tick** | **CONCURRENT** |
 
 > Module mới ⇒ thêm một dòng, chọn Trigger (A/B) + Execution (EXCLUSIVE/CONCURRENT). Hai trục tự do
 > kết hợp (có thể A+exclusive hoặc B+concurrent).
@@ -340,16 +340,13 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 lifecycle 2 trục **đã chạy thật** — disarm giờ **stop** native catch_spin module (đúng Phần 1), GO-absent vẫn
 tắt tất cả qua `ensureIdle()`.
 
-### 🚧 Còn lại — GATE trên native + cần verify trên máy
-Việc cho **transfer/discard chạy song song thật** (execution-lane split) **chưa làm**, vì:
-1. **Phụ thuộc native chưa có:** cần native push observation `INVENTORY`/`POKEMON_STORAGE` **riêng** cho
-   transfer/discard (hiện `POKEMON_STORAGE` là no-op ở Kotlin source; inventory đang đi kèm scan catch_spin).
-   Bạn đã xác nhận *sẽ làm native song song* — bước này chờ cái đó.
-2. **Đụng core state-machine + không verify được ở đây:** tách transfer/discard ra khỏi `AutomationCoordinator`
-   + `AutomationRunner` (đang serialize chung), cho chúng execution path riêng dùng `ExecutionLock`, là thay đổi
-   dễ vỡ trên một hệ đang chạy. Phải làm **cùng lúc với native** và **verify trên máy root**.
+### ✅ Native maintenance lanes
+Transfer và discard đã có execution path native riêng: transfer bắt đầu từ catch-success
+authoritative event, còn discard tự đọc inventory theo periodic observer tick. Kotlin chỉ
+mirror config và nhận automation telemetry; `AutomationCoordinator` không còn planner
+auto-discard.
 
-**Khi native sẵn sàng, các mảnh còn lại (primitives đã có sẵn để ráp):**
+**Các mảnh còn lại để verify/hoàn thiện trên máy root:**
 - `MutationArbiter`: bọc `AutomationRunner` (world-lane exclusive: catch_spin+encounter) + lane concurrent
   (transfer/discard) qua `ExecutionLock`. Giữ policy (b) + timeout backstop.
 - Chuyển 4 feature thành `AutomationModule` runtime object, đăng ký với `RuntimeEventDispatcher`.

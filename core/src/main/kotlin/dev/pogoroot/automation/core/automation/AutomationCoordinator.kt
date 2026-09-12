@@ -1,6 +1,5 @@
 package dev.pogoroot.automation.core.automation
 
-import dev.pogoroot.automation.core.automation.modules.DiscardActionPlanner
 import dev.pogoroot.automation.core.automation.modules.EncounterActionPlanner
 import dev.pogoroot.automation.core.automation.modules.ModuleActionPlanner
 import dev.pogoroot.automation.core.automation.modules.PlanningContext
@@ -35,13 +34,11 @@ data class AutomationSnapshot(
  * shared active-encounter catch decision used by both the encounter berry assist
  * and the catch throw. One-mutation-at-a-time is enforced downstream by the runner.
  *
- * Order (discard, encounter, catch_spin) keeps overworld maintenance before
- * catch/open/spin, and an in-encounter berry before the throw. Native owns the
- * post-catch transfer decision and does not participate in this planner list.
+ * The native discard and transfer modules own their maintenance decisions. This
+ * coordinator keeps only the client-side encounter assist in the planner list.
  */
 class AutomationCoordinator(
     private val planners: List<ModuleActionPlanner> = listOf(
-        DiscardActionPlanner(),
         EncounterActionPlanner(),
     ),
     private val catchPlanner: CatchPlanner = CatchPlanner(),

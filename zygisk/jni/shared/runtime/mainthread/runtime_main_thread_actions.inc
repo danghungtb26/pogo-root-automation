@@ -199,3 +199,106 @@ MainThreadActionOutcome request_main_thread_use_berry(
     );
     return outcome;
 }
+
+MainThreadActionOutcome request_main_thread_discard_task(
+    ProbeContext &context,
+    MainThreadTaskType task_type,
+    int32_t item_id,
+    int32_t amount,
+    const char *command_id
+) {
+    if (!context.main_thread_bridge.ready || context.main_thread_bridge.java_vm == nullptr) {
+        return MainThreadActionOutcome::kRejected;
+    }
+    if (task_type == MainThreadTaskType::kStartDiscard &&
+        (item_id <= 0 || amount <= 0)) {
+        return MainThreadActionOutcome::kRejected;
+    }
+    std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
+    if (context.main_thread_bridge.pending_token != 0U) return MainThreadActionOutcome::kRejected;
+    const uint64_t token = context.main_thread_bridge.next_token++;
+    context.main_thread_bridge.pending_token = token;
+    context.main_thread_bridge.pending_type = task_type;
+    context.main_thread_bridge.pending_item_id = item_id;
+    context.main_thread_bridge.pending_discard_amount = amount;
+    context.main_thread_bridge.pending_discard_command_id = command_id == nullptr ? "" : command_id;
+    context.main_thread_bridge.pending_result = nullptr;
+    context.main_thread_bridge.pending_done = false;
+    context.main_thread_bridge.pending_success = false;
+    context.main_thread_bridge.pending_action_outcome = MainThreadActionOutcome::kRejected;
+
+    JNIEnv *env = nullptr;
+    bool attached = false;
+    if (context.main_thread_bridge.java_vm->GetEnv(
+            reinterpret_cast<void **>(&env), JNI_VERSION_1_6
+        ) != JNI_OK) {
+        if (context.main_thread_bridge.java_vm->AttachCurrentThread(&env, nullptr) != JNI_OK) {
+            context.main_thread_bridge.pending_token = 0U;
+            return MainThreadActionOutcome::kRejected;
+        }
+        attached = true;
+    }
+    const jboolean posted = env->CallStaticBooleanMethod(
+        static_cast<jclass>(context.main_thread_bridge.bridge_class),
+        context.main_thread_bridge.post_method,
+        static_cast<jlong>(token)
+    );
+    const bool post_ok = java_call_succeeded(env, "post discard task") && posted == JNI_TRUE;
+    if (attached) context.main_thread_bridge.java_vm->DetachCurrentThread();
+    if (!post_ok) {
+        context.main_thread_bridge.pending_token = 0U;
+        return MainThreadActionOutcome::kRejected;
+    }
+    const bool completed = context.main_thread_bridge.condition.wait_for(
+        lock,
+        std::chrono::seconds(5),
+        [&context, token]() {
+            return context.main_thread_bridge.pending_token != token ||
+                context.main_thread_bridge.pending_done;
+        }
+    );
+    const MainThreadActionOutcome outcome = completed &&
+        context.main_thread_bridge.pending_token == token
+        ? context.main_thread_bridge.pending_action_outcome
+        : MainThreadActionOutcome::kIndeterminate;
+    context.main_thread_bridge.pending_token = 0U;
+    context.main_thread_bridge.pending_done = false;
+    context.main_thread_bridge.pending_item_id = 0;
+    context.main_thread_bridge.pending_discard_amount = 0;
+    context.main_thread_bridge.pending_discard_command_id.clear();
+    __android_log_print(
+        outcome == MainThreadActionOutcome::kInvoked ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "main-thread discard task type=%u item_id=%d amount=%d outcome=%u",
+        static_cast<unsigned>(task_type),
+        item_id,
+        amount,
+        static_cast<unsigned>(outcome)
+    );
+    return outcome;
+}
+
+MainThreadActionOutcome request_main_thread_poll_runtime_discard(ProbeContext &context) {
+    return request_main_thread_discard_task(
+        context,
+        MainThreadTaskType::kPollDiscard,
+        0,
+        0,
+        nullptr
+    );
+}
+
+MainThreadActionOutcome request_main_thread_start_runtime_discard(
+    ProbeContext &context,
+    int32_t item_id,
+    int32_t amount,
+    const char *command_id
+) {
+    return request_main_thread_discard_task(
+        context,
+        MainThreadTaskType::kStartDiscard,
+        item_id,
+        amount,
+        command_id
+    );
+}

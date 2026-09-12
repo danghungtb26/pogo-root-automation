@@ -19,6 +19,9 @@ import dev.pogoroot.automation.bridge.RuntimeControlRequest
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfig
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigRequest
+import dev.pogoroot.automation.bridge.RuntimeDiscardConfig
+import dev.pogoroot.automation.bridge.RuntimeDiscardConfigPayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeDiscardConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigRequest
@@ -189,6 +192,34 @@ class RuntimeBridgeClient(
         Log.i(
             LOG_TAG,
             "runtime transfer config acknowledged revision=${config.configRevision} " +
+                "phase=${result.phase} message=${result.message}",
+        )
+    }
+
+    /** Apply the complete, revisioned auto-discard policy to native. */
+    fun setDiscardConfig(config: RuntimeDiscardConfig): Result<Unit> = runCatching {
+        val ready = currentRuntimeReady() ?: connect().getOrThrow()
+        val requestId = "runtime-discard-config-${config.configRevision}-${System.nanoTime()}"
+        val request = RuntimeDiscardConfigRequest(
+            runtimeSessionId = ready.runtimeSessionId,
+            requestId = requestId,
+            config = config,
+            expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
+            pid = ready.pid,
+            processName = ready.processName,
+            packageName = ready.packageName,
+            buildFingerprint = ready.buildFingerprint,
+        )
+        val result = awaitControlResult(requestId) {
+            sendPayload(
+                messageType = BridgeMessageType.COMMAND,
+                payload = RuntimeDiscardConfigPayloadCodec.encode(request).getOrThrow(),
+            )
+        }.getOrThrow()
+        Log.i(
+            LOG_TAG,
+            "runtime discard config acknowledged revision=${config.configRevision} " +
+                "auto=${config.autoDiscard} limits=${config.maxCountByItemId.size} " +
                 "phase=${result.phase} message=${result.message}",
         )
     }

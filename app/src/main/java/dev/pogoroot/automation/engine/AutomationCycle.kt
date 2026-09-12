@@ -51,6 +51,17 @@ internal class AutomationCycle(
                     )
                     return@onSuccess
                 }
+                val discardConfigSync = runtimeCoordinator.syncDiscardConfig(config)
+                if (discardConfigSync.isFailure) {
+                    val error = discardConfigSync.exceptionOrNull()
+                    structuredController.stop()
+                    statusReporter.recordError(
+                        message = "discard config sync: " +
+                            (error?.message ?: error?.javaClass?.simpleName ?: "unknown error"),
+                        runtimeSessionId = ready.runtimeSessionId,
+                    )
+                    return@onSuccess
+                }
                 if (!ready.strongIdentityVerified || ready.capabilities.isEmpty()) {
                     // START is intentionally probe-only. Do not let the structured
                     // adapter refresh or submit commands until the delayed automatic

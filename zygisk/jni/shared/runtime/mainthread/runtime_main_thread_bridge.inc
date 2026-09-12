@@ -197,6 +197,9 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     std::string fort_id;
     uint64_t pokemon_id = 0U;
     std::string transfer_command_id;
+    int32_t discard_item_id = 0;
+    int32_t discard_amount = 0;
+    std::string discard_command_id;
     double player_latitude = 0.0;
     double player_longitude = 0.0;
     {
@@ -205,6 +208,9 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         fort_id = context->main_thread_bridge.pending_fort_id;
         pokemon_id = context->main_thread_bridge.pending_pokemon_id;
         transfer_command_id = context->main_thread_bridge.pending_transfer_command_id;
+        discard_item_id = context->main_thread_bridge.pending_item_id;
+        discard_amount = context->main_thread_bridge.pending_discard_amount;
+        discard_command_id = context->main_thread_bridge.pending_discard_command_id;
     }
     if (task_type == MainThreadTaskType::kFindObject) {
         result = find_unity_object_on_main_thread(*context, name_space.c_str(), class_name.c_str());
@@ -279,6 +285,24 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
             transfer_command_id.c_str()
         );
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
+    } else if (task_type == MainThreadTaskType::kPollDiscard) {
+        const RuntimeDiscardPromisePollResult poll_result =
+            poll_pending_runtime_discard_on_main_thread(*context);
+        task_success = poll_result != RuntimeDiscardPromisePollResult::kNoPending;
+        action_outcome = poll_result == RuntimeDiscardPromisePollResult::kWaiting ||
+                poll_result == RuntimeDiscardPromisePollResult::kCompleted
+            ? MainThreadActionOutcome::kInvoked
+            : poll_result == RuntimeDiscardPromisePollResult::kNoPending
+                ? MainThreadActionOutcome::kRejected
+                : MainThreadActionOutcome::kIndeterminate;
+    } else if (task_type == MainThreadTaskType::kStartDiscard) {
+        action_outcome = start_runtime_discard_on_main_thread(
+            *context,
+            discard_item_id,
+            discard_amount,
+            discard_command_id.c_str()
+        );
+        task_success = action_outcome == MainThreadActionOutcome::kInvoked;
     } else if (task_type == MainThreadTaskType::kSpin) {
         action_outcome = spin_runtime_pokestop_on_main_thread(*context, fort_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
@@ -286,7 +310,8 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu inventory_stacks=%zu",
+        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu inventory_stacks=%zu "
+        "discard_item=%d discard_amount=%d",
         static_cast<unsigned>(task_type),
         name_space.c_str(),
         class_name.c_str(),
@@ -294,7 +319,9 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
         result,
         nearby.spawns.size(),
         forts.forts.size(),
-        inventory.items.size()
+        inventory.items.size(),
+        discard_item_id,
+        discard_amount
     );
     __android_log_print(
         current_thread == nullptr ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
@@ -391,6 +418,8 @@ void shutdown_main_thread_bridge(ProbeContext &context) {
         context.main_thread_bridge.pending_token = 0U;
         context.main_thread_bridge.pending_done = true;
         context.main_thread_bridge.pending_item_id = 0;
+        context.main_thread_bridge.pending_discard_amount = 0;
+        context.main_thread_bridge.pending_discard_command_id.clear();
         context.main_thread_bridge.pending_pokemon_id = 0U;
         context.main_thread_bridge.pending_transfer_command_id.clear();
         context.main_thread_bridge.pending_forts.forts.clear();

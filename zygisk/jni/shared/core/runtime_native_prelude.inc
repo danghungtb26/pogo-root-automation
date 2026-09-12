@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "zygisk.hpp"
@@ -269,6 +270,7 @@ struct RuntimeBinding {
     const void *map_pokestop_get_id = nullptr;
     const void *map_pokestop_get_location = nullptr;
     const void *map_pokestop_get_is_cooling_down = nullptr;
+    const void *map_pokestop_set_cooldown_time = nullptr;
     const void *map_pokestop_start_interactive = nullptr;
     const void *map_pokestop_interactive_item_spinner = nullptr;
     const void *poi_item_spinner_spin = nullptr;
@@ -326,7 +328,7 @@ struct RuntimeBinding {
     bool inventory_read_verified = false;
     // Discard executor (IItemBag.RecycleItem(ItemData, int, ISet<Item>)). ItemData
     // is a plain data class constructed by object_new + field writes. Execution is
-    // gated behind kDiscardExecutionEnabled until verified on device.
+    // guarded by kDiscardExecutionEnabled and the exact verified binding.
     const void *item_bag_recycle_item = nullptr;
     Il2CppClass *item_data_class = nullptr;
     bool discard_verified = false;
@@ -362,6 +364,8 @@ enum class MainThreadTaskType : uint32_t {
     kStartTransfer = 12U,
     kPollEncounter = 13U,
     kPollSpin = 14U,
+    kPollDiscard = 15U,
+    kStartDiscard = 16U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -393,6 +397,8 @@ struct MainThreadBridge {
     uint64_t pending_pokemon_id = 0U;
     std::string pending_transfer_command_id;
     int32_t pending_item_id = 0;
+    int32_t pending_discard_amount = 0;
+    std::string pending_discard_command_id;
     pogo_runtime::RuntimeNearbyObservation pending_nearby;
     pogo_runtime::RuntimeFortsObservation pending_forts;
     pogo_runtime::RuntimeInventoryObservation pending_inventory;
@@ -599,6 +605,14 @@ enum class RuntimeTransferPromisePollResult : uint32_t {
     kTimedOut = 4U,
 };
 
+enum class RuntimeDiscardPromisePollResult : uint32_t {
+    kNoPending = 0U,
+    kWaiting = 1U,
+    kCompleted = 2U,
+    kFailed = 3U,
+    kTimedOut = 4U,
+};
+
 enum class RuntimeSpinPromisePollResult : uint32_t {
     kNoPending = 0U,
     kWaiting = 1U,
@@ -631,7 +645,8 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
 bool consume_terminal_runtime_spin(
     ProbeContext &context,
     std::string *fort_id,
-    int32_t *server_result
+    int32_t *server_result,
+    int64_t *cooldown_complete_ms
 );
 
 void reset_runtime_spin_state(ProbeContext &context);
@@ -691,6 +706,30 @@ MainThreadActionOutcome request_main_thread_start_runtime_transfer(
 bool runtime_transfer_blocks_catch_spin();
 bool runtime_transfer_has_pending();
 void reset_runtime_transfer_state(ProbeContext &context);
+
+RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
+    ProbeContext &context
+);
+
+MainThreadActionOutcome start_runtime_discard_on_main_thread(
+    ProbeContext &context,
+    int32_t item_id,
+    int32_t amount,
+    const char *command_id
+);
+
+MainThreadActionOutcome request_main_thread_poll_runtime_discard(ProbeContext &context);
+
+MainThreadActionOutcome request_main_thread_start_runtime_discard(
+    ProbeContext &context,
+    int32_t item_id,
+    int32_t amount,
+    const char *command_id
+);
+
+bool runtime_discard_blocks_catch_spin();
+bool runtime_discard_has_pending();
+void reset_runtime_discard_state(ProbeContext &context);
 
 MainThreadActionOutcome request_main_thread_spin(
     ProbeContext &context,

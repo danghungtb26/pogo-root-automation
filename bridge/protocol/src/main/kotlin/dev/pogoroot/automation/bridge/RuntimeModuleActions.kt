@@ -15,4 +15,7 @@ enum class ModuleControlAction(val wireValue: Int, val owner: RuntimeFeatureModu
 
     /** Replace the validated transfer keep-policy snapshot. */
     TRANSFER_CONFIG_SET(7, RuntimeFeatureModule.TRANSFER),
+
+    /** Replace the validated native auto-discard limit snapshot. */
+    DISCARD_CONFIG_SET(8, RuntimeFeatureModule.DISCARD),
 }

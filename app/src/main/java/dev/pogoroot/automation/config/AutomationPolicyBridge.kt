@@ -4,9 +4,9 @@ import dev.pogoroot.automation.core.automation.AutomationPolicy
 import dev.pogoroot.automation.core.automation.AutomationTimingPolicy
 import dev.pogoroot.automation.core.automation.BerryType
 import dev.pogoroot.automation.core.automation.ThrowProfile
-import dev.pogoroot.automation.core.automation.InventoryPolicy
 import dev.pogoroot.automation.core.automation.TransferPolicy
 import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfig
+import dev.pogoroot.automation.bridge.RuntimeDiscardConfig
 import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 
 fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy(
@@ -28,12 +28,8 @@ fun HeadlessAutomationConfig.toCorePolicy(): AutomationPolicy = AutomationPolicy
         ),
     ),
     autoSpin = autoSpin,
-    autoDiscard = autoDiscard,
     autoTransfer = autoTransfer,
     berryType = berryMode.toCoreBerryType(),
-    inventoryPolicy = InventoryPolicy(
-        maxCountByItemId = discardLimits,
-    ),
     transferPolicy = TransferPolicy(
         minimumIvPercentToKeep = transferMinimumIvPercent,
         keepUnknownIv = true,
@@ -81,4 +77,11 @@ fun HeadlessAutomationConfig.toRuntimeTransferConfig(): RuntimeTransferConfig =
         keepFavorite = transferKeepFavorite,
         keepLegendary = true,
         keepMythical = true,
+    )
+
+fun HeadlessAutomationConfig.toRuntimeDiscardConfig(): RuntimeDiscardConfig =
+    RuntimeDiscardConfig(
+        configRevision = configRevision,
+        autoDiscard = autoDiscard,
+        maxCountByItemId = discardLimits,
     )

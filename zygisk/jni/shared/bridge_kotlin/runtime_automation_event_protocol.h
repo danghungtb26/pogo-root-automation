@@ -18,6 +18,9 @@ enum class RuntimeAutomationEventType : uint32_t {
     kPokemonTransferred = 4U,
     kPokemonTransferTriggered = 5U,
     kPokemonTransferFailed = 6U,
+    kItemDiscardTriggered = 7U,
+    kItemDiscarded = 8U,
+    kItemDiscardFailed = 9U,
 };
 
 struct RuntimeAutomationEvent {
@@ -34,7 +37,7 @@ inline bool encode_runtime_automation_event_payload(
         return false;
     }
     const uint32_t event_type = static_cast<uint32_t>(value.type);
-    if (event_type == 0U || event_type > 6U) return false;
+    if (event_type == 0U || event_type > 9U) return false;
     payload->clear();
     append_u32(payload, kRuntimeAutomationEventPayloadMagic);
     append_u32(payload, event_type);

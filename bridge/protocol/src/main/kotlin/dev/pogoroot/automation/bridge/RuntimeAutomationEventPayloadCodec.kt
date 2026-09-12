@@ -12,6 +12,9 @@ enum class RuntimeAutomationEventType(val wireValue: Int) {
     POKEMON_TRANSFERRED(4),
     POKEMON_TRANSFER_TRIGGERED(5),
     POKEMON_TRANSFER_FAILED(6),
+    ITEM_DISCARD_TRIGGERED(7),
+    ITEM_DISCARDED(8),
+    ITEM_DISCARD_FAILED(9),
 
     ;
 
