@@ -149,11 +149,22 @@ bool read_runtime_map_forts(
     observation->forts.clear();
     std::vector<MapDictionaryEntry> entries;
     if (!enumerate_map_dictionary(
-            api, binding.map_place_directory_pokestops, &entries)) return false;
+            api, binding.map_place_directory_pokestops, &entries)) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime map forts enumerate failed directory=%p pokestops=%p",
+            binding.map_place_directory_service,
+            binding.map_place_directory_pokestops
+        );
+        return false;
+    }
+    size_t readable_count = 0U;
     for (const MapDictionaryEntry &entry : entries) {
         void *pokestop = entry.value;
         pogo_runtime::RuntimeFortObservation fort{};
         if (!read_runtime_map_pokestop(api, binding, pokestop, &fort)) continue;
+        ++readable_count;
         const bool duplicate = std::any_of(
             observation->forts.begin(),
             observation->forts.end(),
@@ -161,5 +172,13 @@ bool read_runtime_map_forts(
         );
         if (!duplicate) observation->forts.push_back(std::move(fort));
     }
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "runtime map forts complete dictionary_entries=%zu readable=%zu forts=%zu",
+        entries.size(),
+        readable_count,
+        observation->forts.size()
+    );
     return true;
 }

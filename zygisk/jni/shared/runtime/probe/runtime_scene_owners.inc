@@ -48,6 +48,10 @@
     } else {
         __android_log_print(ANDROID_LOG_INFO, kLogTag, "MapContentHandler egft field unavailable");
     }
+    // Scene owners can become available after the initial managed discovery.
+    // Rebind the place directory now that both verified owners are available;
+    // this also refreshes forts_read_verified/spin_verified.
+    bind_direct_map_place_directory(context.il2cpp_api, &binding);
     if (!binding.map_entity_read_verified) {
         __android_log_print(ANDROID_LOG_INFO, kLogTag, "MapSceneViewService map entity service unavailable");
     }

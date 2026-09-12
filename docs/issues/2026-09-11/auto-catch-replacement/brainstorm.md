@@ -433,3 +433,154 @@ scan tiếp theo.
 
 Lần push lại bản đã sửa chưa thực hiện được vì BlueStacks Air 1 đang mất kết nối
 (`127.0.0.1:5565 Connection refused`); không dùng ADB thủ công để bypass trạng thái này.
+
+## 15. Audit việc không quét được forts — 10:21
+
+### 1. Hiện trạng và kỳ vọng
+
+Log mới nhất là `build/logs/logcat-full-20260912-102116-86002.txt`, process hiện tại là
+PID `5890`. Map entity reader đã hoạt động: `map_verified=1`, `map_service` khác null,
+`get_cells` khác null, và scan đọc được `cells=26`, `wild=4`. Tuy nhiên mọi cycle đều trả
+`forts=0`.
+
+Kỳ vọng là mỗi map tick phải đi qua directory pokestop, enumerate các entry, đọc
+`MapPokestop.Id`, `Location`, `IsCoolingDown`, rồi trả danh sách forts cho filter/spin.
+
+### 2. Bằng chứng tái hiện
+
+Các marker quan trọng ở cycle hiện tại:
+
+```text
+10:21:00.661 managed diagnostic: owner label=MapSceneViewService.MapEntityService
+                         object=0x787fd1f550 class=...MapEntityService exact=1
+10:21:00.667 runtime map scan begin stage=5 map_verified=1
+                         map_service=0x787fd1f550 get_cells=0x79a12a6850
+                         forts_verified=0 fort_directory=0x0 pokestops=0x0
+10:21:00.667 runtime map scan forts skipped reason=binding_unverified
+10:21:00.667 runtime map scan complete success=1 cells=26 wild=4 forts=0 complete=1
+```
+
+Cùng chuỗi này lặp lại ở `10:21:02.691`, `10:21:06.728`, `10:21:10.772` và
+`10:21:14.806`. Vì vậy đây không phải trường hợp dictionary được enumerate nhưng rỗng;
+`read_runtime_map_forts()` bị chặn trước khi gọi `enumerate_map_dictionary()`.
+
+### 3. Phạm vi ảnh hưởng
+
+- Map và wild scan vẫn chạy.
+- Fort reader bị disable bởi `forts_read_verified=0`.
+- Direct spin cũng không thể verified vì `spin_verified` phụ thuộc vào fort reader.
+- Chưa có bằng chứng nào cho thấy `MapPokestop.get_Id`, `get_Location` hoặc
+  `get_IsCoolingDown` bị crash hay trả dữ liệu sai; các getter này chưa được gọi trong
+  cycle lỗi.
+
+### 4. Nguyên nhân gốc
+
+Binding hiện tại trong `zygisk/jni/modules/catch_spin/direct_map_bindings.inc` chỉ tìm
+directory theo owner chain:
+
+```text
+MapEntityService --egiq--> MapPlaceDirectoryService --ehft--> Dictionary<string, IMapPokestop>
+```
+
+Log xác nhận kết quả của chain này là `directory=0x0`, `pokestops=0x0`. Trong khi đó
+reverse dump của đúng build `0.427.0` còn có hai owner chain đã biết:
+
+```text
+MapSceneViewService --ehjt--> IMapPlaceDirectoryService
+MapContentHandler    --egga--> IMapPlaceDirectoryService
+```
+
+`MapSceneViewService` và `MapContentHandler` đã được resolve để lấy `MapEntityService`,
+nhưng code discovery chưa đọc `ehjt` hoặc `egga`. Do đó directory tồn tại ở owner chain
+khác nhưng binding không giữ được nó, làm capability bị fail-closed.
+
+### 5. Dependency map
+
+```text
+MapSceneViewService
+  ├─ ehkb → MapContentHandler
+  │          ├─ egft → MapEntityService → egix → Cells       [đang chạy]
+  │          └─ egga → IMapPlaceDirectoryService              [chưa bind]
+  └─ ehjt → IMapPlaceDirectoryService                         [chưa bind]
+             └─ ehft → Dictionary<string, IMapPokestop>
+                        └─ MapPokestop getters → fort observation
+```
+
+### 6. Các hướng xử lý và lựa chọn
+
+1. **Khuyến nghị:** giữ nguyên fail-closed, bổ sung fallback owner chain theo thứ tự
+   `MapSceneViewService.ehjt`, sau đó `MapContentHandler.egga`; từ directory lấy `ehft`,
+   rồi mới set `forts_read_verified`.
+2. Chỉ nới điều kiện `forts_read_verified` để quét trực tiếp từ cells: không đủ an toàn,
+   vì cells hiện là `MapEntityCell` và không chứng minh được layout/danh sách pokestop.
+3. Bỏ điều kiện binding và đọc địa chỉ đoán: không chấp nhận, vì có thể đọc nhầm object
+   và làm crash target process.
+
+### 7. Phạm vi sửa tối thiểu dự kiến
+
+Chỉ cần mở rộng việc resolve directory trong direct map binding; không cần thay đổi filter,
+tick counter, Promise catch hay logic enumerate. Nên log thêm `directory_source=ehjt|egga|egiq`
+và địa chỉ `ehft` để phân biệt owner chain nào hoạt động trên thiết bị.
+
+### 8. Rủi ro và cách phòng ngừa
+
+- Chỉ chấp nhận object nếu `runtime_object_is_exact_class(..., MapPlaceDirectoryService)`
+  thành công.
+- Chỉ set capability verified khi directory, dictionary và cả ba getter pokestop đều tồn tại.
+- Không gọi discovery chờ callback từ callback main thread; fallback phải dùng field đã đọc
+  đồng bộ trong cùng main-thread task hoặc dùng owner đã cache.
+- Nếu cả hai fallback đều null, tiếp tục trả `forts=0` với log `binding_unverified`, không
+  đoán offset khác.
+
+### 9. Câu hỏi bug template
+
+- **Expected:** map scan đọc được các fort đang hiển thị và đưa fort đủ điều kiện vào filter.
+- **Actual:** map scan chỉ đọc cells/wild; fort phase bị skip vì `binding_unverified`.
+- **Reproduction:** chạy auto catch sau khi `MapSceneViewService` ready, xem các cycle có
+  `map_verified=1` nhưng `forts_verified=0`, `directory=0x0`, `pokestops=0x0`.
+- **Evidence:** PID `5890`, các dòng `22066`, `22075`, `22078`, `22081` trong log nêu trên.
+- **Root cause:** chỉ resolve `MapEntityService.egiq`; bỏ sót `MapSceneViewService.ehjt` và
+  `MapContentHandler.egga`.
+- **Fix boundary:** bổ sung binding directory và log source; giữ nguyên fail-closed reader.
+- **Validation:** capability phải thành `forts_verified=1`, log phải có số dictionary entries,
+  số fort đọc được và không còn `forts skipped reason=binding_unverified`.
+
+## Acceptance Criteria (from spec)
+
+Không có spec riêng cho lỗi này; các tiêu chí dưới đây được suy ra từ behavior hiện tại và
+reverse output của build `0.427.0`.
+
+| ID | Rule / Requirement | Expected |
+|---|---|---|
+| AC-FORT-1 | Resolve directory từ owner chain đã verify | `ehjt`, `egga` hoặc `egiq` trả đúng `MapPlaceDirectoryService`. |
+| AC-FORT-2 | Resolve dictionary và getter | `ehft`, `get_Id`, `get_Location`, `get_IsCoolingDown` đều khác null. |
+| AC-FORT-3 | Cho phép fort scan | `forts_read_verified=1`; không log `binding_unverified`. |
+| AC-FORT-4 | Quan sát được từng stage | Có log owner source, dictionary entry count, fort read count và skip reason nếu fail. |
+| AC-FORT-5 | Fail closed | Nếu binding không exact/đủ, không enumerate địa chỉ đoán và không spin. |
+| AC-FORT-6 | Không phá map/wild scan | `cells` và `wild` hiện có tiếp tục được đọc bình thường. |
+
+## Synthesis
+
+Kết luận: forts hiện không được quét vì binding bị disable trước bước đọc map, không phải
+vì map không có fort hoặc vì filter loại hết fort. Fix đúng là bind `IMapPlaceDirectoryService`
+từ `MapSceneViewService.ehjt` hoặc `MapContentHandler.egga`, sau đó đọc dictionary `ehft`;
+không cần bỏ guard. Phần triển khai được ghi ở mục 16 bên dưới.
+
+## 16. Triển khai fallback binding fort directory
+
+Đã triển khai fix trong native:
+
+- Tách `update_direct_map_fort_capabilities()` để tính lại `forts_read_verified` và
+  `spin_verified` sau mỗi lần owner discovery.
+- Tách `bind_direct_map_place_directory()` và thử lần lượt `MapEntityService.egiq`,
+  `MapSceneViewService.ehjt`, `MapContentHandler.egga`.
+- Gọi lại directory binding trong `discover_scene_runtime_owners()` sau khi scene owner
+  late-bind thành công; đây là phần cần thiết vì initial discovery xảy ra trước khi map
+  scene ready.
+- Thêm log `map directory candidate` và `map directory bound source=...` để xác nhận
+  owner chain thực tế trên thiết bị.
+
+Guard fail-closed vẫn giữ nguyên: chỉ bind object exact class `MapPlaceDirectoryService`
+và chỉ enable forts/spin khi dictionary cùng ba getter `MapPokestop` đã đủ. Native Magisk build
+đã pass arm64-v8a/x86_64; Gradle `test assembleDebug` cũng pass. Chưa push/install trong lượt
+này; cần test runtime để xác nhận `forts_verified=1`, dictionary entries và số fort đọc được.

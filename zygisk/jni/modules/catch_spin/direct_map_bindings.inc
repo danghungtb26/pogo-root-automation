@@ -44,6 +44,101 @@ const void *find_direct_map_instance_method_with_two_parameters(
         api.method_is_instance(method) ? method : nullptr;
 }
 
+void update_direct_map_fort_capabilities(RuntimeBinding *binding) {
+    if (binding == nullptr) return;
+    binding->forts_read_verified = binding->map_place_directory_service != nullptr &&
+        binding->map_place_directory_pokestops != nullptr &&
+        binding->map_pokestop_get_id != nullptr &&
+        binding->map_pokestop_get_location != nullptr &&
+        binding->map_pokestop_get_is_cooling_down != nullptr;
+    binding->spin_verified = binding->forts_read_verified &&
+        binding->map_pokestop_start_interactive != nullptr &&
+        binding->map_pokestop_interactive_item_spinner != nullptr &&
+        binding->poi_item_spinner_spin != nullptr;
+}
+
+void bind_direct_map_place_directory(
+    const Il2CppApi &api,
+    RuntimeBinding *binding
+) {
+    if (binding == nullptr || !has_runtime_inspection_api(api)) return;
+
+    void *directory = nullptr;
+    const char *directory_source = nullptr;
+    const auto try_directory_field = [&api, &directory, &directory_source](
+        void *owner,
+        const char *field_name,
+        const char *source
+    ) {
+        if (directory != nullptr || owner == nullptr) return;
+        void *candidate = nullptr;
+        const bool field_read = read_runtime_field(api, owner, field_name, &candidate);
+        const bool exact = field_read && runtime_object_is_exact_class(
+            api, candidate, "Niantic.Holoholo.Map", "MapPlaceDirectoryService"
+        );
+        __android_log_print(
+            exact ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+            kLogTag,
+            "managed diagnostic: map directory candidate source=%s owner=%p field=%s read=%d object=%p exact=%d",
+            source,
+            owner,
+            field_name,
+            field_read ? 1 : 0,
+            candidate,
+            exact ? 1 : 0
+        );
+        if (exact) {
+            directory = candidate;
+            directory_source = source;
+        }
+    };
+
+    // Keep the existing MapEntityService owner as the first choice. Scene
+    // discovery can run later, so also resolve the same injected directory
+    // from the already verified MapSceneViewService/MapContentHandler owners.
+    try_directory_field(
+        binding->map_entity_service,
+        "egiq",
+        "MapEntityService.egiq"
+    );
+    try_directory_field(
+        binding->map_scene_view_service,
+        "ehjt",
+        "MapSceneViewService.ehjt"
+    );
+    try_directory_field(
+        binding->map_content_handler,
+        "egga",
+        "MapContentHandler.egga"
+    );
+
+    if (directory != nullptr) {
+        binding->map_place_directory_service = directory;
+        read_runtime_field(
+            api,
+            directory,
+            "ehft",
+            &binding->map_place_directory_pokestops
+        );
+        Il2CppClass *directory_class = api.object_get_class(directory);
+        binding->map_place_directory_get_active_pokestops = find_direct_map_instance_method(
+            api, directory_class, "get_ActivePokestops", 0U
+        );
+        binding->map_place_directory_get_pokestop = find_direct_map_instance_method_with_parameter(
+            api, directory_class, "GetPokestop", "System.String"
+        );
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "managed diagnostic: map directory bound source=%s directory=%p pokestops=%p",
+            directory_source == nullptr ? "unknown" : directory_source,
+            binding->map_place_directory_service,
+            binding->map_place_directory_pokestops
+        );
+    }
+    update_direct_map_fort_capabilities(binding);
+}
+
 void discover_direct_map_bindings(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
@@ -117,27 +212,7 @@ void discover_direct_map_bindings(
     binding->direct_catch_outcome_verified = false;
     binding->soft_sfida_outcome_observer_verified = false;
 
-    void *directory = nullptr;
-    if (binding->map_entity_service != nullptr) {
-        read_runtime_field(api, binding->map_entity_service, "egiq", &directory);
-    }
-    if (runtime_object_is_exact_class(
-            api, directory, "Niantic.Holoholo.Map", "MapPlaceDirectoryService")) {
-        binding->map_place_directory_service = directory;
-        read_runtime_field(
-            api,
-            directory,
-            "ehft",
-            &binding->map_place_directory_pokestops
-        );
-        Il2CppClass *directory_class = api.object_get_class(directory);
-        binding->map_place_directory_get_active_pokestops = find_direct_map_instance_method(
-            api, directory_class, "get_ActivePokestops", 0U
-        );
-        binding->map_place_directory_get_pokestop = find_direct_map_instance_method_with_parameter(
-            api, directory_class, "GetPokestop", "System.String"
-        );
-    }
+    bind_direct_map_place_directory(api, binding);
 
     Il2CppClass *pokestop_class = find_runtime_class(
         api, assemblies, assembly_count, "Niantic.Holoholo.Pokestop", "MapPokestop", nullptr
@@ -177,15 +252,7 @@ void discover_direct_map_bindings(
         api, spinner_class, "Spin", "System.Single"
     );
 
-    binding->forts_read_verified = binding->map_place_directory_service != nullptr &&
-        binding->map_place_directory_pokestops != nullptr &&
-        binding->map_pokestop_get_id != nullptr &&
-        binding->map_pokestop_get_location != nullptr &&
-        binding->map_pokestop_get_is_cooling_down != nullptr;
-    binding->spin_verified = binding->forts_read_verified &&
-        binding->map_pokestop_start_interactive != nullptr &&
-        binding->map_pokestop_interactive_item_spinner != nullptr &&
-        binding->poi_item_spinner_spin != nullptr;
+    update_direct_map_fort_capabilities(binding);
 
     __android_log_print(
         binding->direct_catch_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
