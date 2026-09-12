@@ -5,8 +5,8 @@ import dev.pogoroot.automation.bridge.RuntimeAutomationEventType
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventType
 
-/** Maps native automation telemetry to the app-owned event/toast model. */
-internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent = when (type) {
+/** Maps known native automation telemetry to the app-owned event/toast model. */
+internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent? = when (type) {
     RuntimeAutomationEventType.POKEMON_FOUND -> AutomationEvent(
         AutomationEventType.INFO,
         "Found Pokémon #${secondaryId.toUnsignedDecimal()} to catch",
@@ -35,6 +35,7 @@ internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent 
         AutomationEventType.ERROR,
         "Transfer failed: Pokémon #${primaryId.toUnsignedDecimal()}",
     )
+    RuntimeAutomationEventType.UNKNOWN -> null
 }
 
 private fun Long.toUnsignedDecimal(): String = toULong().toString()

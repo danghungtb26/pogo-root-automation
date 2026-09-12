@@ -6,6 +6,7 @@
 #include "shared/bridge_kotlin/runtime_automation_event_protocol.h"
 #include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
+#include "shared/runtime/inventory/runtime_inventory_common.inc"
 #include "shared/bridge_kotlin/runtime_feature_module_protocol.h"
 #include "shared/core/runtime_native_common.inc"
 #include "shared/bridge_kotlin/runtime_bridge_protocol.inc"

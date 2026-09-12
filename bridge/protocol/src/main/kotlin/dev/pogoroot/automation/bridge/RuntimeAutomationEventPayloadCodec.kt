@@ -4,16 +4,27 @@ import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 
 enum class RuntimeAutomationEventType(val wireValue: Int) {
+    /** A validly framed event introduced by a newer runtime build. */
+    UNKNOWN(Int.MIN_VALUE),
     POKEMON_FOUND(1),
     POKEMON_CAUGHT(2),
     POKEMON_FLED(3),
     POKEMON_TRANSFERRED(4),
     POKEMON_TRANSFER_TRIGGERED(5),
     POKEMON_TRANSFER_FAILED(6),
+
+    ;
+
+    companion object {
+        fun fromWireValue(value: Int): RuntimeAutomationEventType = entries.firstOrNull {
+            it.wireValue == value
+        } ?: UNKNOWN
+    }
 }
 
 data class RuntimeAutomationEventPayload(
     val type: RuntimeAutomationEventType,
+    val wireType: Int,
     val primaryId: Long,
     val secondaryId: Long,
 )
@@ -29,16 +40,14 @@ object RuntimeAutomationEventPayloadCodec {
         DataInputStream(ByteArrayInputStream(payload)).use { input ->
             require(input.readInt() == MAGIC) { "invalid runtime automation event marker" }
             val eventTypeWire = input.readInt()
-            val type = RuntimeAutomationEventType.entries.firstOrNull {
-                it.wireValue == eventTypeWire
-            } ?: error("unknown runtime automation event type")
+            val type = RuntimeAutomationEventType.fromWireValue(eventTypeWire)
             val primaryId = input.readLong()
             val secondaryId = input.readLong()
             // Native IDs are uint64_t. Long preserves the raw 64-bit pattern,
             // so a valid ID may appear negative when its high bit is set.
             require(primaryId != 0L) { "runtime automation event primary id is invalid" }
             require(input.available() == 0) { "trailing runtime automation event bytes" }
-            RuntimeAutomationEventPayload(type, primaryId, secondaryId)
+            RuntimeAutomationEventPayload(type, eventTypeWire, primaryId, secondaryId)
         }
     }
 }

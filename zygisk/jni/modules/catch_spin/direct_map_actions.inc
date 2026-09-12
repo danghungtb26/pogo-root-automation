@@ -1,5 +1,5 @@
 struct DirectMapPokeballThrow {
-    int32_t ball_type = 1;
+    int32_t ball_type = kRuntimePokeBallItemId;
     float reticle_size = 0.0F;
     uint8_t hit_bullseye = 0U;
     uint8_t spinning = 0U;
@@ -308,9 +308,25 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     // Check the count right before the throw instead of continuously observing
     // inventory. Zero -> do not waste the throw; report out-of-balls so the
     // service can spin to farm balls. A negative count means the inventory
-    // binding is unavailable, so proceed rather than block.
-    constexpr int32_t kPokeBallItemId = 1;
-    const int32_t poke_ball_count = read_runtime_item_count(api, binding, kPokeBallItemId);
+    // binding is unavailable, so proceed rather than inventing a zero count.
+    const int32_t poke_ball_count = read_runtime_item_count(
+        api, binding, kRuntimePokeBallItemId
+    );
+    const char *ball_state = "unknown";
+    if (poke_ball_count == 0) {
+        ball_state = "empty";
+    } else if (poke_ball_count > 0) {
+        ball_state = "available";
+    }
+    __android_log_print(
+        poke_ball_count < 0 ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
+        kLogTag,
+        "direct map catch ball gate id=%llu item_id=%d poke_ball_count=%d state=%s",
+        static_cast<unsigned long long>(encounter_id),
+        kRuntimePokeBallItemId,
+        poke_ball_count,
+        ball_state
+    );
     if (poke_ball_count == 0) {
         __android_log_print(
             ANDROID_LOG_INFO,

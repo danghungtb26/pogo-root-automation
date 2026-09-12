@@ -53,11 +53,18 @@ bool request_main_thread_inventory(
         return false;
     }
     *observation = context.main_thread_bridge.pending_inventory;
+    const RuntimeInventoryBallCounts balls = runtime_inventory_ball_counts(*observation);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "main-thread inventory completed items=%zu",
-        observation->items.size()
+        "main-thread inventory completed stacks=%zu curated_total=%d "
+        "poke_ball_count=%d great_ball_count=%d ultra_ball_count=%d master_ball_count=%d",
+        observation->items.size(),
+        observation->used_slots,
+        balls.poke_ball,
+        balls.great_ball,
+        balls.ultra_ball,
+        balls.master_ball
     );
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;

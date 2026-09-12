@@ -22,12 +22,39 @@ bool read_runtime_inventory(
     };
     observation->items.clear();
     int64_t total = 0;
+    bool read_failed = false;
     for (int32_t item_id : kInventoryItemIds) {
         const int32_t count = read_runtime_item_count(api, binding, item_id);
-        if (count <= 0) continue;
+        if (count < 0) {
+            read_failed = true;
+            __android_log_print(
+                ANDROID_LOG_WARN,
+                kLogTag,
+                "runtime inventory item read failed item_id=%d",
+                item_id
+            );
+            continue;
+        }
+        if (count == 0) continue;
         observation->items.push_back({item_id, count});
         total += count;
     }
+    const RuntimeInventoryBallCounts balls = runtime_inventory_ball_counts(*observation);
+    __android_log_print(
+        read_failed ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
+        kLogTag,
+        "runtime inventory read stacks=%zu curated_total=%lld "
+        "poke_ball_count=%d great_ball_count=%d ultra_ball_count=%d master_ball_count=%d "
+        "read_failed=%d",
+        observation->items.size(),
+        static_cast<long long>(total),
+        balls.poke_ball,
+        balls.great_ball,
+        balls.ultra_ball,
+        balls.master_ball,
+        read_failed ? 1 : 0
+    );
+    if (read_failed || total > 2147483647LL) return false;
     // The bag capacity is not read yet; report used==capacity==sum so the Kotlin
     // mapper's used<=capacity invariant holds. Discard uses per-item limits, not
     // capacity, so this does not affect the discard decision.

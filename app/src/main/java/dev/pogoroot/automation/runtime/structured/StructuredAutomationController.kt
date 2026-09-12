@@ -89,7 +89,15 @@ class StructuredAutomationController(
                     try {
                         if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.AUTOMATION_EVENT) {
                             RuntimeAutomationEventPayloadCodec.decode(event.payload)
-                                .onSuccess { eventSink.publish(it.toAutomationEvent()) }
+                                .onSuccess { decoded ->
+                                    decoded.toAutomationEvent()?.let(eventSink::publish)
+                                        ?: Log.w(
+                                            LOG_TAG,
+                                            "ignored unknown runtime automation event " +
+                                                "wire_type=${decoded.wireType} " +
+                                                "primary_id=${decoded.primaryId.toULong()}",
+                                        )
+                                }
                                 .onFailure { error ->
                                     lastError = "automation event decode: ${error.message}"
                                     eventSink.publish(AutomationEvent(AutomationEventType.ERROR, lastError!!))
@@ -148,6 +156,11 @@ class StructuredAutomationController(
                             outOfBalls = outOfBalls,
                             excludedSpawnIds = requestedCatchPokemonIds,
                         )
+                        val inventoryStackCount = snapshot.inventory?.items?.size ?: "unavailable"
+                        val pokeBallCount = snapshot.inventory?.items
+                            ?.filter { it.itemId == 1 }
+                            ?.sumOf { it.count }
+                            ?: "unavailable"
                         Log.i(
                             LOG_TAG,
                             "automation filter input seq=${event.messageSeq} " +
@@ -155,7 +168,8 @@ class StructuredAutomationController(
                                 "lifecycle=${snapshot.lifecycleState} " +
                                 "nearby=${snapshot.nearby?.spawns?.size ?: "unavailable"} " +
                                 "forts=${snapshot.forts?.forts?.size ?: "unavailable"} " +
-                                "inventory=${snapshot.inventory?.items?.size ?: "unavailable"}",
+                                "inventory_stacks=$inventoryStackCount " +
+                                "poke_ball_count=$pokeBallCount",
                         )
                         snapshot.encounter?.let(onEncounterSnapshot)
                         (snapshot.nearby?.playerPosition ?: snapshot.encounter?.position)

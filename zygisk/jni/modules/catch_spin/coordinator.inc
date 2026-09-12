@@ -94,10 +94,7 @@ int32_t runtime_pokeball_count(
     const pogo_runtime::RuntimeCatchSpinObservation &snapshot
 ) {
     if (!snapshot.inventory_available) return -1;
-    for (const auto &item : snapshot.inventory.items) {
-        if (item.item_id == 1) return item.count;
-    }
-    return 0;
+    return runtime_inventory_item_count(snapshot.inventory, kRuntimePokeBallItemId);
 }
 
 bool runtime_catch_spin_read_snapshot(
@@ -405,6 +402,18 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     (void)send_runtime_catch_spin_payload(tick.context, snapshot);
 
     const int32_t ball_count = runtime_pokeball_count(snapshot);
+    const int32_t total_ball_count = snapshot.inventory_available
+        ? runtime_inventory_total_ball_count(snapshot.inventory) : -1;
+    __android_log_print(
+        ball_count < 0 ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
+        kLogTag,
+        "native catch_spin ball inventory_available=%d poke_ball_count=%d "
+        "total_ball_count=%d inventory_stacks=%zu",
+        snapshot.inventory_available ? 1 : 0,
+        ball_count,
+        total_ball_count,
+        snapshot.inventory.items.size()
+    );
     if (ball_count == 0) g_runtime_catch_spin_coordinator.out_of_balls = true;
     if (ball_count > 0) g_runtime_catch_spin_coordinator.out_of_balls = false;
 

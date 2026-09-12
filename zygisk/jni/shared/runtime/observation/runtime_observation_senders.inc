@@ -74,11 +74,18 @@ bool send_runtime_inventory_payload(
     const bool sent = send_internal_message(
         context.fd, pogo_runtime::kRuntimeObservationMagic, envelope
     );
+    const RuntimeInventoryBallCounts balls = runtime_inventory_ball_counts(observation);
     __android_log_print(
         sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "runtime observation inventory items=%zu sent=%d",
+        "runtime observation inventory stacks=%zu curated_total=%d "
+        "poke_ball_count=%d great_ball_count=%d ultra_ball_count=%d master_ball_count=%d sent=%d",
         observation.items.size(),
+        observation.used_slots,
+        balls.poke_ball,
+        balls.great_ball,
+        balls.ultra_ball,
+        balls.master_ball,
         sent ? 1 : 0
     );
     return sent;
@@ -104,7 +111,8 @@ bool send_runtime_catch_spin_payload(
         sent ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
         "runtime REQUEST_CATCH_SPIN cycle=%llu nearby_available=%d nearby=%zu "
-        "forts_available=%d forts=%zu inventory_available=%d inventory=%zu "
+        "forts_available=%d forts=%zu inventory_available=%d inventory_stacks=%zu "
+        "poke_ball_count=%d total_ball_count=%d "
         "player_location=%d sent=%d",
         static_cast<unsigned long long>(observation.cycle_id),
         observation.nearby_available ? 1 : 0,
@@ -113,6 +121,10 @@ bool send_runtime_catch_spin_payload(
         observation.forts.forts.size(),
         observation.inventory_available ? 1 : 0,
         observation.inventory.items.size(),
+        observation.inventory_available
+            ? runtime_inventory_item_count(observation.inventory, kRuntimePokeBallItemId) : -1,
+        observation.inventory_available
+            ? runtime_inventory_total_ball_count(observation.inventory) : -1,
         observation.has_player_position ? 1 : 0,
         sent ? 1 : 0
     );

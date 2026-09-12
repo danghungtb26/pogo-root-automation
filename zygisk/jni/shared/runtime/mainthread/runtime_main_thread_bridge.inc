@@ -286,7 +286,7 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu inventory=%zu",
+        "main-thread task type=%u target=%s.%s success=%d result=%p nearby=%zu forts=%zu inventory_stacks=%zu",
         static_cast<unsigned>(task_type),
         name_space.c_str(),
         class_name.c_str(),

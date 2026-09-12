@@ -769,3 +769,131 @@ server đã nhận và xử lý lệnh.
 Build validation: `scripts/build-magisk.sh` pass cho `arm64-v8a` và `x86_64`; `./gradlew test
 assembleDebug` pass. Hai file protocol test được mô tả trong `AGENTS.md` hiện không tồn tại
 trong working tree nên không thể chạy riêng bước host test đó.
+
+## 20. Audit lỗi đọc inventory và số lượng ball — 2026-09-12
+
+### 1. Bug template
+
+- **Expected:** native đọc đúng số lượng từng item từ `IItemBag`, đặc biệt `Item.PokeBall`,
+  rồi dùng số đó để quyết định có được gọi `TryCapture` hay phải chuyển sang nhánh spin.
+- **Actual được chứng minh từ code/log:** log chỉ ghi `inventory=10` hoặc
+  `main-thread inventory completed items=10`. Con số `10` là số stack có count dương trong
+  snapshot, không phải số Poké Ball. Hiện không có log nào ghi `item_id=1 count=<n>`, nên không
+  thể dùng các log này để kết luận native đang đọc được bao nhiêu ball.
+- **Reproduction/evidence:** trong
+  `build/logs/logcat-full-20260912-131812-417.txt`, các dòng `20669`, `20671`, `20683` và
+  `20741` lặp lại `inventory=10`; cùng log không có `ball_count`, `item_id` hay `GetItemCount`
+  result. Vì vậy việc nhìn `inventory=10` như “10 ball” là diễn giải sai telemetry.
+- **Affected path:**
+  `ItemBagImpl.GetItemCount(Item)` → `read_runtime_item_count()` →
+  `read_runtime_inventory()` → `request_main_thread_inventory()` →
+  `runtime_pokeball_count()` / on-demand gate trong `direct_map_actions.inc`.
+
+### 2. Đối chiếu reverse và binding
+
+Reverse dump `reverse/pogo-0.427.0/dump.cs.gz` xác nhận contract của runtime:
+
+```text
+IItemBag.GetItemCount(Holoholo.Rpc.Item) -> System.Int32
+Item.PokeBall   = 1
+Item.GreatBall  = 2
+Item.UltraBall  = 3
+Item.MasterBall = 4
+```
+
+Log managed diagnostic cũng xác nhận owner là exact class
+`Niantic.Holoholo.Internal.ItemBagImpl`, method có `instance=1`, `params=1`, parameter
+`Holoholo.Rpc.Item`, return `System.Int32`. Do đó chưa có bằng chứng cho thấy binding đang gọi
+nhầm method hoặc bảng ID ball `1..4` sai; ghi chú cũ nói Master Ball là `12` cần được coi là
+stale/wrong và không dùng làm căn cứ sửa native.
+
+### 3. Các lỗi dữ liệu hiện hữu cần phân biệt
+
+1. **Telemetry sai tên/thiếu dữ liệu:** `items.size()` đang được in dưới nhãn `inventory`.
+   Đây là lỗi chắc chắn và khiến việc kiểm tra runtime bị sai hướng.
+2. **Reader là curated, không phải full inventory:** native chỉ hỏi 18 ID hard-code rồi bỏ qua
+   `count <= 0`; vì vậy snapshot không thể đại diện cho toàn bộ inventory. Đặc biệt `-1` (lỗi
+   đọc) bị xử lý giống `0` (item không có), làm mất khả năng phân biệt “hết ball” với “đọc lỗi”.
+3. **Ball dùng cho catch bị cố định:** `runtime_pokeball_count()` và on-demand gate chỉ dùng
+   item ID `1`, trong khi `DirectMapPokeballThrow.ball_type` cũng cố định là `1`. Đây là đúng nếu
+   policy hiện tại chỉ cho native ném Poké Ball; nó sẽ sai nếu yêu cầu “tổng tất cả ball” hoặc
+   native được mở rộng để chọn Great/Ultra Ball.
+4. **`used_slots`/`capacity` đang là giá trị giả:** cả hai được gán bằng tổng count của các ID
+   curated. Nó không làm thay đổi gate Poké Ball hiện tại, nhưng làm `InventorySnapshot` không
+   phản ánh bag capacity và sẽ gây sai nếu sau này dùng field này cho discard/full-bag policy.
+
+### 4. Root cause hiện tại
+
+Root cause của hiện tượng “log số ball sai” là telemetry đang trộn khái niệm số item stack với
+số lượng ball và không expose kết quả từng lần `GetItemCount`. Root cause dữ liệu tiềm ẩn là
+reader nuốt `-1` thành absent item. Chưa thể kết luận `GetItemCount(Item.PokeBall)` trả sai số
+thực tế chỉ từ các log hiện có; cần một lần đo có log từng ID/count và đối chiếu trực tiếp với
+inventory UI tại cùng thời điểm.
+
+### 5. Scope và hướng sửa tối thiểu
+
+- Giữ binding `ItemBagImpl.GetItemCount(Item)` và các ID enum đã reverse-verify.
+- Đổi log thành các trường rõ nghĩa: `inventory_stacks`, `poke_ball_count`,
+  `great_ball_count`, `ultra_ball_count`, `master_ball_count`, cùng trạng thái
+  `read_failed_ids`/`read_failed`.
+- Tách kết quả `unknown/read_failed` khỏi `zero`; không cho một lần đọc lỗi bị coi là hết ball.
+- Nếu mục tiêu là catch bằng Poké Ball như flow hiện tại, gate chỉ dùng ID `1`; nếu mục tiêu là
+  tổng ball, phải đổi cả selector lẫn `DirectMapPokeballThrow.ball_type`, không chỉ đổi phép
+  cộng trong inventory.
+- Không sửa `used_slots`/`capacity` trong cùng một patch ball gate nếu chưa có binding exact cho
+  bag capacity; chỉ đánh dấu chúng là `unknown` hoặc giữ riêng khỏi quyết định catch.
+
+### Acceptance Criteria — inferred
+
+| ID | Rule / Requirement | Expected |
+|---|---|---|
+| AC-INV-1 | Enum mapping | `PokeBall=1`, `GreatBall=2`, `UltraBall=3`, `MasterBall=4` theo dump `0.427.0`. |
+| AC-INV-2 | Exact read visibility | Mỗi snapshot có log kết quả `GetItemCount` theo từng ball ID; `inventory_stacks` không được gọi là ball count. |
+| AC-INV-3 | Error semantics | `-1`/exception là `read_failed`/unknown, không biến thành zero. |
+| AC-INV-4 | Current catch contract | Với DIRECT_MAP hiện tại, `poke_ball_count` phải là count của ID `1` và được đọc lại ngay trước `TryCapture`. |
+| AC-INV-5 | Full-ball policy clarity | Nếu muốn dùng Great/Ultra, phải có mapping `item_id -> ball_type` và selector tương ứng; không cộng mù các stack. |
+| AC-INV-6 | Inventory model safety | `used_slots`/`capacity` không được dùng để suy ra ball count; giá trị giả phải được đánh dấu rõ hoặc tách khỏi policy. |
+| AC-INV-7 | Runtime verification | Đối chiếu log ID/count với inventory UI cùng thời điểm và chứng minh zero/positive thay đổi sau khi catch/spin. |
+
+### Synthesis
+
+Binding đọc inventory hiện đã được reverse và runtime diagnostic xác nhận đúng method/class;
+điểm sai chắc chắn là cách log đang báo `items.size()` như inventory count, nên chưa thể biết
+số ball thực tế từ log. Native decision hiện dùng đúng Poké Ball ID `1` và còn đọc lại ngay trước
+`TryCapture`, nhưng reader vẫn có rủi ro vì danh sách curated và việc bỏ qua `-1`. Bước tiếp theo
+nên là bổ sung telemetry per-item và semantics `unknown` rồi mới kết luận hoặc sửa thuật toán
+chọn ball; không nên đổi ID Master Ball sang `12` hay cộng tất cả ball khi flow throw vẫn cố định
+`ball_type=1`.
+
+## 21. Triển khai fix inventory/ball count — 2026-09-12
+
+Đã triển khai fix theo mục 20:
+
+- Tạo `zygisk/jni/shared/runtime/inventory/runtime_inventory_common.inc` làm nguồn chung cho
+  enum ID ball và cách lấy count từ snapshot; không còn rải literal `1` ở các native path.
+- Native inventory reader ghi rõ `stacks`, `curated_total`, count của Poké/Great/Ultra/Master
+  Ball và `read_failed`; nếu bất kỳ `GetItemCount` nào trả `-1` hoặc tổng vượt giới hạn thì
+  snapshot không được coi là hợp lệ.
+- Catch-spin telemetry, main-thread inventory log, standalone inventory log và Kotlin filter log
+  đều đổi `inventory` thành `inventory_stacks` và expose `poke_ball_count`; catch-spin thêm cả
+  `total_ball_count` để không nhầm số stack với tổng ball.
+- On-demand gate trước `TryCapture` ghi count thực tế và trạng thái `available/empty/unknown`.
+  Count `0` vẫn là `out_of_balls`; count âm chỉ là unknown và không bị biến thành zero.
+- Giữ nguyên contract gameplay hiện tại: DIRECT_MAP ném Poké Ball ID `1`, chưa tự cộng Great/
+  Ultra/Master để quyết định catch.
+
+Validation: `ANDROID_NDK="/Users/hungdv26/Library/Android/sdk/ndk/27.1.12297006"
+./scripts/build-magisk.sh` pass cho hai ABI; `./gradlew test assembleDebug --rerun-tasks` pass.
+`git diff --check` pass. Lần runtime tiếp theo cần đọc các dòng `poke_ball_count=...` và so với
+UI inventory cùng thời điểm để xác nhận giá trị game trả về, thay vì suy luận từ
+`inventory_stacks`.
+
+## 22. Fix unknown runtime automation event — 2026-09-12
+
+Decoder Kotlin trước đây ném lỗi khi wire event type không nằm trong danh sách app đang biết,
+khiến một event telemetry lạ xuất hiện thành error toast: `unknown runtime automation event type`.
+Đã đổi decoder sang giữ `wireType`, map type lạ thành `UNKNOWN`, ghi log cảnh báo và bỏ qua event;
+các lỗi frame/magic/ID/trailing bytes vẫn là lỗi decode thật và tiếp tục được báo. Cách này giữ
+automation không bị ảnh hưởng khi native và app lệch version hoặc native bổ sung event mới.
+
+Validation: `./gradlew test assembleDebug --rerun-tasks` pass.
