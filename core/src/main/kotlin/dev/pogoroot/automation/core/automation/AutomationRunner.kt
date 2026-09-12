@@ -32,7 +32,6 @@ class AutomationRunner(
     private var suspended = false
     private var needsResync = false
     private var blockedActionAfterIndeterminate: AutomationAction? = null
-    private var pendingMapSyncExecution: ActionExecution? = null
     private var lastError: String? = null
     private var lastMessageSeq = 0L
     private var nextMutationAllowedAtElapsedNs = 0L
@@ -50,7 +49,6 @@ class AutomationRunner(
         // A new runtime session is a new authority. Never carry an old command
         // into it, even if the PID happens to be reused.
         if (replacingSession || !preserveRecovery || active?.request?.runtimeSessionId != runtime.runtimeSessionId) active = null
-        if (replacingSession || !preserveRecovery) pendingMapSyncExecution = null
         lastObservation = null
         clearMutationQueue()
         lastMessageSeq = 0L
@@ -100,7 +98,6 @@ class AutomationRunner(
         lastObservation = observation
         lastMessageSeq = observation.messageSeq
 
-        resolvePendingMapSync(observation)
         if (suspended || active != null) {
             return Result.success(
                 RunnerDispatch(
@@ -224,24 +221,15 @@ class AutomationRunner(
         } else if (validatedExecution.phase.isDefinitive) {
             consumeQueuedAction(validatedExecution.request.action)
             requeueSamePlanAfterSettle = validatedExecution.phase == ActionExecutionPhase.COMPLETED &&
-                validatedExecution.request.settleDelayNs > 0L &&
-                !validatedExecution.isDirectMapCatch()
+                validatedExecution.request.settleDelayNs > 0L
             if (current.phase == ActionExecutionPhase.INDETERMINATE) {
                 suspended = false
                 needsResync = false
                 blockedActionAfterIndeterminate = null
             }
             active = null
-            pendingMapSyncExecution = validatedExecution.takeIf { it.requiresMapSync() }
-            if (pendingMapSyncExecution != null) {
-                suspended = true
-                needsResync = true
-                blockedActionAfterIndeterminate = null
-                lastError = "catch result confirmed; waiting for map synchronization"
-            } else {
-                lastError = validatedExecution.message
-                    .takeUnless { validatedExecution.phase == ActionExecutionPhase.COMPLETED }
-            }
+            lastError = validatedExecution.message
+                .takeUnless { validatedExecution.phase == ActionExecutionPhase.COMPLETED }
             scheduleSettle(validatedExecution.request.settleDelayNs)
         }
         return Result.success(snapshot())
@@ -266,7 +254,6 @@ class AutomationRunner(
         identity = null
         suspended = true
         needsResync = true
-        pendingMapSyncExecution = null
         clearMutationQueue()
         nextMutationAllowedAtElapsedNs = 0L
         return active
@@ -290,9 +277,6 @@ class AutomationRunner(
     @Synchronized
     fun resumeAfterResync(settleDelayNs: Long = 0L): Result<Unit> {
         if (!suspended || !needsResync) return Result.failure(IllegalStateException("resync is not pending"))
-        if (pendingMapSyncExecution != null) {
-            return Result.failure(IllegalStateException("map synchronization is pending"))
-        }
         if (lastObservation == null) return Result.failure(IllegalStateException("fresh observation required"))
         val indeterminateAction = active
             ?.takeIf { it.phase == ActionExecutionPhase.INDETERMINATE }
@@ -374,33 +358,11 @@ class AutomationRunner(
             now + delayNs
         }
     }
-    private fun resolvePendingMapSync(observation: AutomationObservation): Boolean {
-        val execution = pendingMapSyncExecution ?: return false
-        val action = execution.request.action as? AutomationAction.Catch ?: return false
-        val nearby = observation.snapshot.nearby ?: return false
-        if (!nearby.isComplete || observation.snapshot.lifecycleState != GameLifecycleState.OVERWORLD) return false
-        if (nearby.spawns.any { it.spawnId == action.encounterId }) return false
-
-        pendingMapSyncExecution = null
-        suspended = false
-        needsResync = false
-        blockedActionAfterIndeterminate = null
-        lastError = null
-        return true
-    }
-
     private fun ActionExecution.hasAuthoritativeCatchOutcome(): Boolean =
         phase == ActionExecutionPhase.COMPLETED &&
             request.action is AutomationAction.Catch &&
             catchOutcome != null &&
             catchOutcome != CatchOutcome.INDETERMINATE
-
-    private fun ActionExecution.isDirectMapCatch(): Boolean =
-        request.action is AutomationAction.Catch &&
-            request.action.mode == CatchMode.DIRECT_MAP
-
-    private fun ActionExecution.requiresMapSync(): Boolean =
-        isDirectMapCatch() && catchOutcome in setOf(CatchOutcome.CAUGHT, CatchOutcome.FLED)
 
     /**
      * Reconciles the pending FIFO with the latest plan. Already consumed

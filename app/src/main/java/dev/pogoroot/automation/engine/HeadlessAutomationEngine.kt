@@ -50,7 +50,6 @@ class HeadlessAutomationEngine(
 
     fun deactivate() {
         AutomationRunState.setActive(false)
-        cycle.resetCycleCounter()
         resetRequested.set(true)
     }
 
@@ -62,7 +61,6 @@ class HeadlessAutomationEngine(
 
     fun stop() {
         AutomationRunState.setActive(false)
-        cycle.resetCycleCounter()
         resetRequested.set(true)
         loopActive.set(false)
         statusReporter.setRunning(false)
@@ -70,7 +68,6 @@ class HeadlessAutomationEngine(
 
     fun shutdown() {
         AutomationRunState.setActive(false)
-        cycle.resetCycleCounter()
         resetRequested.set(true)
         loopActive.set(false)
         runCatching { runtimeCoordinator.ensureIdle().getOrThrow() }

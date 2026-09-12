@@ -179,7 +179,7 @@ bool read_active_runtime_encounter(
 
 // Mark the observed world as changed so the next observer cycle re-reads it.
 // Used only by the legacy push-observer path (a periodic fallback tick) when the
-// runtime is not in explicit SCAN_MAP pull mode.
+// runtime is not in native module-owned snapshot mode.
 void mark_world_dirty(ProbeContext &context) {
     context.world_dirty.store(true, std::memory_order_relaxed);
 }
@@ -214,8 +214,8 @@ void *runtime_observation_thread(void *opaque_context) {
         ++encounter_owner_refresh_ticks;
         const RuntimeBinding binding = runtime_binding_snapshot(*context);
         // Legacy push-observer path: re-read the world on the dirty flag plus a
-        // rare reconcile re-read for recovery. Disabled in explicit SCAN_MAP pull
-        // mode (nearby/forts are then read on demand per cycle). Forts do not
+        // rare reconcile re-read for recovery. Disabled in native snapshot mode
+        // (nearby/forts are then read on demand by the catch_spin module). Forts do not
         // depend on the cell traversal, so either reader source is enough; each
         // payload is still published only under its own flag.
         const bool observe_source =

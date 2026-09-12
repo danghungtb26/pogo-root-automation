@@ -4,6 +4,12 @@
 > **Nguyên tắc cốt lõi:** sau khi được `start`, mỗi module **tự chạy độc lập bên trong nó**,
 > KHÔNG còn bị central engine/loop gốc điều khiển theo từng cycle.
 
+> **Cập nhật implementation:** `catch_spin` đã chuyển hẳn sang native. Native
+> `CatchSpinModule::observe()` tự đếm observer tick, đọc snapshot map/forts/
+> inventory, filter catch-all, chọn target và gọi catch/spin. Kotlin chỉ giữ
+> activation + dispatch config revision; các đoạn bên dưới nói về Kotlin
+> `SCAN_MAP`/planner là lịch sử thiết kế cũ và không còn là runtime path.
+
 ---
 
 ## Phần 1 — Lifecycle (start/stop module)
@@ -327,9 +333,10 @@ chạy dài (vd. chuỗi walk/berry có nhịp riêng). ⇒ **mặc định even
 | Phase 3a | ~~`ModuleLifecycleController`~~ → thay bằng per-module `isActive(context)` | `64ccac5`→refactor | ✅ |
 | Phase 3b | Wire `activeModules(context)` → native enable (catch_spin đọc arm) | `70a0f66`→refactor | ✅ **live behavior** |
 | Phase 3c | Bỏ special-case `if CATCH_SPIN`; mỗi module tự khai `isActive`; xoá `ModuleLifecycleController` unused | `073657b` | ✅ |
+| Phase 4 | Native catch-spin observer tự scan/filter/decide/action; Kotlin chỉ dispatch config | (this) | ✅ |
 | doc | Đồng bộ doc: kiến trúc engine-centric, tách policy/mechanism (`ModuleRuntimeManager`) | (this) | ✅ |
 
-**Đã đạt:** package sạch theo tầng; taxonomy 2 trục trong code; đủ kernel primitive (lock/dispatcher/reducer);
+**Đã đạt:** package sạch theo tầng; taxonomy 2 trục trong code; native catch-spin tự vận hành;
 lifecycle 2 trục **đã chạy thật** — disarm giờ **stop** native catch_spin module (đúng Phần 1), GO-absent vẫn
 tắt tất cả qua `ensureIdle()`.
 

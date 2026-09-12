@@ -114,6 +114,12 @@ RuntimeActionResult execute_runtime_catch(
             direct_result.message = "map spawn id is invalid";
             return direct_result;
         }
+        if (!begin_pending_direct_catch(context, command.command_id, encounter_id)) {
+            direct_result.phase = kCommandPhaseIndeterminate;
+            direct_result.error_code = "direct_catch_promise_pending";
+            direct_result.message = "another TryCapture Promise is still being observed";
+            return direct_result;
+        }
         context.last_action_command_id = command.command_id;
         const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
             context, encounter_id
@@ -123,19 +129,23 @@ RuntimeActionResult execute_runtime_catch(
             direct_result.error_code = "direct_catch_outcome_unavailable";
             direct_result.message = "MapPokemon.TryCapture was invoked; server catch outcome is not yet observed";
         } else if (outcome == MainThreadActionOutcome::kIndeterminate) {
+            abandon_pending_direct_catch(context, "direct_catch_invocation_indeterminate");
             direct_result.phase = kCommandPhaseIndeterminate;
             direct_result.error_code = "invoke_outcome_indeterminate";
             direct_result.message = "MapPokemon.TryCapture may have run but the main-thread result was lost";
         } else if (outcome == MainThreadActionOutcome::kOutOfBalls) {
+            abandon_pending_direct_catch(context, "out_of_balls");
             direct_result.error_code = "out_of_balls";
             direct_result.message = "no Poké Balls remain; catch skipped so the service can spin";
         } else if (outcome == MainThreadActionOutcome::kEncounterRequested) {
+            abandon_pending_direct_catch(context, "encounter_requested");
             // Non-terminal: the background SendEncounterRequest (102) was fired and
             // no ball was thrown. The controller should retry the same target on a
             // later cycle, by which point the server encounter response is cached.
             direct_result.error_code = "encounter_requested";
             direct_result.message = "background encounter opened; retry catch once the server response is cached";
         } else {
+            abandon_pending_direct_catch(context, "catch_target_unavailable");
             direct_result.error_code = "catch_target_unavailable";
             direct_result.message = "the requested map Pokémon is no longer available";
         }

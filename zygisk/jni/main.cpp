@@ -2,6 +2,7 @@
 // unit for Zygisk's registration macros and the existing internal linkage.
 #include <sys/mman.h>
 #include "shared/bridge_kotlin/runtime_catch_spin_protocol.h"
+#include "shared/bridge_kotlin/runtime_catch_spin_config_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
 #include "shared/bridge_kotlin/runtime_feature_module_protocol.h"
 #include "shared/core/runtime_native_common.inc"
@@ -44,9 +45,12 @@
 
 // catch_spin main-thread execution workers (dispatched by the shared bridge).
 #include "modules/catch_spin/map_actions.inc"
+#include "modules/catch_spin/encounter_promise_observer.inc"
 #include "modules/catch_spin/direct_map_actions.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
+#include "modules/catch_spin/direct_catch_promise_observer.inc"
+#include "modules/catch_spin/direct_catch_map_sync.inc"
 
 // Feature-owned command parsing/execution.
 #include "modules/catch_spin/catch.inc"
@@ -61,13 +65,15 @@
 #include "modules/transfer/execute.inc"
 #include "modules/encounter/berry.inc"
 
+// The catch_spin config mirror is separate from gameplay execution. It is
+// included before the module registry so catch_spin can own CONFIG_SET through
+// the same module dispatch boundary as the other feature controls.
+#include "modules/catch_spin/config.inc"
+
 // Host publication/routing comes after feature implementations so capability
 // publication can describe the verified executors without owning them.
 #include "host/runtime_capabilities.inc"
-// The catch_spin module owns the SCAN_MAP control action; its handler is defined
-// in modules/catch_spin/scan_map.inc (below). Forward-declare it so the module's
-// handle_control_action can reference it from runtime_feature_modules.inc.
-bool run_runtime_scan_map(ProbeContext &context, const char *request_id, uint64_t cycle_id);
+#include "modules/catch_spin/coordinator.inc"
 // The runtime-core module owns START/STOP/DIAGNOSTIC; the lifecycle handlers are
 // defined in runtime_control.inc (below). Forward-declare them so the module can
 // reference them from runtime_feature_modules.inc.
@@ -75,7 +81,6 @@ bool activate_runtime(ProbeContext &context, const char *request_id);
 bool stop_runtime(ProbeContext &context, const char *request_id);
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id);
 #include "shared/runtime/module/runtime_feature_modules.inc"
-#include "modules/catch_spin/scan_map.inc"
 #include "shared/runtime/control/runtime_control.inc"
 }  // namespace
 

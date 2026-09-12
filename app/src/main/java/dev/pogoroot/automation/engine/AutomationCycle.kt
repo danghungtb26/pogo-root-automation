@@ -1,7 +1,5 @@
 package dev.pogoroot.automation.engine
 
-import android.util.Log
-import java.util.concurrent.atomic.AtomicLong
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
 import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
@@ -10,23 +8,15 @@ import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
 internal enum class CycleWait { NORMAL, WAIT_FOR_RESULT, WAIT_AFTER_ACTION }
 
 /**
- * One automation cycle: ensure the runtime is connected/ready, drain a pending
- * action result, and — only while the catch_spin cluster is armed — pull one
- * correlated SCAN_MAP world snapshot and dispatch the planned mutation. Owns the
- * per-session cycle counter. Extracted from [HeadlessAutomationEngine] so the loop
- * keeps only lifecycle + pacing.
+ * One controller cycle: ensure the runtime is connected/ready and drain native
+ * observations/results. Catch-spin scanning and mutation are owned by the native
+ * observer; this loop remains for encounter and maintenance modules.
  */
 internal class AutomationCycle(
     private val runtimeCoordinator: RuntimeLifecycleCoordinator,
     private val structuredController: StructuredAutomationController,
     private val statusReporter: HeadlessAutomationStatusReporter,
 ) {
-    private val snapshotCycle = AtomicLong(0L)
-
-    fun resetCycleCounter() {
-        snapshotCycle.set(0L)
-    }
-
     fun run(config: HeadlessAutomationConfig): CycleWait {
         if (!runtimeCoordinator.connected) {
             // Drop any stale game-adapter session before the broker/runtime
@@ -36,6 +26,20 @@ internal class AutomationCycle(
         var wait = CycleWait.NORMAL
         runtimeCoordinator.ensureRunning(config)
             .onSuccess { ready ->
+                val configSync = runtimeCoordinator.syncCatchSpinConfig(
+                    config = config,
+                    armed = CatchSpinArmState.isArmed(),
+                )
+                if (configSync.isFailure) {
+                    val error = configSync.exceptionOrNull()
+                    structuredController.stop()
+                    statusReporter.recordError(
+                        message = "catch_spin config sync: " +
+                            (error?.message ?: error?.javaClass?.simpleName ?: "unknown error"),
+                        runtimeSessionId = ready.runtimeSessionId,
+                    )
+                    return@onSuccess
+                }
                 if (!ready.strongIdentityVerified || ready.capabilities.isEmpty()) {
                     // START is intentionally probe-only. Do not let the structured
                     // adapter refresh or submit commands until the delayed automatic
@@ -44,28 +48,12 @@ internal class AutomationCycle(
                     statusReporter.publishRuntimeDiagnosticPending(ready.runtimeSessionId)
                 } else {
                     val wasAwaitingAction = structuredController.awaitingActionResult()
-                    val beforeScan = tickAndPublish(config, "runtime bridge")
-                    if (beforeScan && structuredController.awaitingActionResult()) {
+                    val tickSucceeded = tickAndPublish(config, "runtime bridge")
+                    if (tickSucceeded && structuredController.awaitingActionResult()) {
                         wait = CycleWait.WAIT_FOR_RESULT
                     }
-                    if (beforeScan && wasAwaitingAction && wait != CycleWait.WAIT_FOR_RESULT) {
+                    if (tickSucceeded && wasAwaitingAction && wait != CycleWait.WAIT_FOR_RESULT) {
                         wait = CycleWait.WAIT_AFTER_ACTION
-                    }
-                    // The runtime stays connected/warm while Pokémon GO is
-                    // foreground, but the SCAN_MAP cycle (and its counter) only
-                    // starts once the catch_spin cluster is armed. While disarmed we
-                    // neither scan nor dispatch.
-                    if (wait == CycleWait.NORMAL && CatchSpinArmState.isArmed()) {
-                        val cycle = snapshotCycle.incrementAndGet()
-                        runtimeCoordinator.requestCatchSpinScan(cycle)
-                            .onFailure { error ->
-                                Log.w(
-                                    LOG_TAG,
-                                    "automation SCAN_MAP failed cycle=$cycle " +
-                                        "error=${error.message ?: error::class.java.simpleName}",
-                                )
-                            }
-                        tickAndPublish(config, "runtime scan response")
                     }
                 }
             }
@@ -94,7 +82,4 @@ internal class AutomationCycle(
         return result.isSuccess
     }
 
-    private companion object {
-        const val LOG_TAG = "PogoRootAutomation"
-    }
 }

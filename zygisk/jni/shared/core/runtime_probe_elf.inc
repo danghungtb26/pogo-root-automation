@@ -267,6 +267,9 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(runtime_class_init, Il2CppRuntimeClassInit, "il2cpp_runtime_class_init");
     RESOLVE(runtime_invoke, Il2CppRuntimeInvoke, "il2cpp_runtime_invoke");
     RESOLVE(string_new, Il2CppStringNew, "il2cpp_string_new");
+    RESOLVE(gchandle_new, Il2CppGcHandleNew, "il2cpp_gchandle_new");
+    RESOLVE(gchandle_get_target, Il2CppGcHandleGetTarget, "il2cpp_gchandle_get_target");
+    RESOLVE(gchandle_free, Il2CppGcHandleFree, "il2cpp_gchandle_free");
 #undef RESOLVE
 
     const bool available = has_core_il2cpp_api(*api);

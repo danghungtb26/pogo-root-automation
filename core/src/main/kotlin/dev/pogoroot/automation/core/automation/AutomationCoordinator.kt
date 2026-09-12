@@ -1,6 +1,5 @@
 package dev.pogoroot.automation.core.automation
 
-import dev.pogoroot.automation.core.automation.modules.CatchSpinActionPlanner
 import dev.pogoroot.automation.core.automation.modules.DiscardActionPlanner
 import dev.pogoroot.automation.core.automation.modules.EncounterActionPlanner
 import dev.pogoroot.automation.core.automation.modules.ModuleActionPlanner
@@ -27,13 +26,6 @@ data class AutomationSnapshot(
      * forced to farm balls. Cleared once a spin completes.
      */
     val outOfBalls: Boolean = false,
-    /**
-     * Runtime master arm for the catch_spin cluster (volatile, default off). While
-     * false the catch_spin planner produces no catch/spin actions regardless of the
-     * autoCatch/autoSpin behaviour flags. Set by the controller from the in-memory
-     * arm switch (the overlay's Automation button).
-     */
-    val catchSpinArmed: Boolean = false,
 )
 
 /**
@@ -53,7 +45,6 @@ class AutomationCoordinator(
         DiscardActionPlanner(),
         TransferActionPlanner(),
         EncounterActionPlanner(),
-        CatchSpinActionPlanner(),
     ),
     private val catchPlanner: CatchPlanner = CatchPlanner(),
 ) {
@@ -67,10 +58,6 @@ class AutomationCoordinator(
             policy = policy,
             encounterCatchDecision = encounterCatchDecision(snapshot, policy),
             overworldTargetSpawn = target,
-            // A catch (direct-map) or an open-encounter was intended this cycle;
-            // catch_spin uses this to force a spin when the pouch is out of balls.
-            overworldCatchIntended = target != null &&
-                ((policy.autoCatch && policy.catchPolicy.catchAll) || policy.autoEncounter),
         )
         return planners.flatMap { it.plan(context) }
     }

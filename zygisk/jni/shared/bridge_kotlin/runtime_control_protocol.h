@@ -12,7 +12,7 @@ constexpr uint32_t kPayloadVersion = 1U;
 constexpr uint32_t kMarker = 0x52544354U;  // ASCII "RTCT"
 
 // Runtime lifecycle control actions only. Feature-module control actions (e.g.
-// SCAN_MAP) are NOT listed here: they are plain wire numbers owned by a module's
+// catch-spin CONFIG_SET) are NOT listed here: they are plain wire numbers owned by a module's
 // declared control_actions and routed via the module owner map, exactly like
 // gameplay action tags. The transport carries the action as a raw number
 // (Request::action_wire) and never whitelists it.
@@ -20,7 +20,7 @@ enum class Action : uint32_t {
     kStart = 1U,
     kStop = 2U,
     kDiagnostic = 3U,
-    // 4U (snapshot) retired; 5U (scan map) is a module-owned control action.
+    // 4U (snapshot) and 5U (legacy scan) are retired.
 };
 
 struct Request {

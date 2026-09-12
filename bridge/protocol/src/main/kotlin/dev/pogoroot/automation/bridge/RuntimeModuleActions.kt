@@ -10,6 +10,6 @@ package dev.pogoroot.automation.bridge
  * `RuntimeFeatureModuleCatalog`, which references these values.
  */
 enum class ModuleControlAction(val wireValue: Int, val owner: RuntimeFeatureModule) {
-    /** catch_spin's per-cycle world-snapshot pull (nearby/forts/inventory/player). */
-    SCAN_MAP(5, RuntimeFeatureModule.CATCH_SPIN),
+    /** Replace the validated catch_spin runtime configuration snapshot. */
+    CATCH_SPIN_CONFIG_SET(6, RuntimeFeatureModule.CATCH_SPIN),
 }

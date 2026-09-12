@@ -82,6 +82,12 @@ MainThreadActionOutcome request_main_thread_direct_catch(
     );
 }
 
+MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &context) {
+    return request_main_thread_direct_action(
+        context, MainThreadTaskType::kPollDirectCatch, 0U, ""
+    );
+}
+
 MainThreadActionOutcome request_main_thread_spin(
     ProbeContext &context,
     const std::string &fort_id

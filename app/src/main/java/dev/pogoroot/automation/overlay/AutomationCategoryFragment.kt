@@ -64,6 +64,7 @@ class AutomationCategoryFragment : Fragment() {
         val config = host.repository.read()
         val mapTapWalk = switch(host, "Walk to verified map taps", config.mapTapWalkEnabled)
         val autoCatch = switch(host, "Auto catch", config.autoCatch)
+        val catchAll = switch(host, "Catch all nearby Pokémon", config.catchAll)
         val throwQualityGroup = RadioGroup(host).apply { orientation = RadioGroup.VERTICAL }
         val throwQualityOptions = ThrowQualityTarget.entries.map { target ->
             target to RadioButton(host).apply {
@@ -84,6 +85,7 @@ class AutomationCategoryFragment : Fragment() {
             addView(description(host, "Only verified MAP_TARGET observations from the exact runtime binding can start a walk."))
             addView(mapTapWalk)
             addView(autoCatch)
+            addView(catchAll)
             addView(description(host, "Auto throw quality is a client-owned request. Excellent is used only when the exact runtime advertises THROW_CONTROL and OBSERVE_THROW_OUTCOME; it is not a guaranteed catch."))
             addView(throwQualityGroup)
             addView(description(host, "Guaranteed catch from a user's throw is not available in this runtime: a miss remains a MISSED attempt and is never rewritten as CAUGHT."))
@@ -100,6 +102,7 @@ class AutomationCategoryFragment : Fragment() {
                 current.copy(
                     mapTapWalkEnabled = mapTapWalk.isChecked,
                     autoCatch = autoCatch.isChecked,
+                    catchAll = catchAll.isChecked,
                     catchThrowQuality = throwQualityOptions.first { it.second.isChecked }.first,
                     autoCloseCatchPreview = autoCloseCatchPreview.isChecked,
                     autoSpin = autoSpin.isChecked,

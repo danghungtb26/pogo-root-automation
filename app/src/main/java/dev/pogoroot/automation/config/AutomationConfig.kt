@@ -21,7 +21,11 @@ enum class BerryMode {
 data class HeadlessAutomationConfig(
     /** Compatibility field; the live master switch is [AutomationRunState]. */
     val enabled: Boolean = false,
+    /** Monotonic persisted revision used when synchronizing config to native. */
+    val configRevision: Long = DEFAULT_CONFIG_REVISION,
     val autoCatch: Boolean = true,
+    /** Direct-map catch filter. Nearby observations currently support catch-all only. */
+    val catchAll: Boolean = true,
     val catchThrowQuality: ThrowQualityTarget = ThrowQualityTarget.ANY,
     val catchCurvePreference: CurvePreference = CurvePreference.ANY,
     val catchEncounterMode: EncounterMode = EncounterMode.STANDARD,
@@ -50,6 +54,8 @@ data class HeadlessAutomationConfig(
     val structuredAllowedBuildFingerprints: Set<String> = emptySet(),
 ) {
     companion object {
+        const val DEFAULT_CONFIG_REVISION = 1L
+
         // Common Poké Ball / berry limits. Users can override these from overlay settings.
         val DEFAULT_DISCARD_LIMITS = mapOf(
             1 to 200,   // Poké Ball
@@ -72,7 +78,12 @@ class AutomationConfigRepository(context: Context) {
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
         // The master switch is process-local. A cold start must always be off.
         enabled = false,
+        configRevision = prefs.getLong(
+            KEY_CONFIG_REVISION,
+            HeadlessAutomationConfig.DEFAULT_CONFIG_REVISION,
+        ).coerceAtLeast(HeadlessAutomationConfig.DEFAULT_CONFIG_REVISION),
         autoCatch = prefs.getBoolean(KEY_AUTO_CATCH, true),
+        catchAll = prefs.getBoolean(KEY_CATCH_ALL, true),
         catchThrowQuality = enumPreference(KEY_THROW_QUALITY, ThrowQualityTarget.ANY),
         catchCurvePreference = enumPreference(KEY_THROW_CURVE, CurvePreference.ANY),
         catchEncounterMode = enumPreference(KEY_CATCH_ENCOUNTER_MODE, EncounterMode.STANDARD),
@@ -109,13 +120,23 @@ class AutomationConfigRepository(context: Context) {
             .toSet(),
     )
 
+    @Synchronized
     fun update(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig): HeadlessAutomationConfig {
-        val next = transform(read())
+        val current = read()
+        val transformed = transform(current)
+        val nextRevision = if (current.configRevision == Long.MAX_VALUE) {
+            HeadlessAutomationConfig.DEFAULT_CONFIG_REVISION
+        } else {
+            current.configRevision + 1L
+        }
+        val next = transformed.copy(configRevision = nextRevision)
         prefs.edit()
             // Never persist the volatile master switch, including a stale value
             // written by an older APK.
             .remove(KEY_ENABLED)
+            .putLong(KEY_CONFIG_REVISION, next.configRevision)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
+            .putBoolean(KEY_CATCH_ALL, next.catchAll)
             .putString(KEY_THROW_QUALITY, next.catchThrowQuality.name)
             .putString(KEY_THROW_CURVE, next.catchCurvePreference.name)
             .putString(KEY_CATCH_ENCOUNTER_MODE, next.catchEncounterMode.name)
@@ -192,7 +213,9 @@ class AutomationConfigRepository(context: Context) {
     companion object {
         private const val PREFS_NAME = "headless_automation"
         private const val KEY_ENABLED = "enabled"
+        private const val KEY_CONFIG_REVISION = "config_revision"
         private const val KEY_AUTO_CATCH = "auto_catch"
+        private const val KEY_CATCH_ALL = "catch_all"
         private const val KEY_THROW_QUALITY = "catch_throw_quality"
         private const val KEY_THROW_CURVE = "catch_throw_curve"
         private const val KEY_CATCH_ENCOUNTER_MODE = "catch_encounter_mode"

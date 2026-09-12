@@ -25,7 +25,8 @@ val EncounterModuleDescriptor = RuntimeFeatureModuleDescriptor(
     executionMode = ExecutionMode.EXCLUSIVE,
     // Ignores the master arm — driven purely by encounter-shaping config.
     isActive = {
-        it.config.berryMode != BerryMode.NONE ||
+        (it.config.autoEncounter && !(it.config.autoCatch && it.config.catchAll)) ||
+            it.config.berryMode != BerryMode.NONE ||
             it.config.catchThrowQuality != ThrowQualityTarget.ANY ||
             it.config.catchCurvePreference != CurvePreference.ANY
     },

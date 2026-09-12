@@ -3,7 +3,7 @@ package dev.pogoroot.automation.pogo
 import java.io.ByteArrayInputStream
 import java.io.DataInputStream
 
-/** Decodes the single correlated SCAN_MAP response used by catch/spin automation. */
+/** Decodes native catch-spin snapshot telemetry for the other controller modules. */
 object RuntimeCatchSpinPayloadCodec {
     private const val MAGIC = 0x504F4743
     private const val NEARBY_PRESENT = 1

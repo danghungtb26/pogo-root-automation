@@ -59,6 +59,7 @@ class RuntimeLifecycleCoordinator(
     @Volatile private var lastError: String? = null
     private var nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
     private val modules = linkedMapOf<RuntimeFeatureModule, RuntimeFeatureModuleSnapshot>()
+    private val catchSpinConfigDispatcher = CatchSpinConfigDispatcher(bridge)
 
     val connected: Boolean
         get() = bridge.connected
@@ -70,6 +71,7 @@ class RuntimeLifecycleCoordinator(
             activeRuntimeSessionId != ready.runtimeSessionId
         if (sessionChanged) {
             resetModules()
+            resetCatchSpinConfig()
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
@@ -89,6 +91,7 @@ class RuntimeLifecycleCoordinator(
             state = RuntimeControlState.RUNNING
             lastError = null
             resetModules()
+            resetCatchSpinConfig()
         }
 
         var advertisedReady = bridge.currentRuntimeReady() ?: ready
@@ -123,6 +126,7 @@ class RuntimeLifecycleCoordinator(
             state = RuntimeControlState.DETACHED
             lastError = null
             resetModules()
+            resetCatchSpinConfig()
             return@runCatching
         }
 
@@ -139,6 +143,7 @@ class RuntimeLifecycleCoordinator(
         state = RuntimeControlState.ATTACHED_IDLE
         lastError = null
         resetModules()
+        resetCatchSpinConfig()
     }.onFailure(::recordFailure)
 
     @Synchronized
@@ -162,15 +167,23 @@ class RuntimeLifecycleCoordinator(
         lastError = null
     }.onFailure(::recordFailure)
 
+    /**
+     * Push the latest Kotlin-owned snapshot into the enabled native catch_spin
+     * module. The revision and session cache make this edge-triggered: a config
+     * update is sent once, then native remains the runtime source for this session.
+     */
     @Synchronized
-    fun requestCatchSpinScan(cycleId: Long): Result<Unit> = runCatching {
-        Log.i(LOG_TAG, "automation SCAN_MAP request cycle=$cycleId")
-        bridge.requestRuntimeScanMap(cycleId).getOrThrow()
-    }
-
-    /** Compatibility entry point for callers that still use the old name. */
-    @Synchronized
-    fun requestWorldSnapshot(cycleId: Long): Result<Unit> = requestCatchSpinScan(cycleId)
+    fun syncCatchSpinConfig(
+        config: HeadlessAutomationConfig,
+        armed: Boolean,
+    ): Result<Unit> = runCatching {
+        val module = modules[RuntimeFeatureModule.CATCH_SPIN]
+        catchSpinConfigDispatcher.sync(
+            config = config,
+            armed = armed,
+            moduleEnabled = module?.state == RuntimeFeatureModuleState.ENABLED,
+        ).getOrThrow()
+    }.onFailure(::recordFailure)
 
     @Synchronized
     fun snapshot(): RuntimeControlSnapshot = RuntimeControlSnapshot(
@@ -201,6 +214,7 @@ class RuntimeLifecycleCoordinator(
         nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.DETACHED
         resetModules()
+        resetCatchSpinConfig()
     }
 
     private fun syncModules(
@@ -340,6 +354,10 @@ class RuntimeLifecycleCoordinator(
         }
     }
 
+    private fun resetCatchSpinConfig() {
+        catchSpinConfigDispatcher.reset()
+    }
+
     private fun recordFailure(error: Throwable) {
         lastError = error.message ?: error::class.java.simpleName
         if (bridge.connected) {
@@ -354,6 +372,7 @@ class RuntimeLifecycleCoordinator(
             nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             resetModules()
+            resetCatchSpinConfig()
         }
     }
 

@@ -9,7 +9,6 @@ import dev.pogoroot.automation.pogo.PogoGameAdapter
 
 internal fun PogoGameAdapter.readStructuredSnapshot(
     outOfBalls: Boolean,
-    catchSpinArmed: Boolean,
     mergeStorage: (PokemonStorageSnapshot?) -> PokemonStorageSnapshot?,
     excludedSpawnIds: Set<String> = emptySet(),
 ): AutomationSnapshot {
@@ -56,7 +55,6 @@ internal fun PogoGameAdapter.readStructuredSnapshot(
         inventory = inventory,
         storage = mergeStorage(runtimeStorage),
         outOfBalls = outOfBalls,
-        catchSpinArmed = catchSpinArmed,
     )
 }
 

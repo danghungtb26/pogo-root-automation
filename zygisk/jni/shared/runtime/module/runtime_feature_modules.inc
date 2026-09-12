@@ -54,6 +54,7 @@ public:
     virtual bool handle_control_action(
         ProbeContext & /*context*/,
         uint32_t /*control_action*/,
+        const std::vector<uint8_t> & /*command*/,
         const char * /*request_id*/,
         uint64_t /*cycle_id*/
     ) {
@@ -384,12 +385,13 @@ GameplayDispatchStatus dispatch_gameplay_action(
     return GameplayDispatchStatus::kHandled;
 }
 
-// Route a control action to the module that owns it (e.g. SCAN_MAP -> catch_spin,
+// Route a control action to the module that owns it (e.g. CONFIG_SET -> catch_spin,
 // START/STOP/DIAGNOSTIC -> runtime-core). Returns
 // the module handler's result, or a fail-closed rejection if unowned.
 bool dispatch_control_action(
     ProbeContext &context,
     uint32_t control_action,
+    const std::vector<uint8_t> &command,
     const char *request_id,
     uint64_t cycle_id
 ) {
@@ -402,6 +404,6 @@ bool dispatch_control_action(
             "no runtime feature module owns this control action"
         );
     }
-    return owner->handle_control_action(context, control_action, request_id, cycle_id);
+    return owner->handle_control_action(context, control_action, command, request_id, cycle_id);
 }
 }  // namespace pogo_runtime_module

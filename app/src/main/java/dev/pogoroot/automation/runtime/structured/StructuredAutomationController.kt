@@ -14,7 +14,6 @@ import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
-import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -28,7 +27,6 @@ import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.config.toCorePolicy
 import dev.pogoroot.automation.data.LastActiveGameAction
-import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.AutomationEventType
@@ -62,7 +60,6 @@ class StructuredAutomationController(
     )
     private var connected = false
     private var processedObservationSeq = 0L
-    private var processedScanCycleId = 0L
     private var lastAction: String? = null
     private var lastError: String? = null
     private var outOfBalls = false
@@ -135,37 +132,16 @@ class StructuredAutomationController(
                             observationSeq = event.messageSeq
                             continue
                         }
-                        val scanCycleId = source.selectedScanCycleId()
-                        if (event.observationType ==
-                            dev.pogoroot.automation.bridge.ObservationType.REQUEST_CATCH_SPIN
-                        ) {
-                            if (scanCycleId == null || scanCycleId <= processedScanCycleId) {
-                                Log.w(
-                                    LOG_TAG,
-                                    "automation REQUEST_CATCH_SPIN ignored stale cycle=$scanCycleId " +
-                                        "last=$processedScanCycleId seq=${event.messageSeq}",
-                                )
-                                processedObservationSeq = event.messageSeq
-                                observationSeq = event.messageSeq
-                                continue
-                            }
-                            Log.i(
-                                LOG_TAG,
-                                "automation REQUEST_CATCH_SPIN received cycle=$scanCycleId " +
-                                    "seq=${event.messageSeq}",
-                            )
-                        }
                         val current = source.runtimeMetadata ?: error("runtime session disappeared")
                         val snapshot = adapter.readStructuredSnapshot(
                             outOfBalls = outOfBalls,
-                            catchSpinArmed = CatchSpinArmState.isArmed(),
                             mergeStorage = wildState::mergePendingWildTransfers,
                             excludedSpawnIds = requestedCatchPokemonIds,
                         )
                         Log.i(
                             LOG_TAG,
                             "automation filter input seq=${event.messageSeq} " +
-                                "type=${event.observationType} cycle=${scanCycleId ?: "none"} " +
+                                "type=${event.observationType} " +
                                 "lifecycle=${snapshot.lifecycleState} " +
                                 "nearby=${snapshot.nearby?.spawns?.size ?: "unavailable"} " +
                                 "forts=${snapshot.forts?.forts?.size ?: "unavailable"} " +
@@ -228,7 +204,6 @@ class StructuredAutomationController(
                                     "action=${it.action}",
                             )
                         }
-                        if (scanCycleId != null) processedScanCycleId = scanCycleId
                         processedObservationSeq = event.messageSeq
                         observationSeq = event.messageSeq
                     } finally {
@@ -268,7 +243,6 @@ class StructuredAutomationController(
         connected = false
         resetRunnerOnNextAttach = true
         processedObservationSeq = 0L
-        processedScanCycleId = 0L
         requestedCatchPokemonIds.clear()
         outOfBalls = false
         latestPlayerPosition = null
@@ -288,7 +262,6 @@ class StructuredAutomationController(
         runner.attach(identity, preserveRecoveryState = !resetRunnerOnNextAttach).getOrThrow()
         resetRunnerOnNextAttach = false
         processedObservationSeq = 0L
-        processedScanCycleId = 0L
         latestPlayerPosition = null
         recordedGameActionCommands.clear()
         catchLabelsByCommand.clear()
@@ -358,28 +331,10 @@ class StructuredAutomationController(
             ),
         ).onFailure { lastError = it.message }
         val catchAction = request.action as? AutomationAction.Catch
-        val holdDirectCatchResult = resultStatus.isSuccess &&
-            phase == ActionExecutionPhase.INDETERMINATE &&
-            catchAction?.mode == CatchMode.DIRECT_MAP
-        if (holdDirectCatchResult) {
-            Log.w(
-                LOG_TAG,
-                "automation direct catch held command=${request.commandId} " +
-                    "encounter=${catchAction.encounterId}; outcome observer unavailable; " +
-                    "no further catch will be dispatched",
-            )
-            eventSink.publish(
-                AutomationEvent(
-                    AutomationEventType.ERROR,
-                    "Direct catch submitted for ${catchAction.encounterId}; " +
-                        "waiting for authoritative outcome before continuing",
-                ),
-            )
-        }
         if (resultStatus.isSuccess && phase.mayHaveRun && phase != ActionExecutionPhase.ACCEPTED) {
             recordGameActionIfNeeded(request, result)
         }
-        if (resultStatus.isSuccess && phase.isTerminal && !holdDirectCatchResult) {
+        if (resultStatus.isSuccess && phase.isTerminal) {
             lastAction = request.action::class.simpleName
             val label = if (request.action is AutomationAction.Catch) {
                 catchLabelsByCommand[request.commandId] ?: request.action.encounterId()

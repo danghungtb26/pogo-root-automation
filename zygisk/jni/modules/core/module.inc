@@ -29,6 +29,7 @@ public:
     bool handle_control_action(
         ProbeContext &context,
         uint32_t control_action,
+        const std::vector<uint8_t> & /*command*/,
         const char *request_id,
         uint64_t /*cycle_id*/
     ) override {

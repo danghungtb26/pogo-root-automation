@@ -6,11 +6,18 @@ The controller UI is optional. Runtime attachment, orchestration, and gameplay f
 
 The native side uses one Zygisk host inside the target process and independently controlled C++ feature modules. This avoids repeating Zygisk/process/bridge setup while preserving a clean module boundary that can later move behind separate shared libraries if required.
 
-The core design rule for gameplay automation is:
+The general design rule for encounter automation is:
 
 > **Native decides whether an action can be performed safely; the Kotlin service decides whether the action should be performed.**
 
 That rule keeps game-runtime mechanics in native code and keeps configurable automation policy in the service/core layer.
+
+Catch-spin is now the deliberate exception to the generic policy split: its
+simple catch-all policy is dispatched as a revisioned snapshot, and the native
+`catch_spin` observer owns tick cadence, map/inventory reads, filtering, target
+selection, direct catch, spin, settle, and fail-closed recovery. Kotlin still
+owns encounter-specific policy and maintenance modules, but it no longer plans
+or submits catch-spin mutations.
 
 ## Ownership
 
@@ -26,11 +33,8 @@ HeadlessAutomationService
   - reconnect/recovery
 
   StructuredAutomationController / policy layer
-  - consume observations
-  - filter candidates
-  - score/prioritize targets
-  - decide catch/spin/discard/transfer intent
-  - cooldown/retry/rate-limit policy
+  - consume observations for encounter/maintenance modules
+  - decide encounter/discard/transfer intent
         |
         v
 RuntimeBridgeClient
@@ -67,11 +71,11 @@ The service and native host intentionally do not share the same responsibility.
 | Read nearby Pokémon from game runtime | no | yes |
 | Read nearby PokéStops/Forts from game runtime | no | yes |
 | Normalize observations and publish them | no | yes |
-| Filter by species/config/rules | yes | no |
-| Score/prioritize Pokémon | yes | no |
-| Decide whether to catch or spin | yes | no |
-| Cooldown/rate-limit/retry policy | yes | no |
-| Choose the target spawn/fort | yes | no |
+| Filter by species/config/rules | encounter policy | native catch-all only |
+| Score/prioritize Pokémon | encounter policy | native deterministic selection |
+| Decide whether to catch or spin | encounter policy | native catch-spin |
+| Cooldown/rate-limit/retry policy | encounter policy | native catch-spin |
+| Choose the target spawn/fort | encounter policy | native catch-spin |
 | Resolve live IL2CPP object/binding | no | yes |
 | Verify current runtime/lifecycle state | no | yes |
 | Marshal work onto the required game/main thread | no | yes |
@@ -98,6 +102,8 @@ zygisk/jni/
   modules/
     catch_spin/
       module.inc
+      config.inc                     # revisioned native policy mirror
+      coordinator.inc                # tick -> read -> filter -> catch/spin
       catch.inc
       spin.inc
       open_encounter.inc
@@ -492,7 +498,9 @@ Spin(fortId)
 native validates live runtime state and executes/rejects
 ```
 
-Native code reports what is currently observable and executable. Kotlin decides whether spinning the fort is desirable at that moment.
+For catch-spin, native performs the fort/catch desirability decision from the
+revisioned simple policy snapshot. Kotlin remains the policy owner for the
+encounter flow and maintenance modules.
 
 ## Command validation rule
 
@@ -670,9 +678,9 @@ config.enabled = true
     -> host START if needed
     -> derive desired modules from config
     -> ENABLE/DISABLE modules independently
-    -> receive observations
-    -> filter/score/select targets in Kotlin
-    -> emit guarded AutomationAction commands
+    -> receive native telemetry for encounter/maintenance modules
+    -> native catch_spin scans/filters/selects/actions autonomously
+    -> Kotlin emits guarded commands only for other modules
 ```
 
 Changing a persisted setting while the service stays alive changes only the affected native module on the next synchronization cycle.
@@ -693,32 +701,24 @@ then autoDiscard=true
     CATCH_SPIN/ENCOUNTER keep their own state
 ```
 
-## Recommended CATCH_SPIN service structure
+## Current CATCH_SPIN structure
 
-The policy side should remain replaceable and testable without touching native bindings. A recommended direction is:
-
-```text
-app/.../automation/catchspin/
-  CatchSpinCoordinator.kt
-  PokemonTargetSelector.kt
-  PokemonFilter.kt
-  PokemonScorer.kt
-  FortSelector.kt
-  CatchSpinPolicy.kt
-```
-
-Native remains focused on runtime integration:
+The catch-spin decision is now replaceable inside the native module without
+adding a second Kotlin planner:
 
 ```text
 zygisk/jni/modules/catch_spin/
   module.inc
+  config.inc
+  coordinator.inc
   catch.inc
   spin.inc
   open_encounter.inc
-  [observation-specific implementation as it is further separated]
 ```
 
-The exact file layout may evolve, but policy must stay above the bridge and game-runtime mechanics must stay below it.
+`config.inc` validates the policy snapshot and `coordinator.inc` owns the native
+tick/read/filter/action state machine. Encounter-specific policy remains above
+the bridge because it needs richer encounter data.
 
 ## Recovery rules
 
@@ -728,7 +728,8 @@ The exact file layout may evolve, but policy must stay above the bridge and game
 - Lost ENABLE result: retry is safe because module enable is idempotent.
 - Lost DISABLE result: service can send DISABLE again.
 - Module unavailable: record `UNAVAILABLE`; do not fail unrelated modules.
-- Stale gameplay target: native rejects it; service selects again from a newer observation.
+- Stale catch-spin target: native rejects it and selects again from a newer scan.
+- Stale encounter target: native rejects it; service selects again from a newer observation.
 - Runtime identity mismatch/expired request: fail closed.
 
 ## Debugging checkpoints
@@ -767,8 +768,8 @@ Before merge, validate the independent module behavior on the target rooted runt
 1. Launch the target app with automation disabled: modules register/load, host reaches `ATTACHED_IDLE`, and no module is active.
 2. Confirm the service receives one registration load/fail status per module for the runtime session.
 3. Enable only catch/spin: `CATCH_SPIN=ENABLED`, `ENCOUNTER=DISABLED`.
-4. Confirm nearby Pokémon and fort observations reach Kotlin while `CATCH_SPIN` is enabled.
-5. Confirm Kotlin selects a candidate and native does not autonomously choose a Pokémon.
+4. Confirm native catch-spin scans nearby Pokémon/forts and logs its own target/action decisions.
+5. Confirm Kotlin receives only optional snapshot telemetry and does not submit catch-spin actions.
 6. Open an encounter from a selected nearby candidate and confirm the service can perform a second policy check from `EncounterObservation` before sending Catch.
 7. Turn berry or non-default throw quality on: `ENCOUNTER` becomes enabled without restarting `CATCH_SPIN`.
 8. Turn throw assist off while catch/spin stays on: hooks remain safe pass-through and no throw-assist diagnostics are emitted.

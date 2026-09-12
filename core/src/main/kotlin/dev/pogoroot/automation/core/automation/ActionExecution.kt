@@ -172,11 +172,7 @@ internal val AutomationAction.isMutation: Boolean
 
 internal val AutomationAction.expectedLifecycle: GameLifecycleState?
     get() = when (this) {
-        is AutomationAction.Catch -> if (mode == CatchMode.DIRECT_MAP) {
-            GameLifecycleState.OVERWORLD
-        } else {
-            GameLifecycleState.ENCOUNTER
-        }
+        is AutomationAction.Catch -> GameLifecycleState.ENCOUNTER
 
         is AutomationAction.TakeEncounterSnapshot,
         is AutomationAction.UseBerry,
@@ -198,16 +194,12 @@ internal val AutomationAction.requiredCapabilities: Set<String>
         is AutomationAction.MoveTo -> setOf("MOVE")
         is AutomationAction.OpenEncounter -> setOf("OPEN_ENCOUNTER")
         is AutomationAction.Catch -> buildSet {
-            if (mode == CatchMode.DIRECT_MAP) {
-                add("DIRECT_CATCH")
-            } else {
-                add(if (closePreviewAfterCaught) "CATCH_AND_CLOSE_PREVIEW" else "CATCH")
-                if (!throwProfile.isDefault) {
-                    add("THROW_CONTROL")
-                    if (throwProfile.requiresStructuredOutcome) add("OBSERVE_THROW_OUTCOME")
-                }
-                if (throwProfile.encounterMode == EncounterMode.AR_PLUS) add("AR_ENCOUNTER")
+            add(if (closePreviewAfterCaught) "CATCH_AND_CLOSE_PREVIEW" else "CATCH")
+            if (!throwProfile.isDefault) {
+                add("THROW_CONTROL")
+                if (throwProfile.requiresStructuredOutcome) add("OBSERVE_THROW_OUTCOME")
             }
+            if (throwProfile.encounterMode == EncounterMode.AR_PLUS) add("AR_ENCOUNTER")
         }
         is AutomationAction.TakeEncounterSnapshot -> buildSet {
             add("SNAPSHOT_DURING_ENCOUNTER")

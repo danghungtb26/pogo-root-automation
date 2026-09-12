@@ -33,7 +33,7 @@ enum class ModuleTriggerType {
     /** Driven purely by native-pushed lifecycle/observation events; no own cadence. */
     REACTIVE,
 
-    /** Self-emits a request on its own cadence (e.g. catch_spin's SCAN_MAP pull). */
+    /** Self-emits work on its own cadence (native modules may tick internally). */
     PERIODIC,
 }
 
@@ -121,9 +121,8 @@ object RuntimeFeatureModuleCatalog {
      * The module that consumes [observationType], or null when the type is
      * kernel-level (lifecycle/diagnostics) and owned by no feature module.
      *
-     * NEARBY/FORTS/REQUEST_CATCH_SPIN are catch_spin's world-snapshot inputs;
-     * INVENTORY feeds discard and POKEMON_STORAGE feeds transfer (native pushes
-     * these independently — see docs/automation-flow.md Phần 2 finding).
+     * REQUEST_CATCH_SPIN is a native catch-spin snapshot telemetry event. The
+     * catch-spin decision itself is never reconstructed in Kotlin.
      */
     fun ownerOfObservationType(observationType: ObservationType): RuntimeFeatureModule? =
         when (observationType) {

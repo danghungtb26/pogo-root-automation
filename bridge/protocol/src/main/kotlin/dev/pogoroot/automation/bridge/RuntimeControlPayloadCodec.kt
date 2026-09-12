@@ -7,7 +7,7 @@ import java.io.DataOutputStream
 
 /**
  * Runtime lifecycle control actions only. Feature-module control actions (e.g.
- * SCAN_MAP) are declared per-module in [ModuleControlAction], not here, so module
+ * feature controls are declared per-module in [ModuleControlAction], not here, so module
  * actions stay out of the shared enum. The wire carries the action as a raw number
  * ([RuntimeControlRequest.actionWire]); the native dispatcher validates it against
  * this lifecycle set plus the module owner map, like a gameplay action tag.

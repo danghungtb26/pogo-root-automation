@@ -1,9 +1,8 @@
-// catch_spin owns the map-automation actions only: direct-map catch (12) and
-// spin (4). The encounter-based flow (open/throw/snapshot/berry) belongs to the
-// encounter module.
+// catch_spin owns the native map-automation actions: direct-map catch (12) and
+// spin (4). Kotlin no longer plans or submits either action.
 constexpr uint32_t kCatchSpinActionTags[] = {4U, 12U};
-// Control actions: 5 = SCAN_MAP (pogo_runtime_control::Action::kScanMap).
-constexpr uint32_t kCatchSpinControlActions[] = {5U};
+// Control action 6 applies the complete runtime-owned policy snapshot.
+constexpr uint32_t kCatchSpinControlActions[] = {6U};
 
 class CatchSpinModule final : public RuntimeFeatureModuleBase {
 public:
@@ -22,14 +21,20 @@ public:
     }
 
     bool on_enable(ProbeContext &context) override {
-        // Nearby/forts are read on demand via the SCAN_MAP pull path; there is no
-        // map-query inline hook to install.
+        // The observer owns the complete scan/filter/action loop. No Kotlin pull
+        // request is needed after this module is enabled.
         (void)context;
+        reset_runtime_catch_spin_coordinator();
         return true;
     }
 
     void on_disable(ProbeContext &context) override {
         (void)context;
+        reset_runtime_catch_spin_coordinator();
+    }
+
+    void observe(ObserverTickContext &tick) override {
+        run_runtime_catch_spin_observer_tick(tick);
     }
 
     ModuleActionOwnership action_ownership() const override {
@@ -53,28 +58,39 @@ public:
         // owner map only routes 12 here; execute_runtime_catch takes the direct path.
         if (parse_runtime_catch_command(command, &action)) {
             *command_id = action.command_id;
-            *result = execute_runtime_catch(context, action);
+            RuntimeActionResult config_result;
+            if (!runtime_catch_spin_config_allows_action(action.action_tag, &config_result)) {
+                *result = std::move(config_result);
+            } else {
+                *result = execute_runtime_catch(context, action);
+            }
             return true;
         }
         if (parse_runtime_spin_command(command, &action)) {
             *command_id = action.command_id;
-            *result = execute_runtime_spin(context, action);
+            RuntimeActionResult config_result;
+            if (!runtime_catch_spin_config_allows_action(action.action_tag, &config_result)) {
+                *result = std::move(config_result);
+            } else {
+                *result = execute_runtime_spin(context, action);
+            }
             return true;
         }
         return false;
     }
 
-    // SCAN_MAP (control action 5, declared above) is this module's world-snapshot
-    // pull: it reads nearby/forts/inventory/player on the main thread and replies
-    // REQUEST_CATCH_SPIN. The map/inventory readers it calls stay shared runtime
-    // infra (main-thread bridge, map/inventory readers), not module-private state.
+    // CONFIG_SET remains the only control-plane input for the autonomous loop.
     bool handle_control_action(
         ProbeContext &context,
-        uint32_t /*control_action*/,  // only SCAN_MAP is owned
-        const char *request_id,
-        uint64_t cycle_id
+        uint32_t control_action,
+        const std::vector<uint8_t> &command,
+        const char * /*request_id*/,
+        uint64_t /*cycle_id*/
     ) override {
-        return run_runtime_scan_map(context, request_id, cycle_id);
+        if (control_action == pogo_runtime_catch_spin_config::kConfigSetAction) {
+            return apply_runtime_catch_spin_config(context, command);
+        }
+        return false;
     }
 };
 

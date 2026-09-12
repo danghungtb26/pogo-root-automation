@@ -17,14 +17,13 @@ also activates the out-of-balls → spin gate, which depends on
 
 ## Ball check is on-demand, not observed
 
-The catch-vs-spin ball decision does **not** use the inventory observation. The
-DIRECT_MAP catch always throws a Poké Ball, so the native catch executor reads
-`IItemBag.GetItemCount(Poké Ball)` **right before the throw**
-(`direct_catch_runtime_on_main_thread`); zero → it skips the throw and returns
-`MainThreadActionOutcome::kOutOfBalls` → result `out_of_balls`. The controller
-sets `AutomationSnapshot.outOfBalls`, and the coordinator then skips catching and
-forces a spin to farm balls (cleared once a spin completes). This keeps inventory
-observation out of the ball path entirely.
+The native catch-spin coordinator reads the inventory together with each map
+snapshot. The DIRECT_MAP catch always throws a Poké Ball, so an unavailable
+inventory source is treated as unknown and native does not catch. The current
+reader omits zero-count stacks, so a missing Poké Ball stack is interpreted as
+zero and switches the native decision to spinning to farm balls. The main-thread
+direct-catch path also retains its last-moment `kOutOfBalls` guard. Kotlin's
+`AutomationSnapshot.outOfBalls` remains only for the encounter throw flow.
 
 ## Observe: poll, not event-driven, and owned by the discard module
 
@@ -76,10 +75,12 @@ PogoGameAdapter.readInventory -> PogoInventoryMapper -> InventorySnapshot
     v
 AutomationCoordinator.plan
     -> InventoryPlanner (discard by InventoryPolicy.maxCountByItemId)
-    -> out-of-balls gate (catchBallCount, Poké Ball only)
     v
 AutomationAction.DiscardItem   (execution still blocked, see below)
 ```
+
+The catch-spin coordinator consumes its own native snapshot directly; the
+snapshot telemetry sent to Kotlin is not a catch/spin decision input.
 
 ## Native reader details
 

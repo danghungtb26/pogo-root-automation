@@ -139,6 +139,25 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         return MainThreadActionOutcome::kRejected;
     }
 
+    // SendEncounterRequest is asynchronous. Poll its retained Promise on this
+    // same main-thread task before looking for egws, so a second request cannot
+    // race the first response and TryCapture cannot run prematurely.
+    const RuntimeEncounterPromisePollResult encounter_promise_state =
+        poll_pending_encounter_request(context, encounter_id);
+    if (encounter_promise_state == RuntimeEncounterPromisePollResult::kWaiting) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime action direct map catch waiting for encounter promise id=%llu",
+            static_cast<unsigned long long>(encounter_id)
+        );
+        return MainThreadActionOutcome::kEncounterRequested;
+    }
+    if (encounter_promise_state == RuntimeEncounterPromisePollResult::kFailed ||
+        encounter_promise_state == RuntimeEncounterPromisePollResult::kTimedOut) {
+        return MainThreadActionOutcome::kIndeterminate;
+    }
+
     // These are readonly injected fields from the reverse-verified
     // MapPokemon_Fields layout. Do not call managed field helpers here: the
     // object is already exact-class verified and this path must not re-enter
@@ -184,6 +203,15 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     };
     void *encounter_out_proto = read_wild_field(kWildMapPokemonEncounterOutProtoOffset);
     if (encounter_out_proto == nullptr) {
+        if (encounter_promise_state == RuntimeEncounterPromisePollResult::kCompleted) {
+            __android_log_print(
+                ANDROID_LOG_INFO,
+                kLogTag,
+                "runtime encounter promise succeeded id=%llu but egws is not cached; retry",
+                static_cast<unsigned long long>(encounter_id)
+            );
+            return MainThreadActionOutcome::kEncounterRequested;
+        }
         void *location_provider = read_wild_field(kWildMapPokemonLocationProviderOffset);
         void *encounter_rpc_handler = read_wild_field(kWildMapPokemonEncounterRpcHandlerOffset);
         if (!kBackgroundEncounterEnabled || !binding.background_encounter_verified ||
@@ -211,7 +239,7 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
             map_pokemon,
             binding.map_pokemon_send_encounter_request
         );
-        api.runtime_invoke(
+        void *encounter_promise = api.runtime_invoke(
             binding.map_pokemon_send_encounter_request,
             map_pokemon,
             nullptr,
@@ -228,12 +256,27 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
             return MainThreadActionOutcome::kIndeterminate;
         }
         __android_log_print(
+            encounter_promise == nullptr ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime action background encounter returned id=%llu promise=%p exception=%p",
+            static_cast<unsigned long long>(encounter_id),
+            encounter_promise,
+            encounter_exception
+        );
+        if (encounter_promise == nullptr || !retain_pending_encounter_request(
+                context, encounter_id, encounter_promise)) {
+            return MainThreadActionOutcome::kIndeterminate;
+        }
+        __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
-            "runtime action background encounter requested id=%llu; retry after server response",
+            "runtime action background encounter requested id=%llu; promise retained; retry after completion",
             static_cast<unsigned long long>(encounter_id)
         );
         return MainThreadActionOutcome::kEncounterRequested;
+    }
+    if (encounter_promise_state == RuntimeEncounterPromisePollResult::kCompleted) {
+        clear_pending_encounter_request(context, "encounter_cache_ready");
     }
 
     void *spawn_point_id_object = invoke_runtime_method(
@@ -343,6 +386,15 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     // build so the completion/value field offsets can be read for the outcome
     // observer (Step 2). Read-only; safe to run every invocation.
     log_direct_catch_promise_layout(api, promise);
+    if (!retain_pending_direct_catch(context, encounter_id, promise)) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime direct map catch promise could not be retained id=%llu",
+            static_cast<unsigned long long>(encounter_id)
+        );
+        return MainThreadActionOutcome::kIndeterminate;
+    }
     return promise == nullptr
         ? MainThreadActionOutcome::kIndeterminate
         : MainThreadActionOutcome::kInvoked;

@@ -16,6 +16,9 @@ import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeControlRequest
+import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfig
+import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigPayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.bridge.RuntimeModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeModuleControlPayloadCodec
@@ -133,17 +136,30 @@ class RuntimeBridgeClient(
     fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
 
-    /** Pull one correlated map/inventory read for the catch/spin automation loop. */
-    fun requestRuntimeScanMap(cycleId: Long): Result<Unit> = runCatching {
-        require(cycleId > 0L) { "scan map cycle must be positive" }
-        val result = requestModuleControl(
-            action = ModuleControlAction.SCAN_MAP,
-            requestIdSuffix = "cycle-$cycleId",
-            cycleId = cycleId,
-        ).getOrThrow()
+    /** Apply the complete, revisioned catch_spin config to the native session. */
+    fun setCatchSpinConfig(config: RuntimeCatchSpinConfig): Result<Unit> = runCatching {
+        val ready = currentRuntimeReady() ?: connect().getOrThrow()
+        val requestId = "runtime-catch-spin-config-${config.configRevision}-${System.nanoTime()}"
+        val request = RuntimeCatchSpinConfigRequest(
+            runtimeSessionId = ready.runtimeSessionId,
+            requestId = requestId,
+            config = config,
+            expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
+            pid = ready.pid,
+            processName = ready.processName,
+            packageName = ready.packageName,
+            buildFingerprint = ready.buildFingerprint,
+        )
+        val result = awaitControlResult(requestId) {
+            sendPayload(
+                messageType = BridgeMessageType.COMMAND,
+                payload = RuntimeCatchSpinConfigPayloadCodec.encode(request).getOrThrow(),
+            )
+        }.getOrThrow()
         Log.i(
             LOG_TAG,
-            "runtime SCAN_MAP acknowledged cycle=$cycleId message=${result.message}",
+            "runtime catch_spin config acknowledged revision=${config.configRevision} " +
+                "phase=${result.phase} message=${result.message}",
         )
     }
 

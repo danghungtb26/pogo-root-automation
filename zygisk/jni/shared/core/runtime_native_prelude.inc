@@ -187,6 +187,12 @@ using Il2CppRuntimeObjectInit = void (*)(void *);
 using Il2CppRuntimeClassInit = void (*)(Il2CppClass *);
 using Il2CppRuntimeInvoke = void *(*)(const void *, void *, void **, void **);
 using Il2CppStringNew = void *(*)(const char *);
+// This build returns GC handles as tagged pointers, not 32-bit table indexes.
+// Keep the ABI-width value intact when passing it back to IL2CPP.
+using Il2CppGcHandle = uintptr_t;
+using Il2CppGcHandleNew = Il2CppGcHandle (*)(void *, bool);
+using Il2CppGcHandleGetTarget = void *(*)(Il2CppGcHandle);
+using Il2CppGcHandleFree = void (*)(Il2CppGcHandle);
 
 struct Il2CppApi {
     void *handle = nullptr;
@@ -233,6 +239,9 @@ struct Il2CppApi {
     Il2CppRuntimeClassInit runtime_class_init = nullptr;
     Il2CppRuntimeInvoke runtime_invoke = nullptr;
     Il2CppStringNew string_new = nullptr;
+    Il2CppGcHandleNew gchandle_new = nullptr;
+    Il2CppGcHandleGetTarget gchandle_get_target = nullptr;
+    Il2CppGcHandleFree gchandle_free = nullptr;
 };
 
 struct RuntimeBinding {
@@ -338,6 +347,7 @@ enum class MainThreadTaskType : uint32_t {
     kSpin = 7U,
     kReadInventory = 8U,
     kReadPlayerPosition = 9U,
+    kPollDirectCatch = 10U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -385,10 +395,24 @@ struct PendingDirectCatch {
     bool terminal = false;
     uint64_t encounter_id = 0U;
     std::string command_id;
+    Il2CppGcHandle promise_gc_handle = 0U;
+    uint64_t requested_at_ns = 0U;
+    uint32_t poll_count = 0U;
     uint32_t phase = 0U;
     uint32_t catch_outcome_wire = 0U;
+    std::string captured_pokemon_id;
     std::string error_code;
     std::string message;
+};
+
+struct PendingEncounterRequest {
+    bool active = false;
+    bool promise_completed = false;
+    uint64_t encounter_id = 0U;
+    Il2CppGcHandle promise_gc_handle = 0U;
+    void *completed_value = nullptr;
+    uint64_t requested_at_ns = 0U;
+    uint32_t poll_count = 0U;
 };
 
 struct MapDictionaryEntry {
@@ -425,12 +449,14 @@ struct ProbeContext {
     MainThreadBridge main_thread_bridge;
     std::mutex pending_direct_catch_mutex;
     PendingDirectCatch pending_direct_catch;
+    std::mutex pending_encounter_request_mutex;
+    PendingEncounterRequest pending_encounter_request;
     std::atomic<bool> observation_running{false};
     pthread_t observation_thread{};
     bool observation_thread_started = false;
     // Dirty-flag for the legacy push-observer path: set by the periodic fallback
     // tick so the observer re-reads the map only when needed (plus a rare
-    // reconcile). Unused in explicit SCAN_MAP pull mode. Starts true so the first
+    // reconcile). Unused in native module-owned snapshot mode. Starts true so the first
     // cycle always reads.
     std::atomic<bool> world_dirty{true};
 };
@@ -523,6 +549,40 @@ MainThreadActionOutcome request_main_thread_use_berry(
 MainThreadActionOutcome request_main_thread_direct_catch(
     ProbeContext &context,
     uint64_t encounter_id
+);
+
+MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &context);
+
+enum class RuntimeDirectCatchPromisePollResult : uint32_t {
+    kNoPending = 0U,
+    kWaiting = 1U,
+    kCompleted = 2U,
+    kFailed = 3U,
+    kTimedOut = 4U,
+};
+
+bool begin_pending_direct_catch(
+    ProbeContext &context,
+    const std::string &command_id,
+    uint64_t encounter_id
+);
+
+void abandon_pending_direct_catch(ProbeContext &context, const char *reason);
+
+bool retain_pending_direct_catch(
+    ProbeContext &context,
+    uint64_t encounter_id,
+    void *promise
+);
+
+
+RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
+    ProbeContext &context
+);
+
+bool consume_terminal_pending_direct_catch(
+    ProbeContext &context,
+    PendingDirectCatch *terminal
 );
 
 MainThreadActionOutcome request_main_thread_spin(

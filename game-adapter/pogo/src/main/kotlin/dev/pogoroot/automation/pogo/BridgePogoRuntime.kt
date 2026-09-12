@@ -9,7 +9,6 @@ import dev.pogoroot.automation.core.automation.ActionRequest
 import dev.pogoroot.automation.core.automation.AutomationAction
 import dev.pogoroot.automation.core.automation.AutomationActionResult
 import dev.pogoroot.automation.core.automation.BerryType
-import dev.pogoroot.automation.core.automation.CatchMode
 import dev.pogoroot.automation.core.model.GameLifecycleState
 
 data class PogoRuntimeMetadata(
@@ -26,7 +25,6 @@ private data class CachedRuntimeState(
     val encounter: RawEncounterObservation?,
     val forts: RawFortObservation?,
     val inventory: RawInventoryObservation?,
-    val scanCycleId: Long? = null,
 )
 
 /**
@@ -47,7 +45,6 @@ class BridgePogoRuntimeSource(
     private var encounter: RawEncounterObservation? = null
     private var forts: RawFortObservation? = null
     private var inventory: RawInventoryObservation? = null
-    private var lastScanCycleId: Long? = null
     private var lastError: String? = null
     private val pendingEvents = ArrayDeque<BridgeEvent>()
     private val observationStates = LinkedHashMap<Long, CachedRuntimeState>()
@@ -82,7 +79,6 @@ class BridgePogoRuntimeSource(
         encounter = null
         forts = null
         inventory = null
-        lastScanCycleId = null
         lastError = null
         pendingEvents.clear()
         observationStates.clear()
@@ -101,7 +97,6 @@ class BridgePogoRuntimeSource(
         encounter = null
         forts = null
         inventory = null
-        lastScanCycleId = null
         pendingEvents.clear()
         observationStates.clear()
         selectedObservationState = null
@@ -158,8 +153,6 @@ class BridgePogoRuntimeSource(
         selectedObservationState = observationStates[observationSeq]
             ?: error("observation state $observationSeq is no longer cached")
     }
-
-    fun selectedScanCycleId(): Long? = selectedObservationState?.scanCycleId
 
     fun clearObservationSelection() {
         selectedObservationState = null
@@ -254,7 +247,6 @@ class BridgePogoRuntimeSource(
             lifecycle = state
             if (state != GameLifecycleState.ENCOUNTER) encounter = null
         }
-        var scanCycleId: Long? = null
         when (event.observationType) {
             ObservationType.LIFECYCLE -> Unit
             ObservationType.NEARBY -> (if (structuredNearby) {
@@ -327,8 +319,6 @@ class BridgePogoRuntimeSource(
                     nearby = scan.nearby
                     forts = scan.forts
                     inventory = scan.inventory
-                    scanCycleId = scan.cycleId
-                    lastScanCycleId = scan.cycleId
                     if (scan.playerLatitude != null && scan.playerLongitude != null && nearby != null) {
                         nearby = nearby?.copy(
                             playerLatitude = scan.playerLatitude,
@@ -351,7 +341,7 @@ class BridgePogoRuntimeSource(
             -> Unit
         }
         observationStates[event.messageSeq] =
-            CachedRuntimeState(lifecycle, nearby, encounter, forts, inventory, scanCycleId)
+            CachedRuntimeState(lifecycle, nearby, encounter, forts, inventory)
         while (observationStates.size > MAX_OBSERVATION_STATES) {
             observationStates.remove(observationStates.entries.first().key)
         }
@@ -448,23 +438,19 @@ class BridgeBackedPogoActionExecutor(
         is AutomationAction.MoveTo -> setOf(GameCapability.MOVE)
         is AutomationAction.OpenEncounter -> setOf(GameCapability.OPEN_ENCOUNTER)
         is AutomationAction.Catch -> buildSet {
-            if (action.mode == CatchMode.DIRECT_MAP) {
-                add(GameCapability.DIRECT_CATCH)
+            add(if (action.closePreviewAfterCaught) {
+                GameCapability.CATCH_AND_CLOSE_PREVIEW
             } else {
-                add(if (action.closePreviewAfterCaught) {
-                    GameCapability.CATCH_AND_CLOSE_PREVIEW
-                } else {
-                    GameCapability.CATCH
-                })
-                if (!action.throwProfile.isDefault) {
-                    add(GameCapability.THROW_CONTROL)
-                    if (action.throwProfile.requiresStructuredOutcome) {
-                        add(GameCapability.OBSERVE_THROW_OUTCOME)
-                    }
+                GameCapability.CATCH
+            })
+            if (!action.throwProfile.isDefault) {
+                add(GameCapability.THROW_CONTROL)
+                if (action.throwProfile.requiresStructuredOutcome) {
+                    add(GameCapability.OBSERVE_THROW_OUTCOME)
                 }
-                if (action.throwProfile.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
-                    add(GameCapability.AR_ENCOUNTER)
-                }
+            }
+            if (action.throwProfile.encounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS) {
+                add(GameCapability.AR_ENCOUNTER)
             }
         }
         is AutomationAction.TakeEncounterSnapshot -> buildSet {
@@ -481,11 +467,7 @@ class BridgeBackedPogoActionExecutor(
     }
 
     private fun expectedLifecycle(action: AutomationAction): GameLifecycleState? = when (action) {
-        is AutomationAction.Catch -> if (action.mode == CatchMode.DIRECT_MAP) {
-            GameLifecycleState.OVERWORLD
-        } else {
-            GameLifecycleState.ENCOUNTER
-        }
+        is AutomationAction.Catch -> GameLifecycleState.ENCOUNTER
         is AutomationAction.TakeEncounterSnapshot,
         is AutomationAction.UseBerry,
         -> GameLifecycleState.ENCOUNTER

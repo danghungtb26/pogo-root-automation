@@ -95,6 +95,7 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     g_runtime_active.store(false);
     g_runtime_explicit_snapshot_mode.store(false);
     discard_pending_throw_events(context);
+    reset_runtime_catch_spin_config();
     return send_runtime_control_completed(
         context.fd,
         request_id,
@@ -140,7 +141,8 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
 }
 bool handle_runtime_control(
     ProbeContext &context,
-    const pogo_runtime_control::Request &request
+    const pogo_runtime_control::Request &request,
+    const std::vector<uint8_t> &command
 ) {
     if (!runtime_control_identity_matches(context, request)) {
         return send_runtime_rejected(
@@ -162,12 +164,13 @@ bool handle_runtime_control(
 
     // Every control action is module-owned: the runtime-core module owns the
     // lifecycle actions (START/STOP/DIAGNOSTIC) and feature modules own theirs
-    // (e.g. catch_spin owns SCAN_MAP). The action arrives as a raw wire number and
+    // (e.g. catch_spin owns CONFIG_SET). The action arrives as a raw wire number and
     // is routed uniformly through the owner map; an action no module owns is
     // rejected fail-closed inside dispatch_control_action. No lifecycle switch.
     return pogo_runtime_module::dispatch_control_action(
         context,
         request.action_wire,
+        command,
         request.request_id.c_str(),
         request.cycle_id
     );
@@ -278,13 +281,29 @@ void runtime_command_channel_loop(ProbeContext &context) {
                 control.request_id.c_str(),
                 static_cast<unsigned int>(control.action_wire)
             );
-            if (!handle_runtime_control(context, control)) break;
+            if (!handle_runtime_control(context, control, command)) break;
             continue;
         }
 
         pogo_runtime_module::Request module_control;
         if (pogo_runtime_module::parse(command, &module_control)) {
             if (!handle_runtime_module_control(context, module_control)) break;
+            continue;
+        }
+
+        // CONFIG_SET has its own marker and payload because it carries a full
+        // versioned snapshot, not the small ENABLE/DISABLE module-control
+        // request. Route it through the catch_spin owner map before falling
+        // through to gameplay parsing.
+        pogo_runtime_catch_spin_config::Request catch_spin_config;
+        if (pogo_runtime_catch_spin_config::parse(command, &catch_spin_config)) {
+            if (!pogo_runtime_module::dispatch_control_action(
+                    context,
+                    pogo_runtime_catch_spin_config::kConfigSetAction,
+                    command,
+                    catch_spin_config.request_id.c_str(),
+                    0U
+                )) break;
             continue;
         }
 

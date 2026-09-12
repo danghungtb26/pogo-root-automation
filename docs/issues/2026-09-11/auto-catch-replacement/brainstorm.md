@@ -240,3 +240,196 @@ Native truyền `args[0] = &throw_data` (struct 12 byte, `static_assert` khớp 
 1. Server có nhận `CatchPokemon(103)` khi wild chưa `Encounter(102)` không? (G3)
 2. Nếu cần 102 trước: gọi `SendEncounterRequest()` lẻ có tự set context server đủ để 103 chạy không?
 3. "bg" có gồm tắt màn hình / app xuống nền, hay chỉ ngầm khi vẫn ở map?
+
+## 9. Cập nhật triển khai — đọc Promise của `SendEncounterRequest`
+
+Yêu cầu follow-up là không coi `kEncounterRequested` như một kết quả thành công.
+Đây chỉ là outcome nội bộ báo rằng `WildMapPokemon.SendEncounterRequest()` đã
+được gọi và cần chờ `IPromise<PokemonEncounterResponse>` hoàn tất trước khi chạy
+`TryCapture`.
+
+Đã triển khai native observer theo mô hình pull trên main thread:
+
+- Lưu return Promise bằng `il2cpp_gchandle_new`, tránh giữ raw pointer không được
+  GC bảo vệ.
+- Poll các field runtime của Promise bằng metadata (`completeCalled`,
+  `errorCalled`, `completedValue`, `errorValue`); không hardcode offset của generic
+  `Promise<T>`.
+- Chỉ khi Promise complete thành công và `WildMapPokemon.egws` đã có
+  `EncounterOutProto` thì mới giải phóng handle và invoke `TryCapture`.
+- Promise lỗi, mất GC target, thiếu field layout hoặc timeout 15 giây đều fail
+  closed; không ném bóng trong các trường hợp này.
+
+Acceptance criteria bổ sung (inferred — needs device confirmation):
+
+| ID | Rule / Requirement | Formula / Expected | Acceptance note |
+|----|--------------------|-------------------|-----------------|
+| AC-PROMISE-1 | Giữ return của Encounter | Log `background encounter returned ... promise != null` tiếp theo `promise retained` | Không discard return của `SendEncounterRequest`. |
+| AC-PROMISE-2 | Đọc trạng thái async | Log `promise state ... complete=0/1 error=0/1` trên main thread | Không đọc managed Promise từ observer thread. |
+| AC-PROMISE-3 | Gate bước catch | Chỉ có `DIRECT_MAP_CATCH_DIRECT` sau `promise completed` và `egws` non-null | Promise pending/failed/timeout không gọi `TryCapture`. |
+
+## 10. Chẩn đoán log map luôn rỗng — 20:40–20:41
+
+### Kết luận
+
+Trong log `build/logs/logcat-full-20260911-204111-62485.txt`, native **không hề đi tới bước
+đọc cells**. Vì vậy chưa thể kết luận `get_Cells()` trả về dictionary rỗng; nguyên nhân hiện tại
+là binding `MapEntityService` chưa được resolve.
+
+### Bằng chứng từ log
+
+| Log | Ý nghĩa |
+|---|---|
+| `runtime bootstrap ... encounter_read=1 map_read=0` | Encounter đã bind, map chưa bind ngay từ bootstrap. |
+| `scene map service unavailable` | `FindObjectOfType(MapSceneViewService)` và fallback `MapScene` đều không lấy được object. |
+| `runtime map scan begin ... map_verified=0 map_service=0x0 get_cells=0x0` | Scan bắt đầu với toàn bộ map binding cần thiết bằng null. |
+| `runtime map scan rejected reason=map_and_fort_bindings_unavailable` | Reader return trước khi gọi `MapEntityService.get_Cells()`. |
+| `native catch_spin scan cycle=1..20 ... nearby_success=0 nearby=0` | Tất cả 20 chu kỳ đều không có nearby/map data. |
+
+Không có dòng `runtime map scan complete success=1`, `background encounter returned`,
+`promise retained` hoặc `DIRECT_MAP_CATCH_DIRECT` trong file log này.
+
+### Root cause trong code
+
+`runtime_catch_spin_read_snapshot()` chỉ gọi lại `discover_scene_runtime_owners()` khi observer
+chưa chạy (`coordinator.inc:69`). Nhưng các chu kỳ `SCAN_MAP` đang chạy từ observer/pull loop,
+nên sau lần discovery sớm bị fail, map owner không bao giờ được thử lại:
+
+```cpp
+if (!before.map_entity_read_verified && !context.observation_running.load()) {
+    discover_scene_runtime_owners(context);
+}
+```
+
+Đây là lỗi retry/lifecycle, không phải bằng chứng map thật sự không có Pokémon. Secondary risk là
+discovery hiện chỉ dùng `FindObjectOfType(Type)`; nếu map service không phải active direct object,
+cần thêm fallback `FindObjectsOfType`/include-inactive hoặc lấy owner từ object chain đã verify.
+
+### Acceptance criteria cho bản sửa
+
+| ID | Rule / Requirement | Expected |
+|---|---|---|
+| AC-MAP-1 | Retry discovery sau khi scene/map đã ready | Có log discovery sau bootstrap và `map_verified=1`. |
+| AC-MAP-2 | Phân biệt binding fail và cells rỗng | Khi binding đủ nhưng cells rỗng, log phải ghi `get_Cells` đã được gọi và số cell đọc được. |
+| AC-MAP-3 | Không spam main thread | Retry có throttle/backoff; không gọi `FindObjectOfType` mỗi tick. |
+| AC-MAP-4 | Fail closed | Khi retry vẫn fail, không gửi encounter/catch và phải giữ `nearby_success=0`. |
+
+### Hướng xử lý khuyến nghị
+
+1. **Đã sửa:** bỏ điều kiện phụ thuộc `context.observation_running` ở
+   `runtime_catch_spin_read_snapshot()`. Khi `map_entity_read_verified=false`, map scan có thể
+   gọi lại `discover_scene_runtime_owners()` ngay cả khi observer đã chạy.
+2. Nếu retry sau khi scene ready vẫn không lấy được object, bổ sung discovery bằng
+   `FindObjectsOfType` hoặc owner chain `MapScene → ehis → ehkb → egft`.
+3. Bổ sung log ở ngay trước/sau `get_Cells()` để xác nhận riêng trường hợp binding đã đủ nhưng
+   dictionary không có cell.
+
+## 11. Log sau khi bỏ guard discovery — map đã chạy, Promise poll làm crash
+
+Log `build/logs/logcat-full-20260912-093024-80606.txt` xác nhận việc bỏ guard đã mở đúng đường:
+
+- `map_verified=1`, `map_service` và `get_cells` đều khác null.
+- `cells=26`, `wild=5`, `nearby_success=1` ở cycle 1 và cycle 2.
+- Native match được target `id=4674225908875914523`.
+- Cycle 1 gọi `DIRECT_MAP_SEND_ENCOUNTER`, nhận Promise và retain thành công.
+- Cycle 2 match lại target rồi process crash trước log `promise state`, trước
+  `DIRECT_MAP_CATCH_DIRECT`, nên `TryCapture` vẫn chưa được gọi.
+
+Crash là `SIGSEGV` trong `libil2cpp.so`, fault address `0xbef64020`. Register `x0` tại crash là
+`0x00000000bef64a98`, trùng với giá trị `gc_handle=3203811992` đã log ở cycle 1 sau khi bị ép
+về `uint32_t`. Disassembly của `il2cpp_gchandle_new` trên build này cho thấy nó trả về handle
+dạng pointer/tagged pointer qua thanh ghi 64-bit; `il2cpp_gchandle_get_target` cũng xử lý handle
+64-bit. Native typedef hiện tại dùng `uint32_t`, làm mất nửa cao của handle. Khi poll gọi
+`gchandle_get_target`, IL2CPP dereference handle bị cắt và crash.
+
+### Required fix trước khi test tiếp
+
+**Đã sửa:** đổi kiểu lưu/truyền GC handle sang `uintptr_t` (`Il2CppGcHandle`) đúng ABI của build
+này trong toàn bộ `Il2CppGcHandleNew`, `Il2CppGcHandleGetTarget`, `Il2CppGcHandleFree`,
+`PendingEncounterRequest` và log format tương ứng. Native build đã pass; cần push/install rồi
+đọc log mới để xác nhận Promise poll không còn crash.
+
+## 12. Kết quả log sau khi sửa GC handle
+
+Log `build/logs/logcat-full-20260912-094235-81929.txt` xác nhận Promise flow đã chạy end-to-end
+đến bước gọi catch:
+
+- Map: `map_verified=1`, `cells=26`, `wild=6`, `nearby_success=1`.
+- Encounter: Promise được retain bằng handle 64-bit `0x765efa35f0`.
+- Poll: `complete=1`, `error=0`, có `PokemonEncounterResponse`; không còn crash.
+- Catch: `DIRECT_MAP_CATCH_DIRECT` được invoke với `ball=1`, `reticle=0.050`, `hit=1`,
+  `spinning=1`, `missed=0`; runtime trả Promise không exception.
+
+Tuy nhiên `direct map catch outcome observer verified=0`, nên log này chỉ chứng minh request
+catch đã được gửi/Promise đã được tạo; chưa chứng minh server trả `CATCH_SUCCESS` và chưa có
+`capturedPokemonId`. Cần hoàn thiện observer kết quả catch trước khi báo caught.
+
+## 13. Poll Promise của `TryCapture` và đồng bộ lại map — 09:55
+
+### Kết luận kỹ thuật
+
+Có thể đọc kết quả `TryCapture` bằng đúng mô hình đã dùng cho
+`SendEncounterRequest`: giữ Promise bằng `il2cpp_gchandle_new`, poll trên Unity main
+thread, đọc `completeCalled`, `errorCalled`, `completedValue`, sau đó đọc
+`CatchPokemonOutProto.Status` và `CapturedPokemonId` từ object kết quả.
+
+Reverse dump của build `0.427.0` xác nhận:
+
+- `Status` là enum tại offset `0x10`: `CATCH_SUCCESS=1`, `CATCH_ESCAPE=2`,
+  `CATCH_FLEE=3`, `CATCH_MISSED=4`.
+- `CapturedPokemonId` là `ulong` tại offset `0x20`.
+- `MapContentHandler.RegisterPokemonCaughtOrFled(ulong)` là postcondition để loại
+  entity đã caught/fled khỏi map.
+- `MapContentHandler.ForceRefreshVisibleCells()` là bước yêu cầu map fetch lại
+  visible cells.
+
+### Đã triển khai
+
+- Tạo `direct_catch_promise_observer.inc`: lưu GC handle 64-bit, poll Promise,
+  decode status/id, log state/result, gửi late result nếu direct catch có
+  `commandId`.
+- Tạo `direct_catch_map_sync.inc`: retry resolve `MapContentHandler` lúc Promise
+  terminal, gọi `RegisterPokemonCaughtOrFled`, fallback `RemoveWildPokemon`, rồi
+  gọi `ForceRefreshVisibleCells`.
+- Thêm task main-thread riêng `kPollDirectCatch`; coordinator vẫn poll dù đang
+  suspended sau catch và chỉ resume sau khi Promise terminal.
+- Native auto catch không coi Promise non-null là caught nữa; chỉ status server
+  `CATCH_SUCCESS` mới được map vào `CAUGHT`.
+
+### Verification
+
+- `build-magisk.sh` pass arm64-v8a và x86_64.
+- `./gradlew test assembleDebug` pass; các module hiện không có test case nên
+  Gradle báo `NO-SOURCE` cho test tasks.
+- Push/install/reboot đã pass qua script repository. Snapshot log mới chưa lấy
+  được vì BlueStacks Air 1 chưa reconnect lại `127.0.0.1:5565` sau reboot
+  (`Connection refused`); cần đọc log sau khi emulator lên lại để xác nhận các
+marker `runtime direct catch promise result`, `map sync method` và scan cycle
+tiếp theo.
+
+## 14. Audit đường reload map sau khi Promise hoàn tất — 09:58
+
+### Phát hiện
+
+`refresh_map_after_direct_catch()` được chạy bên trong callback đã được dispatch lên
+Unity main thread. Việc gọi `discover_scene_runtime_owners()` tại vị trí này là sai
+ngữ cảnh: hàm đó có thể gọi `request_main_thread_object()` rồi chờ một callback khác
+trên chính main thread, tạo deadlock.
+
+### Điều chỉnh
+
+Đã bỏ lời gọi discovery có chờ callback. Resolver mới chỉ dùng các thao tác đồng bộ
+ngay trên main thread:
+
+- dùng `MapSceneViewService` hiện tại nếu binding còn hợp lệ;
+- nếu không có, gọi trực tiếp `FindObjectOfType(MapSceneViewService)`;
+- fallback qua `FindObjectOfType(MapScene)` rồi đọc owner chain `ehis → ehkb`;
+- sau đó gọi `RegisterPokemonCaughtOrFled`, fallback `RemoveWildPokemon`, và
+  `ForceRefreshVisibleCells`.
+
+Native build sau điều chỉnh đã pass. Log runtime cần xác nhận không còn deadlock và có
+đủ các marker `runtime direct catch promise result`, `map sync method=...` cùng cycle
+scan tiếp theo.
+
+Lần push lại bản đã sửa chưa thực hiện được vì BlueStacks Air 1 đang mất kết nối
+(`127.0.0.1:5565 Connection refused`); không dùng ADB thủ công để bypass trạng thái này.

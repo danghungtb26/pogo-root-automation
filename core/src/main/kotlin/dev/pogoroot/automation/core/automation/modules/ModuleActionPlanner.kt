@@ -12,18 +12,15 @@ import dev.pogoroot.automation.core.model.NearbySpawn
  * independent and never duplicate a decision:
  *
  * - [encounterCatchDecision]: needed by both the encounter berry assist and throw.
- * - [overworldTargetSpawn]: the soonest-expiring spawn, targeted by either
- *   catch_spin's direct-map catch or the encounter module's open-encounter (the two
- *   are mutually exclusive per policy).
- * - [overworldCatchIntended]: whether a catch or an open was intended this cycle,
- *   used by catch_spin to force a spin (farm balls) when the pouch is empty.
+ * - [overworldTargetSpawn]: the soonest-expiring spawn used by the encounter
+ *   module's open-encounter flow. Native catch-spin reads and selects its own
+ *   direct-map target independently.
  */
 data class PlanningContext(
     val snapshot: AutomationSnapshot,
     val policy: AutomationPolicy,
     val encounterCatchDecision: CatchDecision? = null,
     val overworldTargetSpawn: NearbySpawn? = null,
-    val overworldCatchIntended: Boolean = false,
 )
 
 /**

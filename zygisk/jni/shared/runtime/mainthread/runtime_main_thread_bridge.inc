@@ -235,6 +235,16 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     } else if (task_type == MainThreadTaskType::kDirectCatch) {
         action_outcome = direct_catch_runtime_on_main_thread(*context, encounter_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
+    } else if (task_type == MainThreadTaskType::kPollDirectCatch) {
+        const RuntimeDirectCatchPromisePollResult poll_result =
+            poll_pending_direct_catch_on_main_thread(*context);
+        task_success = poll_result != RuntimeDirectCatchPromisePollResult::kNoPending;
+        action_outcome = poll_result == RuntimeDirectCatchPromisePollResult::kWaiting ||
+                poll_result == RuntimeDirectCatchPromisePollResult::kCompleted
+            ? MainThreadActionOutcome::kInvoked
+            : poll_result == RuntimeDirectCatchPromisePollResult::kNoPending
+                ? MainThreadActionOutcome::kRejected
+                : MainThreadActionOutcome::kIndeterminate;
     } else if (task_type == MainThreadTaskType::kSpin) {
         action_outcome = spin_runtime_pokestop_on_main_thread(*context, fort_id);
         task_success = action_outcome == MainThreadActionOutcome::kInvoked;
