@@ -37,20 +37,9 @@ bool read_runtime_boxed_lat_lng(
         std::isfinite(*longitude) && *longitude >= -180.0 && *longitude <= 180.0;
 }
 
-bool read_runtime_boxed_double(const Il2CppApi &api, void *boxed, double *value) {
-    if (value == nullptr || api.object_unbox == nullptr ||
-        !is_probable_managed_pointer(boxed)) return false;
-    void *unboxed = api.object_unbox(boxed);
-    if (!is_probable_managed_pointer(unboxed)) return false;
-    memcpy(value, unboxed, sizeof(*value));
-    return std::isfinite(*value);
-}
-
-// Reads the current player position via ILocationProvider.get_CurrentLocation()
-// -> Niantic.Platform.Ditto.Geo.Location (value struct) -> LatitudeDeg/LongitudeDeg.
-// get_CurrentLocation returns the struct by value, which il2cpp_runtime_invoke
-// boxes; the Location getters are value-type instance methods, so they are
-// invoked with the unboxed interior pointer as `this`. Needs device verification.
+// Reads the current player position via ILocationProvider.get_Location()
+// -> LatLng (value struct). The result is boxed by il2cpp_runtime_invoke and
+// stores latitude/longitude as the first two doubles of the value.
 bool read_runtime_player_position(
     const Il2CppApi &api,
     const RuntimeBinding &binding,
@@ -58,28 +47,23 @@ bool read_runtime_player_position(
     double *longitude
 ) {
     if (latitude == nullptr || longitude == nullptr || !binding.location_read_verified ||
-        binding.location_provider == nullptr || binding.location_get_current == nullptr ||
-        binding.location_get_latitude == nullptr || binding.location_get_longitude == nullptr ||
+        binding.location_provider == nullptr || binding.location_get_location == nullptr ||
+        binding.location_get_has_valid == nullptr ||
         api.runtime_invoke == nullptr || api.object_unbox == nullptr) return false;
     void *exception = nullptr;
+    void *boxed_has_valid = api.runtime_invoke(
+        binding.location_get_has_valid, binding.location_provider, nullptr, &exception
+    );
+    bool has_valid_location = false;
+    if (exception != nullptr || !read_boxed_bool(api, boxed_has_valid, &has_valid_location) ||
+        !has_valid_location) return false;
+    exception = nullptr;
     void *boxed_location = api.runtime_invoke(
-        binding.location_get_current, binding.location_provider, nullptr, &exception
+        binding.location_get_location, binding.location_provider, nullptr, &exception
     );
-    if (exception != nullptr || !is_probable_managed_pointer(boxed_location)) return false;
-    void *location_value = api.object_unbox(boxed_location);
-    if (!is_probable_managed_pointer(location_value)) return false;
-    exception = nullptr;
-    void *boxed_lat = api.runtime_invoke(
-        binding.location_get_latitude, location_value, nullptr, &exception
+    return exception == nullptr && read_runtime_boxed_lat_lng(
+        api, boxed_location, latitude, longitude
     );
-    if (exception != nullptr || !read_runtime_boxed_double(api, boxed_lat, latitude)) return false;
-    exception = nullptr;
-    void *boxed_lng = api.runtime_invoke(
-        binding.location_get_longitude, location_value, nullptr, &exception
-    );
-    if (exception != nullptr || !read_runtime_boxed_double(api, boxed_lng, longitude)) return false;
-    return *latitude >= -90.0 && *latitude <= 90.0 &&
-        *longitude >= -180.0 && *longitude <= 180.0;
 }
 
 // Reads the count of a single item via IItemBag.GetItemCount(Item). Returns the

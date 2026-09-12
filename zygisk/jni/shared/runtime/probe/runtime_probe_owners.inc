@@ -176,6 +176,56 @@ Il2CppClass *find_runtime_class(
     return nullptr;
 }
 
+bool runtime_method_name_matches(const char *candidate_name, const char *wanted_name) {
+    if (candidate_name == nullptr || wanted_name == nullptr) return false;
+    if (strcmp(candidate_name, wanted_name) == 0) return true;
+    const size_t candidate_length = strlen(candidate_name);
+    const size_t wanted_length = strlen(wanted_name);
+    return candidate_length > wanted_length + 1U &&
+        candidate_name[candidate_length - wanted_length - 1U] == '.' &&
+        strcmp(candidate_name + candidate_length - wanted_length, wanted_name) == 0;
+}
+
+// IL2CPP can expose an interface implementation on a derived concrete type
+// with an explicit name, while the reverse dump records the method on its base
+// adapter. Resolve both forms and walk the parent chain before declaring a
+// runtime binding unavailable.
+const void *find_runtime_instance_method_in_hierarchy(
+    const Il2CppApi &api,
+    Il2CppClass *klass,
+    const char *method_name,
+    uint32_t parameter_count
+) {
+    if (!has_runtime_inspection_api(api) || klass == nullptr || method_name == nullptr) {
+        return nullptr;
+    }
+    for (uint32_t depth = 0U; klass != nullptr && depth < 8U; ++depth) {
+        const void *direct = api.class_get_method_from_name(
+            klass, method_name, static_cast<int>(parameter_count)
+        );
+        if (direct != nullptr && api.method_is_instance(direct) &&
+            api.method_get_param_count(direct) == parameter_count) {
+            return direct;
+        }
+        if (api.class_get_methods != nullptr && api.method_get_name != nullptr) {
+            void *iterator = nullptr;
+            for (uint32_t inspected = 0U; inspected < 512U; ++inspected) {
+                const void *method = api.class_get_methods(klass, &iterator);
+                if (method == nullptr) break;
+                if (!api.method_is_instance(method) ||
+                    api.method_get_param_count(method) != parameter_count ||
+                    !runtime_method_name_matches(api.method_get_name(method), method_name)) {
+                    continue;
+                }
+                return method;
+            }
+        }
+        if (api.class_get_parent == nullptr) break;
+        klass = api.class_get_parent(klass);
+    }
+    return nullptr;
+}
+
 const void *find_runtime_method_with_parameter(
     const Il2CppApi &api,
     Il2CppClass *klass,

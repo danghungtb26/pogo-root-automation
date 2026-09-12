@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 #include <string>
+#include <unordered_set>
 
 #include "zygisk.hpp"
 #include "../bridge_kotlin/runtime_command_protocol.h"
@@ -304,13 +305,13 @@ struct RuntimeBinding {
     bool forts_read_verified = false;
     bool spin_verified = false;
     bool exact_build_verified = false;
-    // Player position (Niantic.Holoholo.ILocationProvider -> LocationProviderAdapter).
-    // get_CurrentLocation returns a Niantic.Platform.Ditto.Geo.Location value
-    // struct exposing LatitudeDeg/LongitudeDeg (double).
+    // Player position (Niantic.Holoholo.ILocationProvider -> NativeLocationProvider).
+    // The concrete provider exposes get_Location() -> LatLng and
+    // get_HasValidLocation(); discovery resolves both through the concrete type
+    // and its parents/explicit interface methods.
     void *location_provider = nullptr;
-    const void *location_get_current = nullptr;
-    const void *location_get_latitude = nullptr;
-    const void *location_get_longitude = nullptr;
+    const void *location_get_location = nullptr;
+    const void *location_get_has_valid = nullptr;
     bool location_read_verified = false;
     // Inventory read (Niantic.Holoholo.IItemBag -> ItemBagImpl.GetItemCount(Item)).
     // item_bag is resolved in the IItemBag service block. Enables READ_INVENTORY
@@ -353,6 +354,7 @@ enum class MainThreadTaskType : uint32_t {
     kPollDirectCatch = 10U,
     kPollTransfer = 11U,
     kStartTransfer = 12U,
+    kPollEncounter = 13U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -560,6 +562,18 @@ MainThreadActionOutcome request_main_thread_direct_catch(
 
 MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &context);
 
+MainThreadActionOutcome request_main_thread_poll_encounter(
+    ProbeContext &context,
+    uint64_t encounter_id
+);
+
+uint64_t runtime_pending_encounter_id(ProbeContext &context);
+
+MainThreadActionOutcome poll_runtime_encounter_on_main_thread(
+    ProbeContext &context,
+    uint64_t encounter_id
+);
+
 enum class RuntimeDirectCatchPromisePollResult : uint32_t {
     kNoPending = 0U,
     kWaiting = 1U,
@@ -581,6 +595,8 @@ bool begin_pending_direct_catch(
     const std::string &command_id,
     uint64_t encounter_id
 );
+
+bool runtime_direct_catch_is_pending(ProbeContext &context);
 
 void abandon_pending_direct_catch(ProbeContext &context, const char *reason);
 

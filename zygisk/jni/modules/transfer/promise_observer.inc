@@ -15,6 +15,8 @@ struct PendingRuntimeTransfer {
     bool active = false;
     bool blocked = false;
     bool evaluate_keep = false;
+    bool release_attempted = false;
+    bool release_invoked = false;
     RuntimeTransferPendingPhase phase = RuntimeTransferPendingPhase::kWaitingPokemon;
     uint64_t pokemon_id = 0U;
     uint64_t started_at_ns = 0U;
@@ -52,35 +54,49 @@ void finish_runtime_transfer(
     Il2CppGcHandle handle = 0U;
     uint64_t pokemon_id = 0U;
     std::string command_id;
+    bool release_attempted = false;
+    bool release_invoked = false;
     {
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
         if (!g_runtime_transfer.active) return;
         handle = g_runtime_transfer.promise_gc_handle;
         pokemon_id = g_runtime_transfer.pokemon_id;
         command_id = g_runtime_transfer.command_id;
+        release_attempted = g_runtime_transfer.release_attempted;
+        release_invoked = g_runtime_transfer.release_invoked;
         g_runtime_transfer.active = false;
         g_runtime_transfer.promise_gc_handle = 0U;
         g_runtime_transfer.command_id.clear();
         g_runtime_transfer.blocked = blocked;
     }
     free_runtime_transfer_handle(context, handle);
-    const bool success = phase == kCommandPhaseCompleted &&
+    const bool terminal_success = phase == kCommandPhaseCompleted &&
         (error_code == nullptr || error_code[0] == '\0');
+    const bool transfer_success = terminal_success && release_invoked;
+    const char *result = !release_attempted
+        ? "KEEP"
+        : transfer_success ? "SUCCESS" : "FAILED";
     __android_log_print(
-        success ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        transfer_success || !release_attempted ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "native auto transfer terminal id=%llu phase=%u success=%d blocked=%d error=%s message=%s",
+        "native transfer result id=%llu mode=%s phase=%u result=%s release_attempted=%d "
+        "release_invoked=%d blocked=%d error=%s message=%s",
         static_cast<unsigned long long>(pokemon_id),
+        command_id.empty() ? "auto" : "manual",
         phase,
-        success ? 1 : 0,
+        result,
+        release_attempted ? 1 : 0,
+        release_invoked ? 1 : 0,
         blocked ? 1 : 0,
         error_code == nullptr ? "" : error_code,
         message == nullptr ? "" : message
     );
-    if (success) {
+    if (release_attempted) {
         (void)send_runtime_automation_event(
             context,
-            pogo_runtime::RuntimeAutomationEventType::kPokemonTransferred,
+            transfer_success
+                ? pogo_runtime::RuntimeAutomationEventType::kPokemonTransferred
+                : pogo_runtime::RuntimeAutomationEventType::kPokemonTransferFailed,
             pokemon_id
         );
     }
@@ -146,127 +162,7 @@ void *release_runtime_pokemon_on_main_thread(
 RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
     ProbeContext &context,
     const PendingRuntimeTransfer &pending
-) {
-    const Il2CppApi &api = context.il2cpp_api;
-    void *promise = api.gchandle_get_target == nullptr
-        ? nullptr : api.gchandle_get_target(pending.promise_gc_handle);
-    if (promise == nullptr) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseIndeterminate,
-            "transfer_promise_target_unavailable",
-            "ReleasePokemon Promise GC target is no longer available",
-            true
-        );
-        return RuntimeTransferPromisePollResult::kFailed;
-    }
-    bool complete_called = false;
-    bool error_called = false;
-    void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
-    uint32_t poll_count = 0U;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
-        if (g_runtime_transfer.active &&
-            g_runtime_transfer.promise_gc_handle == pending.promise_gc_handle) {
-            poll_count = ++g_runtime_transfer.poll_count;
-        }
-    }
-    __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "native transfer promise state id=%llu promise=%p complete=%d error=%d "
-        "value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
-        static_cast<unsigned long long>(pending.pokemon_id),
-        promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
-        completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
-    );
-    if (!fields_read) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseIndeterminate,
-            "transfer_promise_layout_unavailable",
-            "ReleasePokemon Promise completion fields could not be read",
-            true
-        );
-        return RuntimeTransferPromisePollResult::kFailed;
-    }
-    if (error_called) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseCompleted,
-            "transfer_failed",
-            "ReleasePokemon Promise completed with an error",
-            false
-        );
-        return RuntimeTransferPromisePollResult::kFailed;
-    }
-    if (!complete_called) return RuntimeTransferPromisePollResult::kWaiting;
-    if (completed_value == nullptr || api.object_get_class == nullptr ||
-        !runtime_object_is_exact_class(
-            api, completed_value, "Holoholo.Rpc", "ReleasePokemonOutProto"
-        )) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseIndeterminate,
-            "transfer_result_type_mismatch",
-            "ReleasePokemon Promise returned an unexpected result type",
-            true
-        );
-        return RuntimeTransferPromisePollResult::kFailed;
-    }
-    int32_t status = 0;
-    if (!read_runtime_field(api, completed_value, "Status", &status)) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseIndeterminate,
-            "transfer_result_layout_unavailable",
-            "ReleasePokemonOutProto.Status could not be read",
-            true
-        );
-        return RuntimeTransferPromisePollResult::kFailed;
-    }
-    __android_log_print(
-        status == 1 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "native transfer promise result id=%llu status=%d",
-        static_cast<unsigned long long>(pending.pokemon_id),
-        status
-    );
-    if (status == 1) {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseCompleted,
-            "",
-            "ReleasePokemon completed with SUCCESS",
-            false
-        );
-    } else {
-        finish_runtime_transfer(
-            context,
-            kCommandPhaseCompleted,
-            "transfer_rejected",
-            "ReleasePokemon completed without SUCCESS",
-            false
-        );
-    }
-    return RuntimeTransferPromisePollResult::kCompleted;
-}
+);
 
 RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
     ProbeContext &context
@@ -382,6 +278,19 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         );
     }
 
+    {
+        std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
+        if (g_runtime_transfer.active && g_runtime_transfer.pokemon_id == pending.pokemon_id) {
+            g_runtime_transfer.release_attempted = true;
+        }
+    }
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "native transfer trigger id=%llu mode=%s action=ReleasePokemon",
+        static_cast<unsigned long long>(pending.pokemon_id),
+        pending.command_id.empty() ? "auto" : "manual"
+    );
     void *release_exception = nullptr;
     void *promise = release_runtime_pokemon_on_main_thread(
         context, pokemon, &release_exception
@@ -427,6 +336,7 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         }
         g_runtime_transfer.phase = RuntimeTransferPendingPhase::kWaitingRelease;
         g_runtime_transfer.promise_gc_handle = handle;
+        g_runtime_transfer.release_invoked = true;
         g_runtime_transfer.started_at_ns = static_cast<uint64_t>(now_elapsed_nanos());
         g_runtime_transfer.poll_count = 0U;
     }
@@ -437,6 +347,11 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         static_cast<unsigned long long>(pending.pokemon_id),
         promise,
         static_cast<unsigned long long>(handle)
+    );
+    (void)send_runtime_automation_event(
+        context,
+        pogo_runtime::RuntimeAutomationEventType::kPokemonTransferTriggered,
+        pending.pokemon_id
     );
     return RuntimeTransferPromisePollResult::kWaiting;
 }
@@ -463,6 +378,13 @@ MainThreadActionOutcome start_runtime_transfer_on_main_thread(
         g_runtime_transfer.command_id = command_id == nullptr ? "" : command_id;
         g_runtime_transfer.started_at_ns = static_cast<uint64_t>(now_elapsed_nanos());
     }
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "native transfer queued id=%llu mode=%s phase=WAITING_POKEMON",
+        static_cast<unsigned long long>(pokemon_id),
+        command_id == nullptr || command_id[0] == '\0' ? "auto" : "manual"
+    );
     const RuntimeTransferPromisePollResult first_poll =
         poll_pending_runtime_transfer_on_main_thread(context);
     if (first_poll == RuntimeTransferPromisePollResult::kFailed ||

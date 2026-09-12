@@ -584,3 +584,166 @@ Guard fail-closed vẫn giữ nguyên: chỉ bind object exact class `MapPlaceDi
 và chỉ enable forts/spin khi dictionary cùng ba getter `MapPokestop` đã đủ. Native Magisk build
 đã pass arm64-v8a/x86_64; Gradle `test assembleDebug` cũng pass. Chưa push/install trong lượt
 này; cần test runtime để xác nhận `forts_verified=1`, dictionary entries và số fort đọc được.
+
+## 17. Audit filter fort và current location — 2026-09-12
+
+### 1. Behavior thực tế
+
+Log `build/logs/logcat-full-20260912-103809-88522.txt` cho thấy native đã đọc được
+`forts=145` và config đang `armed=1`, `catch=1`, `spin=1`. Tuy nhiên mọi snapshot đều có
+`player_location=0`, sau đó native vẫn chọn cùng một fort theo thứ tự `fort_id` và gọi
+`SPIN`. Đây là lý do action có thể được invoke nhưng game không chấp nhận vì fort nằm ngoài
+phạm vi tương tác của player.
+
+### 2. Root cause sau khi đối chiếu reverse output
+
+Binding location hiện tìm sai API:
+
+- `Niantic.Holoholo.ILocationProvider` của build `0.427.0` có `get_Location() -> LatLng` và
+  `get_HasValidLocation() -> bool`.
+- Native cũ tìm `get_CurrentLocation() -> Niantic.Platform.Ditto.Geo.Location`, rồi gọi
+  `LatitudeDeg/LongitudeDeg`; đó là `IDeviceManager`, không phải `ILocationProvider`.
+- Concrete owner trên thiết bị là `Niantic.Holoholo.Map.NativeLocationProvider`; method có thể
+  nằm ở base/explicit interface nên lookup chỉ trên concrete class cũng không đủ.
+- `select_spin_target()` không dùng player coordinates, chỉ chọn `fort_id` nhỏ nhất.
+
+### 3. Dependency map
+
+```text
+ILocationProvider service
+  -> NativeLocationProvider
+     -> get_HasValidLocation()
+     -> get_Location() -> boxed LatLng { double latitude; double longitude }
+
+SCAN_MAP main-thread snapshot
+  -> player position + forts
+  -> native haversine distance filter
+  -> nearest spin_available fort <= interaction range
+  -> StartInteractiveMode -> PoiItemSpinner.Spin
+```
+
+### 4. Phạm vi fix
+
+- Discovery tìm method exact, explicit-interface và parent hierarchy; bind đúng `get_Location`
+  cùng `get_HasValidLocation`.
+- Reader yêu cầu `HasValidLocation=true`, unbox hai `double` đầu của `LatLng`, rồi validate
+  latitude/longitude.
+- Selector fail-closed khi thiếu location, bỏ fort thiếu tọa độ/cooldown, tính haversine và
+  chọn fort gần nhất trong bán kính version-scoped 80m.
+- Thêm log fallback location, số fort trong range, fort được chọn và khoảng cách. Không bỏ
+  guard hoặc spin đại một fort khi không có player position.
+
+## Acceptance Criteria — inferred — needs BA confirm
+
+| ID | Rule / Requirement | Expected | Acceptance note |
+|---|---|---|---|
+| AC-LOC-1 | Resolve đúng location provider | `NativeLocationProvider`, `get_Location` và `get_HasValidLocation` khác null | Không dùng `IDeviceManager.get_CurrentLocation` cho service này. |
+| AC-LOC-2 | Read current location | `HasValidLocation=true` và `LatLng` hợp lệ → `player_location=1` với lat/lng khác giá trị placeholder | Provider chưa có GPS → unavailable, không suy diễn vị trí. |
+| AC-FILTER-1 | Chỉ chọn fort gần player | `distance(player, fort) <= 80m` và `spin_available=true` | Chọn fort gần nhất; tie-break bằng `fort_id`. |
+| AC-FILTER-2 | Không có fort trong range | `in_range=0` → không gọi `SPIN`, log `no_available_fort_in_interaction_range` | Không fallback về fort xa nhất/nhỏ nhất. |
+| AC-FILTER-3 | Không có current location | `player=0` → không gọi `SPIN`, log `player_position_unavailable` | Giữ fail-closed để game không nhận action sai phạm vi. |
+| AC-FILTER-4 | Observable decision | Log có `player position`, `spin filter` hoặc `spin target selected` cùng distance/range | Dùng để xác nhận runtime trên Air 1. |
+
+### Synthesis
+
+Lỗi không nằm ở danh sách fort: log chứng minh 145 fort đã được đọc. Lỗi nằm ở việc đọc nhầm
+property location và selector chưa hề lọc khoảng cách, nên action spin bị gửi tới fort ngoài
+phạm vi. Fix hiện tại sửa đúng contract `ILocationProvider` của build và chặn spin khi chưa
+chứng minh được vị trí; lần runtime test tiếp theo cần xác nhận `player_location=1` và distance
+thực tế của fort được chọn.
+
+## 18. Xác minh lệnh Spin có đi tới server hay chưa — 2026-09-12
+
+### 1. Kết luận ngắn
+
+Chưa có bằng chứng lệnh Spin hiện tại đã trigger request lên server. Log chỉ chứng minh native
+đã tìm đúng fort, vào Unity main thread và gọi được method `PoiItemSpinner.Spin`; kết quả
+`main-thread action ... outcome=1` đang được hiểu là invocation thành công, không phải server
+đã trả kết quả spin.
+
+### 2. Đối chiếu với Pokémon GO `0.427.0`
+
+Reverse output trong `reverse/pogo-0.427.0/dump.cs.gz` và `native/libil2cpp.so` cho thấy flow
+thực tế của game là:
+
+```text
+MapPokestop.StartInteractiveMode()
+  -> PoiItemSpinner.Spin(float)
+     -> BasePoiSpinner.Spin(float)      // tạo spin vật lý/visual
+  -> gvf.MoveNext()                     // đợi angular velocity đủ lớn
+     -> ckkn()                          // gate chống lặp + điều kiện map/service
+        -> ckko()                       // tạo FortSearch request
+           -> IRpcHandler RPC method 101
+           -> Promise<FortSearchOutProto>
+```
+
+| Binding / vị trí reverse | Điều đã xác minh |
+|---|---|
+| `PoiItemSpinner.Spin(float)` — `0x7FC13C8` | Chỉ gọi `BasePoiSpinner.Spin` rồi reset cờ `ehgm`; không gọi RPC trực tiếp. |
+| `PoiItemSpinner.gvf.MoveNext()` — `0x7FC2254` | So sánh angular velocity với `spinGetItemsThreshold`, sau đó mới gọi `ckkn()`. |
+| `PoiItemSpinner.ckkn()` — `0x7FC13E8` | Gate thực hiện search, đặt cờ đang xử lý và gọi `ckko()`. |
+| `PoiItemSpinner.ckko()` — `0x7FC1728` | Gọi `IRpcHandler` với method `101`, trả `IPromise<FortSearchOutProto>`. |
+| Constructor `PoiItemSpinner` | `spinGetItemsThreshold` được khởi tạo là `5.0f`. |
+
+Native hiện truyền `speed=1.0f`. Giá trị này chỉ là input cho torque/physics và không đảm bảo
+angular velocity đạt ngưỡng `5.0f`, nhất là khi không có gesture kéo của người chơi. Vì vậy
+việc gọi thành công `Spin` có thể chỉ tạo animation nhưng không bao giờ đi tiếp tới `ckkn()`.
+
+### 3. Bằng chứng từ log runtime
+
+Trong `build/logs/logcat-full-20260912-131812-417.txt`:
+
+- Map scan thành công: `forts=145`, current location hợp lệ.
+- Filter chọn được fort gần nhất: `distance_m=43.0`, `in_range=4`, `range_m=80.0`.
+- Native gọi action: `action=SPIN`, có `pokestop`, `spinner`, `method` khác null; sau đó log
+  `native catch_spin spin invoked`.
+- Unity chỉ log `RefreshSpinner()` và `StartInteractiveMode()`.
+- Có `Quago [PokestopRewardClaimed,true]`, nhưng đây là telemetry/UI callback, không phải
+  bằng chứng `FortSearch` server response.
+- Cùng một fort bị invoke lặp lại qua nhiều cycle, nhưng không thấy các dấu hiệu cần có của
+  request server như `FortSearchOutProto`, `ItemsAwarded`, `FortSearch` hoặc RPC `101`.
+
+### 4. Root cause và ranh giới của kết luận
+
+Binding class/method hiện tại không sai ở tầng Unity invocation: `MapPokestop` và
+`PoiItemSpinner.Spin(float)` khớp reverse của đúng version. Sai lệch nằm ở giả định rằng gọi
+`Spin` là đủ để server xử lý; trong game, server request là bước deferred phụ thuộc vào tốc độ
+quay vật lý và callback coroutine.
+
+Do đó cần phân biệt rõ ba trạng thái trong log:
+
+```text
+SPIN_INVOKED       = gọi được method Unity, không có exception
+FORT_SEARCH_SENT   = bắt được RPC method 101 / request FortSearch
+FORT_SEARCH_RESULT = Promise<FortSearchOutProto> đã settle và đọc được result
+```
+
+Hiện tại chỉ chứng minh được trạng thái thứ nhất.
+
+### 5. Hướng xử lý tiếp theo
+
+Ưu tiên bind/hook exact-build để quan sát `ckkn()`/`ckko()` và RPC `101`, đồng thời giữ Promise
+đủ lâu để đọc completion/result. Có hai lựa chọn cần cân nhắc:
+
+1. Mô phỏng đúng gesture/physics của game hoặc điều chỉnh cách gọi để angular velocity vượt
+   `spinGetItemsThreshold=5.0f`; đây là hướng ít bypass logic game hơn nhưng phụ thuộc Unity
+   physics và khó đảm bảo deterministically.
+2. Gọi `ckkn()` trực tiếp sau khi `StartInteractiveMode` và exact-class checks đã pass; đây là
+   hướng deterministic hơn nhưng là private reverse-derived binding, phải khóa theo package,
+   version, ABI và guard RVA/layout, đồng thời cần observer cho Promise để không tạo request
+   lặp.
+
+Không nên đánh dấu Spin là thành công chỉ từ `runtime_invoke` không có exception. Cần bổ sung
+log/telemetry cho đủ `SPIN_INVOKED`, `FORT_SEARCH_SENT`, `FORT_SEARCH_RESULT` trước khi kết luận
+server đã nhận và xử lý lệnh.
+
+## Acceptance Criteria — server-side Spin verification
+
+| ID | Rule / Requirement | Expected |
+|---|---|---|
+| AC-SPIN-SERVER-1 | Phân biệt invocation và request | Log `SPIN_INVOKED` không được coi là server success. |
+| AC-SPIN-SERVER-2 | Xác nhận request | Quan sát được RPC method `101` hoặc equivalent `FortSearch` request với đúng fort/player location. |
+| AC-SPIN-SERVER-3 | Đọc completion | Promise `FortSearchOutProto` settle thành công/thất bại và có timeout rõ ràng. |
+| AC-SPIN-SERVER-4 | Chống request lặp | Trong lúc Promise chưa settle, fort đang xử lý không được trigger Spin mới. |
+| AC-SPIN-SERVER-5 | Refresh map | Sau result thành công, map/fort state được refresh hoặc cooldown được cập nhật trước cycle tiếp theo. |
+| AC-SPIN-SERVER-6 | Fail closed | Nếu không bind được private method/RPC observer đúng version, không giả vờ báo catch/spin thành công. |

@@ -245,4 +245,37 @@ RuntimeEncounterPromisePollResult poll_pending_encounter_request(
     );
     return RuntimeEncounterPromisePollResult::kCompleted;
 }
+
+bool runtime_encounter_request_is_pending(ProbeContext &context) {
+    std::lock_guard<std::mutex> lock(context.pending_encounter_request_mutex);
+    return context.pending_encounter_request.active &&
+        !context.pending_encounter_request.promise_completed;
+}
+
 }  // namespace
+
+uint64_t runtime_pending_encounter_id(ProbeContext &context) {
+    std::lock_guard<std::mutex> lock(context.pending_encounter_request_mutex);
+    return context.pending_encounter_request.active
+        ? context.pending_encounter_request.encounter_id
+        : 0U;
+}
+
+MainThreadActionOutcome poll_runtime_encounter_on_main_thread(
+    ProbeContext &context,
+    uint64_t encounter_id
+) {
+    const RuntimeEncounterPromisePollResult poll_result =
+        poll_pending_encounter_request(context, encounter_id);
+    switch (poll_result) {
+        case RuntimeEncounterPromisePollResult::kWaiting:
+        case RuntimeEncounterPromisePollResult::kCompleted:
+            return MainThreadActionOutcome::kInvoked;
+        case RuntimeEncounterPromisePollResult::kFailed:
+        case RuntimeEncounterPromisePollResult::kTimedOut:
+            return MainThreadActionOutcome::kIndeterminate;
+        case RuntimeEncounterPromisePollResult::kNoPending:
+        default:
+            return MainThreadActionOutcome::kRejected;
+    }
+}

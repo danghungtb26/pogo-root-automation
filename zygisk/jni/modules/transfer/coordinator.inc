@@ -15,6 +15,15 @@ void on_runtime_catch_succeeded_on_main_thread(
         return;
     }
     const RuntimeTransferConfig config = runtime_transfer_config_snapshot();
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "native auto transfer trigger id=%llu configured=%d auto=%d revision=%llu",
+        static_cast<unsigned long long>(captured_pokemon_id),
+        config.configured ? 1 : 0,
+        config.auto_transfer ? 1 : 0,
+        static_cast<unsigned long long>(config.revision)
+    );
     if (!config.configured || !config.auto_transfer) {
         __android_log_print(
             ANDROID_LOG_INFO,

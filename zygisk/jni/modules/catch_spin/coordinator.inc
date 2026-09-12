@@ -5,6 +5,8 @@
 namespace {
 constexpr uint64_t kCatchSpinScanEveryTicks = 20U;  // ~2 s at a 100 ms tick.
 constexpr uint64_t kCatchSpinActionRetryDelayNs = 250000000ULL;
+constexpr uint64_t kCatchSpinPostCatchDelayMs = 1000U;
+constexpr double kCatchSpinFortInteractionRangeMeters = 80.0;
 
 struct RuntimeCatchSpinCoordinatorState {
     std::mutex mutex;
@@ -12,6 +14,7 @@ struct RuntimeCatchSpinCoordinatorState {
     uint64_t settle_until_ns = 0U;
     bool suspended = false;
     bool out_of_balls = false;
+    std::unordered_set<uint64_t> requested_catch_ids;
 };
 
 RuntimeCatchSpinCoordinatorState g_runtime_catch_spin_coordinator;
@@ -22,26 +25,61 @@ bool runtime_catch_spin_valid_coordinate(double latitude, double longitude) {
 }
 
 const pogo_runtime::RuntimeNearbySpawnObservation *select_catch_target(
-    const pogo_runtime::RuntimeCatchSpinObservation &snapshot
+    const pogo_runtime::RuntimeCatchSpinObservation &snapshot,
+    const std::unordered_set<uint64_t> &requested_catch_ids
 ) {
     if (!snapshot.nearby_available || !snapshot.nearby.is_complete) return nullptr;
     const pogo_runtime::RuntimeNearbySpawnObservation *selected = nullptr;
     for (const auto &spawn : snapshot.nearby.spawns) {
         if (spawn.spawn_id == 0U || !runtime_catch_spin_valid_coordinate(
                 spawn.latitude, spawn.longitude)) continue;
+        if (requested_catch_ids.find(spawn.spawn_id) != requested_catch_ids.end()) continue;
         if (selected == nullptr || spawn.spawn_id < selected->spawn_id) selected = &spawn;
     }
     return selected;
 }
 
 const pogo_runtime::RuntimeFortObservation *select_spin_target(
-    const pogo_runtime::RuntimeCatchSpinObservation &snapshot
+    const pogo_runtime::RuntimeCatchSpinObservation &snapshot,
+    double *selected_distance_meters,
+    size_t *in_range_count
 ) {
-    if (!snapshot.forts_available) return nullptr;
+    if (selected_distance_meters != nullptr) *selected_distance_meters = 0.0;
+    if (in_range_count != nullptr) *in_range_count = 0U;
+    if (!snapshot.forts_available || !snapshot.has_player_position ||
+        !runtime_catch_spin_valid_coordinate(
+            snapshot.player_latitude, snapshot.player_longitude
+        )) return nullptr;
+
+    constexpr double kEarthRadiusMeters = 6371000.0;
+    constexpr double kDegreesToRadians = 0.017453292519943295;
+    const double player_latitude = snapshot.player_latitude * kDegreesToRadians;
+    const double player_longitude = snapshot.player_longitude * kDegreesToRadians;
     const pogo_runtime::RuntimeFortObservation *selected = nullptr;
+    double selected_distance = 0.0;
     for (const auto &fort : snapshot.forts.forts) {
-        if (fort.fort_id.empty() || !fort.spin_available) continue;
-        if (selected == nullptr || fort.fort_id < selected->fort_id) selected = &fort;
+        if (fort.fort_id.empty() || !fort.spin_available ||
+            !runtime_catch_spin_valid_coordinate(fort.latitude, fort.longitude)) continue;
+        const double fort_latitude = fort.latitude * kDegreesToRadians;
+        const double fort_longitude = fort.longitude * kDegreesToRadians;
+        const double delta_latitude = fort_latitude - player_latitude;
+        const double delta_longitude = fort_longitude - player_longitude;
+        const double haversine = std::sin(delta_latitude / 2.0) *
+                std::sin(delta_latitude / 2.0) +
+            std::cos(player_latitude) * std::cos(fort_latitude) *
+                std::sin(delta_longitude / 2.0) * std::sin(delta_longitude / 2.0);
+        const double distance = kEarthRadiusMeters * 2.0 *
+            std::asin(std::sqrt(std::min(1.0, std::max(0.0, haversine))));
+        if (distance > kCatchSpinFortInteractionRangeMeters) continue;
+        if (in_range_count != nullptr) ++(*in_range_count);
+        if (selected == nullptr || distance < selected_distance ||
+            (distance == selected_distance && fort.fort_id < selected->fort_id)) {
+            selected = &fort;
+            selected_distance = distance;
+        }
+    }
+    if (selected_distance_meters != nullptr && selected != nullptr) {
+        *selected_distance_meters = selected_distance;
     }
     return selected;
 }
@@ -80,12 +118,22 @@ bool runtime_catch_spin_read_snapshot(
     pogo_runtime::RuntimeFortsObservation forts;
     const bool map_ok = request_main_thread_map_snapshot(context, &nearby, &forts);
 
-    bool has_player_position = nearby.has_player_position;
+    bool has_player_position = nearby.has_player_position && runtime_catch_spin_valid_coordinate(
+        nearby.player_latitude, nearby.player_longitude
+    );
     double player_latitude = nearby.player_latitude;
     double player_longitude = nearby.player_longitude;
     if (!has_player_position) {
         has_player_position = request_main_thread_player_position(
             context, &player_latitude, &player_longitude
+        );
+        __android_log_print(
+            has_player_position ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+            kLogTag,
+            "native catch_spin player position fallback success=%d lat=%.7f lng=%.7f",
+            has_player_position ? 1 : 0,
+            player_latitude,
+            player_longitude
         );
     }
 
@@ -146,12 +194,14 @@ void runtime_catch_spin_execute_catch(
     );
     switch (outcome) {
         case MainThreadActionOutcome::kInvoked:
+            g_runtime_catch_spin_coordinator.requested_catch_ids.insert(target.spawn_id);
             g_runtime_catch_spin_coordinator.suspended = true;
             __android_log_print(
                 ANDROID_LOG_INFO,
                 kLogTag,
-                "native catch_spin catch invoked spawn=%llu; waiting for TryCapture Promise",
-                static_cast<unsigned long long>(target.spawn_id)
+                "native catch_spin catch requested spawn=%llu memory_size=%zu; waiting for TryCapture Promise",
+                static_cast<unsigned long long>(target.spawn_id),
+                g_runtime_catch_spin_coordinator.requested_catch_ids.size()
             );
             break;
         case MainThreadActionOutcome::kIndeterminate:
@@ -224,10 +274,21 @@ void reset_runtime_catch_spin_coordinator() {
     g_runtime_catch_spin_coordinator.settle_until_ns = 0U;
     g_runtime_catch_spin_coordinator.suspended = false;
     g_runtime_catch_spin_coordinator.out_of_balls = false;
+    g_runtime_catch_spin_coordinator.requested_catch_ids.clear();
 }
 
 void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     if (tick.tick % kCatchSpinScanEveryTicks != 0U) return;
+    const uint64_t pending_encounter_id = runtime_pending_encounter_id(tick.context);
+    if (pending_encounter_id != 0U) {
+        const MainThreadActionOutcome encounter_poll = request_main_thread_poll_encounter(
+            tick.context,
+            pending_encounter_id
+        );
+        if (encounter_poll == MainThreadActionOutcome::kIndeterminate) {
+            runtime_catch_spin_log_rejected("encounter", "promise_poll_failed");
+        }
+    }
     const MainThreadActionOutcome promise_poll = request_main_thread_poll_direct_catch(tick.context);
     if (promise_poll != MainThreadActionOutcome::kRejected) {
         PendingDirectCatch terminal;
@@ -239,15 +300,21 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
             // sticky; otherwise a successful ReleasePokemon Promise would
             // leave catch-spin suspended forever.
             g_runtime_catch_spin_coordinator.suspended = false;
-            runtime_catch_spin_settle(1000U);
+            const bool catch_success = terminal.catch_outcome_wire == 1U;
+            if (catch_success) {
+                runtime_catch_spin_settle(kCatchSpinPostCatchDelayMs);
+            }
             __android_log_print(
                 terminal.catch_outcome_wire == 1U ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                 kLogTag,
                 "native catch_spin TryCapture Promise settled spawn=%llu outcome=%u "
-                "map sync attempted transfer_busy=%d",
+                "map sync attempted transfer_busy=%d post_catch_delay_ms=%llu",
                 static_cast<unsigned long long>(terminal.encounter_id),
                 terminal.catch_outcome_wire,
-                transfer_busy ? 1 : 0
+                transfer_busy ? 1 : 0,
+                static_cast<unsigned long long>(
+                    catch_success ? kCatchSpinPostCatchDelayMs : 0U
+                )
             );
         }
     }
@@ -256,7 +323,18 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     const RuntimeCatchSpinConfig config = runtime_catch_spin_config_snapshot();
     if (!g_runtime_active.load() || !config.configured || !config.armed ||
         !((config.auto_catch && config.catch_all) || config.auto_spin)) return;
-    if (tick.context.active_encounter_id.load() != 0U) return;
+    if (tick.context.active_encounter_id.load() != 0U) {
+        runtime_catch_spin_log_rejected("scan", "active_encounter");
+        return;
+    }
+    if (runtime_direct_catch_is_pending(tick.context)) {
+        runtime_catch_spin_log_rejected("scan", "direct_catch_promise_pending");
+        return;
+    }
+    if (runtime_encounter_request_is_pending(tick.context)) {
+        runtime_catch_spin_log_rejected("scan", "encounter_promise_pending");
+        return;
+    }
     if (g_runtime_catch_spin_coordinator.suspended || runtime_transfer_blocks_catch_spin()) return;
 
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
@@ -294,8 +372,21 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     if (ball_count == 0) g_runtime_catch_spin_coordinator.out_of_balls = true;
     if (ball_count > 0) g_runtime_catch_spin_coordinator.out_of_balls = false;
 
-    const auto *target = select_catch_target(snapshot);
     const bool catch_enabled = config.auto_catch && config.catch_all;
+    const auto *target = select_catch_target(
+        snapshot,
+        g_runtime_catch_spin_coordinator.requested_catch_ids
+    );
+    if (catch_enabled && target == nullptr && !snapshot.nearby.spawns.empty() &&
+        !g_runtime_catch_spin_coordinator.requested_catch_ids.empty()) {
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "native catch_spin no new catch target nearby=%zu requested_memory=%zu",
+            snapshot.nearby.spawns.size(),
+            g_runtime_catch_spin_coordinator.requested_catch_ids.size()
+        );
+    }
     if (catch_enabled && target != nullptr && ball_count > 0 &&
         !g_runtime_catch_spin_coordinator.out_of_balls) {
         runtime_catch_spin_execute_catch(tick.context, binding, *target);
@@ -305,10 +396,37 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     const bool force_spin_for_balls = catch_enabled && target != nullptr &&
         g_runtime_catch_spin_coordinator.out_of_balls;
     if (!config.auto_spin && !force_spin_for_balls) return;
-    const auto *fort = select_spin_target(snapshot);
+    double fort_distance_meters = 0.0;
+    size_t in_range_forts = 0U;
+    const auto *fort = select_spin_target(
+        snapshot, &fort_distance_meters, &in_range_forts
+    );
     if (fort == nullptr) {
-        runtime_catch_spin_log_rejected("spin", "no_available_fort");
+        runtime_catch_spin_log_rejected(
+            "spin",
+            snapshot.has_player_position
+                ? "no_available_fort_in_interaction_range"
+                : "player_position_unavailable"
+        );
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "native catch_spin spin filter forts=%zu in_range=%zu player=%d range_m=%.1f",
+            snapshot.forts.forts.size(),
+            in_range_forts,
+            snapshot.has_player_position ? 1 : 0,
+            kCatchSpinFortInteractionRangeMeters
+        );
         return;
     }
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "native catch_spin spin target selected fort=%s distance_m=%.1f in_range=%zu range_m=%.1f",
+        fort->fort_id.c_str(),
+        fort_distance_meters,
+        in_range_forts,
+        kCatchSpinFortInteractionRangeMeters
+    );
     runtime_catch_spin_execute_spin(tick.context, config, *fort);
 }

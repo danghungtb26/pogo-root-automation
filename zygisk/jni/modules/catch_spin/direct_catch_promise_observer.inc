@@ -117,6 +117,11 @@ bool begin_pending_direct_catch(
     return true;
 }
 
+bool runtime_direct_catch_is_pending(ProbeContext &context) {
+    std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
+    return context.pending_direct_catch.active && !context.pending_direct_catch.terminal;
+}
+
 void abandon_pending_direct_catch(ProbeContext &context, const char *reason) {
     Il2CppGcHandle handle = 0U;
     uint64_t encounter_id = 0U;

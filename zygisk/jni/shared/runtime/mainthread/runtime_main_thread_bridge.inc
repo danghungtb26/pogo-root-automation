@@ -249,6 +249,9 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
             : poll_result == RuntimeDirectCatchPromisePollResult::kNoPending
                 ? MainThreadActionOutcome::kRejected
                 : MainThreadActionOutcome::kIndeterminate;
+    } else if (task_type == MainThreadTaskType::kPollEncounter) {
+        action_outcome = poll_runtime_encounter_on_main_thread(*context, encounter_id);
+        task_success = action_outcome != MainThreadActionOutcome::kRejected;
     } else if (task_type == MainThreadTaskType::kPollTransfer) {
         const RuntimeTransferPromisePollResult poll_result =
             poll_pending_runtime_transfer_on_main_thread(*context);

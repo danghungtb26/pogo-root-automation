@@ -263,7 +263,7 @@ void discover_runtime_owners(
         {"Niantic.Holoholo", "IItemBag", "IItemBag", "ItemBagImpl"},
         {"Niantic.Holoholo", "IPokemonBag", "IPokemonBag", "PokemonBagImpl"},
         {"", "IGameMasterData", "IGameMasterData", "GameMasterData"},
-        {"Niantic.Holoholo", "ILocationProvider", "ILocationProvider", "LocationProviderAdapter"},
+        {"Niantic.Holoholo", "ILocationProvider", "ILocationProvider", "NativeLocationProvider"},
         {"Niantic.Holoholo.Encounter", "IEncounterPokemon", "IEncounterPokemon", "EncounterPokemon"},
         {"Niantic.Holoholo.Encounter", "IEncounterState", "IEncounterState", "EncounterState"},
         {"Niantic.Holoholo.Encounter", "IEncounterInteractionState", "IEncounterInteractionState", "EncounterInteractionState"},
@@ -438,29 +438,24 @@ void discover_runtime_owners(
         if (strcmp(service.label, "ILocationProvider") == 0 && owner != nullptr &&
             api.object_get_class != nullptr && api.class_get_method_from_name != nullptr) {
             Il2CppClass *owner_class = api.object_get_class(owner);
-            const void *get_current = owner_class == nullptr ? nullptr
-                : api.class_get_method_from_name(owner_class, "get_CurrentLocation", 0);
-            Il2CppClass *location_class = find_runtime_class(
-                api, assemblies, assembly_count,
-                "Niantic.Platform.Ditto.Geo", "Location", nullptr
+            const void *get_location = find_runtime_instance_method_in_hierarchy(
+                api, owner_class, "get_Location", 0U
             );
-            const void *get_lat = location_class == nullptr ? nullptr
-                : api.class_get_method_from_name(location_class, "get_LatitudeDeg", 0);
-            const void *get_lng = location_class == nullptr ? nullptr
-                : api.class_get_method_from_name(location_class, "get_LongitudeDeg", 0);
-            if (get_current != nullptr && get_lat != nullptr && get_lng != nullptr) {
+            const void *get_has_valid = find_runtime_instance_method_in_hierarchy(
+                api, owner_class, "get_HasValidLocation", 0U
+            );
+            if (get_location != nullptr && get_has_valid != nullptr) {
                 binding->location_provider = owner;
-                binding->location_get_current = get_current;
-                binding->location_get_latitude = get_lat;
-                binding->location_get_longitude = get_lng;
+                binding->location_get_location = get_location;
+                binding->location_get_has_valid = get_has_valid;
                 binding->location_read_verified = true;
             }
             __android_log_print(
                 binding->location_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                 kLogTag,
-                "managed diagnostic: location provider verified=%d owner=%p current=%p lat=%p lng=%p",
+                "managed diagnostic: location provider verified=%d owner=%p location=%p has_valid=%p",
                 binding->location_read_verified ? 1 : 0,
-                owner, get_current, get_lat, get_lng
+                owner, get_location, get_has_valid
             );
         }
         if (strcmp(service.label, "IPokeballService") == 0 && owner != nullptr &&

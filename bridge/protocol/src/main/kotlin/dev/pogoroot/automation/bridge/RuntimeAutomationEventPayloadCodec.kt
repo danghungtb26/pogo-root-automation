@@ -8,6 +8,8 @@ enum class RuntimeAutomationEventType(val wireValue: Int) {
     POKEMON_CAUGHT(2),
     POKEMON_FLED(3),
     POKEMON_TRANSFERRED(4),
+    POKEMON_TRANSFER_TRIGGERED(5),
+    POKEMON_TRANSFER_FAILED(6),
 }
 
 data class RuntimeAutomationEventPayload(

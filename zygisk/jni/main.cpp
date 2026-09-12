@@ -74,6 +74,7 @@
 #include "modules/transfer/config.inc"
 #include "modules/transfer/metadata.inc"
 #include "modules/transfer/promise_observer.inc"
+#include "modules/transfer/release_promise_observer.inc"
 #include "modules/transfer/execute.inc"
 #include "modules/transfer/coordinator.inc"
 

@@ -374,3 +374,53 @@ remove planner/pending transfer Kotlin nhưng giữ UI/persistence và dispatche
    BlueStacks Air 1.
 
 Chưa implement code, build, push hoặc install trong lượt phân tích này.
+
+## 12. Follow-up: chống catch trùng và trace transfer
+
+### Hiện tượng và nguyên nhân bổ sung
+
+Yêu cầu follow-up ghi nhận hai race/state gap: snapshot map có thể trả lại cùng
+`spawn_id` ở vòng quét kế tiếp sau khi catch đã được invoke; ngoài ra observer
+chưa chặn riêng pending `SendEncounterRequest`/`TryCapture`, nên một vòng quét
+mới có thể tiếp tục đi vào nhánh catch trước khi Promise có result. Native đã có
+`suspended` nhưng đây là state tổng quát, chưa đủ để log rõ nguyên nhân và không
+bao phủ encounter Promise khi direct catch tạm thời bị abandon.
+
+Transfer cũng có một lỗi semantics: `finish_runtime_transfer()` coi mọi terminal
+phase completed không có error là success. Nhánh metadata quyết định `KEEP` cũng
+đi qua handler này, nên có thể phát `POKEMON_TRANSFERRED` dù `ReleasePokemon`
+chưa hề được gọi. Điều này làm log/toast gây hiểu nhầm khi người dùng kiểm tra
+vì sao transfer không chạy.
+
+### Thay đổi đã triển khai
+
+- `RuntimeCatchSpinCoordinatorState` giữ `std::unordered_set<uint64_t>` theo
+  `spawn_id`; chỉ insert sau khi direct catch thực sự trả
+  `MainThreadActionOutcome::kInvoked`, và selector bỏ qua các ID đã ghi nhớ.
+- Scan early-return khi có active encounter, pending `TryCapture`, hoặc pending
+  `SendEncounterRequest`; các nhánh đều có log reason riêng.
+- Transfer state giữ `release_attempted` và `release_invoked`; terminal được
+  phân loại chính xác thành `KEEP`, `SUCCESS` hoặc `FAILED`.
+- Native phát event telemetry `POKEMON_TRANSFER_TRIGGERED` sau khi
+  `ReleasePokemon` Promise được retain; terminal success/failure phát event
+  tương ứng. Kotlin map các event này thành custom toast.
+- Release Promise observer được tách thành
+  `zygisk/jni/modules/transfer/release_promise_observer.inc` để giữ giới hạn
+  500 dòng/source file.
+
+### Acceptance Criteria follow-up
+
+| ID | Tiêu chí nghiệm thu | Expected |
+|---|---|---|
+| AC-AT-12 | Không catch lại spawn đã request | Cùng `spawn_id` không được invoke direct catch lần hai trong session/module run |
+| AC-AT-13 | Chặn khi encounter/catch Promise pending | Không có map scan/action catch mới trước khi Promise terminal hoặc bị fail-safe block |
+| AC-AT-14 | Phân biệt KEEP và transfer | KEEP không phát transfer success/trigger và không gọi `ReleasePokemon` |
+| AC-AT-15 | Trace transfer end-to-end | Log/toast có `queued` → `trigger` → Promise `state/result` → success/failed |
+| AC-AT-16 | Transfer toast đúng terminal | Chỉ Promise ReleasePokemon success mới hiện `Transfer success`; error/indeterminate hiện `Transfer failed` |
+
+### Verification follow-up
+
+`ANDROID_NDK="$HOME/Library/Android/sdk/ndk/27.1.12297006" ./scripts/build-magisk.sh`
+đã pass cho arm64-v8a và x86_64. `./gradlew test assembleDebug --rerun-tasks`
+đã pass; project hiện không có source unit test cho bridge protocol nên các
+Gradle test task liên quan trả `NO-SOURCE`.

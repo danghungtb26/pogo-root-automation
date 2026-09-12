@@ -25,8 +25,6 @@ import dev.pogoroot.automation.pogo.BridgePogoRuntimeSource
 import dev.pogoroot.automation.pogo.PogoGameAdapter
 import dev.pogoroot.automation.pogo.RuntimeThrowDiagnosticPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayloadCodec
-import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayload
-import dev.pogoroot.automation.bridge.RuntimeAutomationEventType
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.config.toCorePolicy
 import dev.pogoroot.automation.data.LastActiveGameAction
@@ -392,31 +390,6 @@ class StructuredAutomationController(
             ?: action.encounterId
         catchLabelsByCommand[request.commandId] = label
     }
-
-    private fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent = when (type) {
-        RuntimeAutomationEventType.POKEMON_FOUND -> AutomationEvent(
-            AutomationEventType.INFO,
-            "Found Pokémon #${secondaryId.toUnsignedDecimal()} to catch",
-        )
-        RuntimeAutomationEventType.POKEMON_CAUGHT -> AutomationEvent(
-            AutomationEventType.CAUGHT,
-            if (secondaryId != 0L) {
-                "Catch success: Pokémon #${secondaryId.toUnsignedDecimal()}"
-            } else {
-                "Catch success"
-            },
-        )
-        RuntimeAutomationEventType.POKEMON_FLED -> AutomationEvent(
-            AutomationEventType.RAN_AWAY,
-            "Pokémon fled",
-        )
-        RuntimeAutomationEventType.POKEMON_TRANSFERRED -> AutomationEvent(
-            AutomationEventType.TRANSFERRED,
-            "Transfer success: Pokémon #${primaryId.toUnsignedDecimal()}",
-        )
-    }
-
-    private fun Long.toUnsignedDecimal(): String = toULong().toString()
 
     private fun isAuthoritativeCatchResult(
         request: dev.pogoroot.automation.core.automation.ActionRequest,

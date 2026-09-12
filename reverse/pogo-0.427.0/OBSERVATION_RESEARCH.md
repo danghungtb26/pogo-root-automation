@@ -33,13 +33,16 @@ RVAs are version-scoped to this exact build. Re-verify if the build changes.
 | Mode B hook (per-batch cells) | `MapQueryManager.ProcessCellsFromResponse(IEnumerable<MapS2Cell>)` | same | `0x9995900` |
 | Entity delta classifier (mode A ref) | `MapQueryManager.Process(visible/updated/hidden/deleted/disposed/translate)` | same | `0x9995FEC` |
 | Per-cell merge | `MapQueryManager.MergeCellUpdate(MapS2Cell)` | same | `0x998D684` |
-| Player position | `LocationProviderAdapter.get_CurrentLocation()` → `Location` | impl of `Niantic.Holoholo.ILocationProvider` | `0x8AA6D38` |
-| Player lat/lng | `Location.get_LatitudeDeg()` / `get_LongitudeDeg()` (double) | `Niantic.Platform.Ditto.Geo.Location` (struct) | `0x9964C24` / `0x9964C34` |
+| Player position | `NativeLocationProvider.get_Location()` → `LatLng` | impl of `Niantic.Holoholo.ILocationProvider` | `0x7FDA298` |
+| Player location validity | `NativeLocationProvider.get_HasValidLocation()` | impl of `Niantic.Holoholo.ILocationProvider` | `0x7FDA358` |
 | Direct catch | `MapPokemon/WildMapPokemon.TryCapture(PokeballThrow, ARPlusEncounterValuesProto)` | `Niantic.Holoholo.Map` | `0x83A3CC8` / `0x8A1EDCC` (base `0x7F91ECC`), Slot 42 |
 
 `PokeballThrow` is a **value struct** (`Item BallType @0x0`, `float ReticleSize @0x4`, `bool HitBullseye/Spinning/Missed @0x8/0x9/0xA`) — this matches the native `DirectMapPokeballThrow` layout exactly, confirming the by-value ABI used by the direct-catch invocation is correct.
 
-`Location` is a value struct in `Niantic.Platform.Ditto.Geo` exposing `LatitudeDeg`/`LongitudeDeg` (double) getters; `ILocationProvider.get_CurrentLocation` returns it by value.
+`ILocationProvider.get_Location` returns a `LatLng` value struct with two `double` fields
+(`Latitude` at `0x0`, `Longitude` at `0x8`). `Niantic.Platform.Ditto.Geo.Location` and
+`IDeviceManager.get_CurrentLocation` are a separate API and must not be used as the
+`ILocationProvider` binding.
 
 ## Important DummyDll limitation
 
@@ -273,17 +276,28 @@ Only if no stable callback can be runtime-verified:
 
 This is the part the reader does not compute yet. Publishing a target's `lat/lng` is not enough; the trigger needs distance-to-player and a range threshold.
 
-Mechanism 1 — **player position (now wired, needs device verify).** Implemented via `ILocationProvider` (impl `LocationProviderAdapter`): resolved in `runtime_probe_discovery.inc` (`location_get_current` + `Location.get_LatitudeDeg/get_LongitudeDeg`), read by `read_runtime_player_position` (`runtime_map_forts.inc`), attached to `RuntimeNearbyObservation` and serialized in nearby payload **v2**, decoded by `RuntimeNearbyPayloadCodec` into `RawNearbyObservation.playerLatitude/Longitude`. `Location` is a value struct returned by value, so the getters are invoked with the unboxed interior pointer — this value-type invoke ABI is the part to confirm on device. (The old `append_optional_absent` at `runtime_bridge_protocol.inc:349-350` belongs to the separate `map_target` message path, not the nearby payload.)
+Mechanism 1 — **player position (now wired, needs device verify).** Implemented via
+`ILocationProvider` (concrete `NativeLocationProvider`): resolved in
+`runtime_probe_discovery.inc` (`get_Location` + `get_HasValidLocation`), read by
+`read_runtime_player_position` (`runtime_map_forts.inc`), attached to
+`RuntimeNearbyObservation` and serialized in nearby payload **v2**, decoded by
+`RuntimeNearbyPayloadCodec` into `RawNearbyObservation.playerLatitude/Longitude`.
+`LatLng` is a value struct returned by value, so native unboxes the two doubles directly.
+(The old `append_optional_absent` at `runtime_bridge_protocol.inc:349-350` belongs to the
+separate `map_target` message path, not the nearby payload.)
 
-Preferred source — `Niantic.Holoholo.ILocationProvider` (impl `LocationProviderAdapter`), holo-game.dll. Chosen because the runtime's service dispatcher **already lists it** as a resolvable candidate (`zygisk/jni/runtime_probe_discovery.inc:265`), so no new resolution machinery is needed. Members (`STATIC_NAME`):
+Preferred source — `Niantic.Holoholo.ILocationProvider` (impl `NativeLocationProvider`),
+holo-game.dll. Chosen because the runtime's service dispatcher **already lists it** as a
+resolvable candidate (`zygisk/jni/runtime_probe_discovery.inc:265`), so no new resolution
+machinery is needed. Members (`STATIC_NAME`):
 
-- `get_CurrentLocation` — on-demand player position for the rate-limited pump.
+- `get_Location` — on-demand player position for the rate-limited pump.
+- `get_HasValidLocation` — prevents treating the default `(0,0)` LatLng as a live position.
 - `add_OnLocationChanged` / `remove_OnLocationChanged` — the cheap, low-frequency player-movement event that drives the in-range recompute in the low-lag design above (this is the mode-A boundary for *position*, distinct from the map-data boundary).
-- `get_LocationLatLng`.
 
 Other candidates seen in the dump if `ILocationProvider` proves unsuitable at runtime: `Niantic.Titan.Core` `ITitanPlayerLocationService.GetPlayerLocation()` + `get_HasValidLocation` (return type `TitanS2LatLng`, fields `latitude`/`longitude`/`latRadians`); its holo-game wrapper `GameExtendedTitanPlayerLocationService`; and `Niantic.Titan.GeoClientCoreUnity` `get_CurrentAvatarLocation`.
 
-LatLng shape: the existing readers already handle both variants — `WildMapPokemon.get_Location()` exposes named `Latitude`/`Longitude` fields read via `read_runtime_field` (`runtime_observation.inc:141-142`), while `MapPokestop.get_Location()` returns a boxed `{double latitude; double longitude}` struct (`runtime_map_forts.inc:34-35`). Confirm which shape `ILocationProvider.get_CurrentLocation` returns at runtime and reuse the matching reader.
+LatLng shape: the existing readers already handle both variants — `WildMapPokemon.get_Location()` exposes named `Latitude`/`Longitude` fields read via `read_runtime_field` (`runtime_observation.inc:141-142`), while `MapPokestop.get_Location()` and `ILocationProvider.get_Location()` return boxed `{double latitude; double longitude}` structs (`runtime_map_forts.inc`).
 
 Missing mechanism 2 — **range thresholds.** Do not hardcode. GameMaster carries them (`STATIC_NAME`):
 
@@ -472,7 +486,7 @@ holo-protos.dll
 
 Priority order (updated — discovery of the concrete types is done; the work is now the low-lag event boundary and the near-player gate):
 
-1. **Wire player position.** Resolve `Niantic.Holoholo.ILocationProvider` (already a dispatcher candidate at `runtime_probe_discovery.inc:265`) via `get_CurrentLocation` + `add_OnLocationChanged`, and populate the two currently-absent player-coordinate fields. Fallbacks: `ITitanPlayerLocationService.GetPlayerLocation()` (Titan.Core) or `get_CurrentAvatarLocation` (GeoClientCoreUnity). Highest value; unblocks all distance logic.
+1. **Wire player position.** Resolve `Niantic.Holoholo.ILocationProvider` (already a dispatcher candidate at `runtime_probe_discovery.inc:265`) via `get_Location` + `get_HasValidLocation`, and populate the two currently-absent player-coordinate fields. Fallbacks: `ITitanPlayerLocationService.GetPlayerLocation()` (Titan.Core) or `get_CurrentAvatarLocation` (GeoClientCoreUnity). Highest value; unblocks all distance logic.
 2. **Pull range/cooldown from GameMaster** (`MapObjectsInteractionRangeSettings` / `RemoteInteractionRangeMeters`, `EncounterRangeM`, `pokestopCoolDownPeriodMs`) instead of hardcoding, or capture them as version-scoped constants.
 3. **Find the coarse batch trigger** for mode B: confirm `OnMapQueryResponseReceived` / `ProcessCellsFromResponse` fires once per server map update and can drive a dirty flag (measure its frequency vs. per-entity `SpawnOrUpdateMapPokemon`).
 4. Verify thread + frequency + object lifetime for the holo-game lifecycle candidates (`SpawnOrUpdateMapPokemon`/`RemoveMapPokemon`, `AddPokestop`/`RemovePokestop`) before promoting any to a permanent hook.

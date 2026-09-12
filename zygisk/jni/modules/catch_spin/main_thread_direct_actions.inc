@@ -97,6 +97,15 @@ MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &cont
     );
 }
 
+MainThreadActionOutcome request_main_thread_poll_encounter(
+    ProbeContext &context,
+    uint64_t encounter_id
+) {
+    return request_main_thread_direct_action(
+        context, MainThreadTaskType::kPollEncounter, encounter_id, ""
+    );
+}
+
 MainThreadActionOutcome request_main_thread_poll_runtime_transfer(ProbeContext &context) {
     return request_main_thread_direct_action(
         context, MainThreadTaskType::kPollTransfer, 0U, ""
