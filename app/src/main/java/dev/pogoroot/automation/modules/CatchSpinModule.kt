@@ -23,5 +23,11 @@ val CatchSpinModuleDescriptor = RuntimeFeatureModuleDescriptor(
     // catch_spin is the ONLY module that depends on the master arm: it activates
     // only while armed AND a catch/spin behaviour is on. This rule lives here, not
     // in any central reducer.
-    isActive = { it.armed && ((it.config.autoCatch && it.config.catchAll) || it.config.autoSpin) },
+    isActive = {
+        it.armed && (
+            (it.config.autoCatch && it.config.catchAll) ||
+                it.config.autoSpin ||
+                it.config.autoWalkToFort
+            )
+    },
 )

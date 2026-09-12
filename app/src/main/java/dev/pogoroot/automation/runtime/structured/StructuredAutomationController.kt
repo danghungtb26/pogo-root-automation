@@ -14,6 +14,7 @@ import dev.pogoroot.automation.core.automation.AutomationObservation
 import dev.pogoroot.automation.core.automation.AutomationRunner
 import dev.pogoroot.automation.core.automation.AutomationRunnerStatus
 import dev.pogoroot.automation.core.automation.AutomationSnapshot
+import dev.pogoroot.automation.core.automation.AutoFortNavigationSignal
 import dev.pogoroot.automation.core.automation.CatchOutcome
 import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.model.GameLifecycleState
@@ -40,6 +41,10 @@ class StructuredAutomationController(
     private val onGameAction: (LastActiveGameAction) -> Unit = {},
     private val onEncounterSnapshot: (EncounterSnapshot) -> Unit = {},
     private val onMapTarget: (MapTargetObservation) -> Unit = {},
+    private val onNavigationEnabledChanged: (Boolean) -> Unit = {},
+    private val onNavigationSnapshot: (AutomationSnapshot) -> Unit = {},
+    private val onNavigationSignal: (AutoFortNavigationSignal) -> Unit = {},
+    private val onNavigationReset: () -> Unit = {},
 ) {
     private val configuredAllowedBuildFingerprints = allowedBuildFingerprints.toSet()
     private val source = BridgePogoRuntimeSource(bridge)
@@ -71,12 +76,12 @@ class StructuredAutomationController(
     private val requestedCatchPokemonIds = linkedSetOf<String>()
     private var resetRunnerOnNextAttach = false
     fun tick(config: HeadlessAutomationConfig): Result<StructuredAutomationTick> = runCatching {
+        onNavigationEnabledChanged(config.autoWalkToFort)
         syncSafetyConfig()
         ensureConnected()
         source.refresh().getOrThrow()
         val runtimeMetadata = source.runtimeMetadata ?: error("runtime session disappeared")
         syncRuntimeIdentity(runtimeMetadata.ready)
-
         var submitted = false
         var observationSeq: Long? = null
         val events = source.drainEvents().getOrThrow()
@@ -90,6 +95,7 @@ class StructuredAutomationController(
                         if (event.observationType == dev.pogoroot.automation.bridge.ObservationType.AUTOMATION_EVENT) {
                             RuntimeAutomationEventPayloadCodec.decode(event.payload)
                                 .onSuccess { decoded ->
+                                    decoded.toAutoFortNavigationSignal()?.let(onNavigationSignal)
                                     decoded.toAutomationEvent()?.let(eventSink::publish)
                                         ?: Log.w(
                                             LOG_TAG,
@@ -172,6 +178,7 @@ class StructuredAutomationController(
                                 "poke_ball_count=$pokeBallCount",
                         )
                         snapshot.encounter?.let(onEncounterSnapshot)
+                        onNavigationSnapshot(snapshot)
                         (snapshot.nearby?.playerPosition ?: snapshot.encounter?.position)
                             ?.let { latestPlayerPosition = it }
                         val automationObservation = AutomationObservation(
@@ -216,6 +223,7 @@ class StructuredAutomationController(
                         dispatch.request?.let {
                             (it.action as? AutomationAction.Catch)?.encounterId?.let {
                                 requestedCatchPokemonIds += it
+                                onNavigationSignal(AutoFortNavigationSignal.POKEMON_FOUND)
                             }
                             rememberCatchLabel(it, snapshot)
                             submitted = true
@@ -262,6 +270,7 @@ class StructuredAutomationController(
     fun snapshot(): AutomationRunnerStatus = runner.snapshot()
     fun awaitingActionResult(): Boolean = runner.snapshot().activeExecution != null
     fun resetForAutomationDisable() {
+        onNavigationReset()
         if (connected) source.disconnect()
         connected = false
         resetRunnerOnNextAttach = true
@@ -273,7 +282,6 @@ class StructuredAutomationController(
         catchLabelsByCommand.clear()
         publishedCatchOutcomeCommands.clear()
     }
-
     fun stop() = resetForAutomationDisable()
     private fun ensureConnected() {
         if (connected) return
@@ -291,14 +299,12 @@ class StructuredAutomationController(
         connected = true
         lastError = null
     }
-
     private fun syncSafetyConfig() {
         val allowlist = currentAllowedBuildFingerprints()
         sessionManager.updateAllowedBuildFingerprints(allowlist)
         actionExecutor.updateAllowedBuildFingerprints(allowlist)
         runner.updateMutationPermission(sessionManager.mutationsAllowed)
     }
-
     private fun syncRuntimeIdentity(ready: BridgeEvent.RuntimeReady) {
         if (sessionManager.current != ready) {
             sessionManager.accept(ready).getOrThrow()
@@ -431,6 +437,11 @@ class StructuredAutomationController(
             CatchOutcome.BREAKOUT -> AutomationEvent(AutomationEventType.INFO, "$label broke out")
             CatchOutcome.NO_BALL -> AutomationEvent(AutomationEventType.ERROR, "No Poké Balls for $label")
             CatchOutcome.INDETERMINATE -> return
+        }
+        when (outcome) {
+            CatchOutcome.CAUGHT -> onNavigationSignal(AutoFortNavigationSignal.POKEMON_CAUGHT)
+            CatchOutcome.FLED -> onNavigationSignal(AutoFortNavigationSignal.POKEMON_FLED)
+            else -> Unit
         }
         eventSink.publish(event)
     }

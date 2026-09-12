@@ -61,6 +61,7 @@ fun HeadlessAutomationConfig.toRuntimeCatchSpinConfig(armed: Boolean): RuntimeCa
         // Direct-map nearby data currently supports catch-all only. Keep this
         // explicit in the wire snapshot so native does not infer a policy.
         catchAll = catchAll,
+        autoWalkToFort = autoWalkToFort,
         spinSettleDelayMs = spinSettleDelayMs,
         catchSettleDelayMs = catchSettleDelayMs,
     )

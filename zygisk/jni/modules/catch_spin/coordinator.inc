@@ -21,75 +21,7 @@ bool runtime_catch_spin_valid_coordinate(double latitude, double longitude) {
         std::isfinite(longitude) && longitude >= -180.0 && longitude <= 180.0;
 }
 
-const pogo_runtime::RuntimeNearbySpawnObservation *select_catch_target(
-    const pogo_runtime::RuntimeCatchSpinObservation &snapshot,
-    const std::unordered_set<uint64_t> &requested_catch_ids
-) {
-    if (!snapshot.nearby_available || !snapshot.nearby.is_complete) return nullptr;
-    const pogo_runtime::RuntimeNearbySpawnObservation *selected = nullptr;
-    for (const auto &spawn : snapshot.nearby.spawns) {
-        if (spawn.spawn_id == 0U || !runtime_catch_spin_valid_coordinate(
-                spawn.latitude, spawn.longitude)) continue;
-        if (requested_catch_ids.find(spawn.spawn_id) != requested_catch_ids.end()) continue;
-        if (selected == nullptr || spawn.spawn_id < selected->spawn_id) selected = &spawn;
-    }
-    return selected;
-}
-
-const pogo_runtime::RuntimeFortObservation *select_spin_target(
-    const pogo_runtime::RuntimeCatchSpinObservation &snapshot,
-    RuntimeFortCooldownDeadlines *fort_cooldown_deadlines,
-    uint64_t now_epoch_ms,
-    double *selected_distance_meters,
-    size_t *in_range_count
-) {
-    if (selected_distance_meters != nullptr) *selected_distance_meters = 0.0;
-    if (in_range_count != nullptr) *in_range_count = 0U;
-    if (!snapshot.forts_available || !snapshot.has_player_position ||
-        !runtime_catch_spin_valid_coordinate(
-            snapshot.player_latitude, snapshot.player_longitude
-        )) return nullptr;
-
-    constexpr double kEarthRadiusMeters = 6371000.0;
-    constexpr double kDegreesToRadians = 0.017453292519943295;
-    const double player_latitude = snapshot.player_latitude * kDegreesToRadians;
-    const double player_longitude = snapshot.player_longitude * kDegreesToRadians;
-    const pogo_runtime::RuntimeFortObservation *selected = nullptr;
-    double selected_distance = 0.0;
-    for (const auto &fort : snapshot.forts.forts) {
-        if (fort.fort_id.empty() || !fort.spin_available ||
-            !runtime_catch_spin_valid_coordinate(fort.latitude, fort.longitude)) continue;
-        if (runtime_fort_cooldown_active(
-                fort_cooldown_deadlines,
-                fort.fort_id,
-                now_epoch_ms,
-                nullptr
-            )) {
-            continue;
-        }
-        const double fort_latitude = fort.latitude * kDegreesToRadians;
-        const double fort_longitude = fort.longitude * kDegreesToRadians;
-        const double delta_latitude = fort_latitude - player_latitude;
-        const double delta_longitude = fort_longitude - player_longitude;
-        const double haversine = std::sin(delta_latitude / 2.0) *
-                std::sin(delta_latitude / 2.0) +
-            std::cos(player_latitude) * std::cos(fort_latitude) *
-                std::sin(delta_longitude / 2.0) * std::sin(delta_longitude / 2.0);
-        const double distance = kEarthRadiusMeters * 2.0 *
-            std::asin(std::sqrt(std::min(1.0, std::max(0.0, haversine))));
-        if (distance > kCatchSpinFortInteractionRangeMeters) continue;
-        if (in_range_count != nullptr) ++(*in_range_count);
-        if (selected == nullptr || distance < selected_distance ||
-            (distance == selected_distance && fort.fort_id < selected->fort_id)) {
-            selected = &fort;
-            selected_distance = distance;
-        }
-    }
-    if (selected_distance_meters != nullptr && selected != nullptr) {
-        *selected_distance_meters = selected_distance;
-    }
-    return selected;
-}
+#include "requested_catch_ids.inc"
 
 // Returns -1 only when the inventory source is unavailable. The native inventory
 // reader emits non-zero stacks only, so an absent Poké Ball item is a verified
@@ -295,6 +227,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         );
         if (encounter_poll == MainThreadActionOutcome::kIndeterminate) {
             runtime_catch_spin_log_rejected("encounter", "promise_poll_failed");
+            remember_requested_catch_skip(pending_encounter_id);
         }
     }
     const MainThreadActionOutcome promise_poll = request_main_thread_poll_direct_catch(tick.context);
@@ -366,7 +299,8 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
 
     const RuntimeCatchSpinConfig config = runtime_catch_spin_config_snapshot();
     if (!g_runtime_active.load() || !config.configured || !config.armed ||
-        !((config.auto_catch && config.catch_all) || config.auto_spin)) return;
+        !((config.auto_catch && config.catch_all) || config.auto_spin ||
+            config.auto_walk_to_fort)) return;
     if (tick.context.active_encounter_id.load() != 0U) {
         runtime_catch_spin_log_rejected("scan", "active_encounter");
         return;
@@ -429,6 +363,11 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     );
     if (ball_count == 0) g_runtime_catch_spin_coordinator.out_of_balls = true;
     if (ball_count > 0) g_runtime_catch_spin_coordinator.out_of_balls = false;
+
+    prune_requested_catch_ids(
+        &g_runtime_catch_spin_coordinator.requested_catch_ids,
+        snapshot
+    );
 
     const bool catch_enabled = config.auto_catch && config.catch_all;
     const auto *target = select_catch_target(

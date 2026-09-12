@@ -12,7 +12,7 @@ namespace pogo_runtime_catch_spin_config {
 constexpr uint32_t kMarker = 0x43534346U;  // CSCF
 constexpr uint32_t kModuleWire = 1U;       // CATCH_SPIN
 constexpr uint32_t kConfigSetAction = 6U;
-constexpr uint32_t kSchemaVersion = 1U;
+constexpr uint32_t kSchemaVersion = 2U;
 constexpr uint64_t kMaxSettleDelayMs = 60000U;
 
 struct Request {
@@ -25,6 +25,7 @@ struct Request {
     bool auto_spin = false;
     bool auto_encounter = false;
     bool catch_all = true;
+    bool auto_walk_to_fort = false;
     uint64_t spin_settle_delay_ms = 0U;
     uint64_t catch_settle_delay_ms = 0U;
     uint64_t expires_at_elapsed_ns = 0U;
@@ -73,6 +74,7 @@ inline bool parse(const std::vector<uint8_t> &input, Request *request) {
         !read_bool(input, &offset, &request->auto_spin) ||
         !read_bool(input, &offset, &request->auto_encounter) ||
         !read_bool(input, &offset, &request->catch_all) ||
+        !read_bool(input, &offset, &request->auto_walk_to_fort) ||
         !pogo_runtime::read_be64(input, &offset, &request->spin_settle_delay_ms) ||
         !pogo_runtime::read_be64(input, &offset, &request->catch_settle_delay_ms) ||
         !pogo_runtime::read_be64(input, &offset, &request->expires_at_elapsed_ns) ||

@@ -241,6 +241,9 @@ void discover_runtime_owners(
     if (container == nullptr) container = scene_container;
     if (container == nullptr) return;
 
+    binding->project_context_class = project_class;
+    binding->di_container_class = container_class;
+
     const void *try_resolve = find_runtime_method_with_parameter(
         api, container_class, "TryResolve", "System.Type"
     );
@@ -252,6 +255,7 @@ void discover_runtime_owners(
         );
         return;
     }
+    binding->di_try_resolve = try_resolve;
 
     struct ServiceCandidate {
         const char *name_space;
@@ -261,6 +265,7 @@ void discover_runtime_owners(
     };
     static const ServiceCandidate services[] = {
         {"Niantic.Holoholo", "IItemBag", "IItemBag", "ItemBagImpl"},
+        {"Niantic.Holoholo.UI.Items", "IItemInventoryService", "IItemInventoryService", "ItemInventoryService"},
         {"Niantic.Holoholo", "IPokemonBag", "IPokemonBag", "PokemonBagImpl"},
         {"", "IGameMasterData", "IGameMasterData", "GameMasterData"},
         {"Niantic.Holoholo", "ILocationProvider", "ILocationProvider", "NativeLocationProvider"},
@@ -358,15 +363,62 @@ void discover_runtime_owners(
                 if (recycle_item != nullptr && item_data_class != nullptr) {
                     binding->item_bag_recycle_item = recycle_item;
                     binding->item_data_class = item_data_class;
+                    binding->item_data_ctor = api.class_get_method_from_name == nullptr
+                        ? nullptr
+                        : api.class_get_method_from_name(item_data_class, ".ctor", 10);
                     binding->discard_verified = true;
+                    if (api.class_get_field_from_name != nullptr && api.field_get_type != nullptr &&
+                        api.type_get_class_or_element_class != nullptr) {
+                        const void *medicine_field = api.class_get_field_from_name(
+                            item_data_class, "medicineData"
+                        );
+                        const Il2CppType *medicine_type = medicine_field == nullptr
+                            ? nullptr : api.field_get_type(medicine_field);
+                        Il2CppClass *medicine_data_class = medicine_type == nullptr
+                            ? nullptr : api.type_get_class_or_element_class(medicine_type);
+                        if (medicine_data_class != nullptr &&
+                            api.class_get_method_from_name != nullptr) {
+                            binding->medicine_data_class = medicine_data_class;
+                            binding->medicine_data_ctor = api.class_get_method_from_name(
+                                medicine_data_class, ".ctor", 0
+                            );
+                        }
+                    }
                 }
                 __android_log_print(
                     binding->discard_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
-                    "managed diagnostic: discard binding verified=%d recycle=%p item_data=%p",
-                    binding->discard_verified ? 1 : 0, recycle_item, item_data_class
+                    "managed diagnostic: discard binding verified=%d recycle=%p item_data=%p "
+                    "medicine_data=%p medicine_ctor=%p",
+                    binding->discard_verified ? 1 : 0,
+                    recycle_item,
+                    item_data_class,
+                    binding->medicine_data_class,
+                    binding->medicine_data_ctor
                 );
             }
+        }
+        if (strcmp(service.label, "IItemInventoryService") == 0 && owner != nullptr &&
+            runtime_object_is_exact_class(
+                api, owner, "Niantic.Holoholo.UI.Items", "ItemInventoryService"
+            )) {
+            Il2CppClass *owner_class = api.object_get_class(owner);
+            const void *get_expiring_items = owner_class == nullptr ||
+                api.class_get_method_from_name == nullptr
+                ? nullptr
+                : api.class_get_method_from_name(owner_class, "get_ExpiringItemsCopy", 0);
+            if (get_expiring_items != nullptr) {
+                binding->item_inventory_service = owner;
+                binding->item_inventory_get_expiring_items = get_expiring_items;
+            }
+            __android_log_print(
+                get_expiring_items != nullptr ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                kLogTag,
+                "managed diagnostic: item inventory service verified=%d service=%p expiring=%p",
+                get_expiring_items != nullptr ? 1 : 0,
+                owner,
+                get_expiring_items
+            );
         }
         if (strcmp(service.label, "IPokemonBag") == 0 && owner != nullptr &&
             runtime_object_is_exact_class(api, owner, "Niantic.Holoholo.Internal", "PokemonBagImpl")) {
@@ -397,11 +449,21 @@ void discover_runtime_owners(
         if (strcmp(service.label, "IGameMasterData") == 0 && owner != nullptr &&
             runtime_object_is_exact_class(api, owner, "", "GameMasterData")) {
             binding->game_master_data = owner;
+            Il2CppClass *gm_class = api.object_get_class != nullptr
+                ? api.object_get_class(owner)
+                : nullptr;
+            const void *get_item_settings = gm_class == nullptr
+                ? nullptr
+                : api.class_get_method_from_name(gm_class, "GetItemSettings", 1);
+            if (get_item_settings != nullptr) {
+                binding->game_master_get_item_settings = get_item_settings;
+            }
             __android_log_print(
                 ANDROID_LOG_INFO,
                 kLogTag,
-                "managed diagnostic: game master data owner=%p",
-                owner
+                "managed diagnostic: game master data owner=%p get_item_settings=%p",
+                owner,
+                get_item_settings
             );
         }
         if (strcmp(service.label, "IEncounterPokemon") == 0 && owner != nullptr &&
@@ -615,5 +677,41 @@ void discover_runtime_owners(
         binding->map_pokemon_on_tapped,
         binding->unity_find_objects_of_type
     );
+    if (binding->discard_verified) {
+        Il2CppClass *inventory_service_class = find_runtime_class(
+            api,
+            assemblies,
+            assembly_count,
+            "Niantic.Holoholo.UI.Items",
+            "ItemInventoryService",
+            nullptr
+        );
+        binding->item_inventory_service_class = find_runtime_class(
+            api,
+            assemblies,
+            assembly_count,
+            "Niantic.Holoholo.UI.Items",
+            "IItemInventoryService",
+            nullptr
+        );
+        binding->item_inventory_service_impl_class = inventory_service_class;
+        if (inventory_service_class != nullptr && api.class_get_method_from_name != nullptr) {
+            binding->item_inventory_list_sorted = api.class_get_method_from_name(
+                inventory_service_class,
+                "ListSortedPlayerInventory",
+                5
+            );
+        }
+        resolve_discard_inventory_filter_delegate(api, assemblies, assembly_count, binding);
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "managed diagnostic: discard inventory lookup list=%p filter=%p ctor=%p",
+            binding->item_inventory_list_sorted,
+            binding->item_inventory_filter_delegate,
+            binding->item_data_ctor
+        );
+        resolve_discard_hash_set_item_binding(api, assemblies, assembly_count, binding);
+    }
     discover_direct_map_bindings(api, assemblies, assembly_count, binding);
 }

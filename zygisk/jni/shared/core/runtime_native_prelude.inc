@@ -300,6 +300,7 @@ struct RuntimeBinding {
     const void *map_pokemon_on_tapped = nullptr;
     const void *unity_find_objects_of_type = nullptr;
     void *map_scene_view_service = nullptr;
+    void *map_scene_context = nullptr;
     void *map_content_handler = nullptr;
     void *dynamic_tappables_service = nullptr;
     const void *dynamic_tappables_tap = nullptr;
@@ -327,10 +328,24 @@ struct RuntimeBinding {
     const void *item_bag_get_item_count = nullptr;
     bool inventory_read_verified = false;
     // Discard executor (IItemBag.RecycleItem(ItemData, int, ISet<Item>)). ItemData
-    // is a plain data class constructed by object_new + field writes. Execution is
-    // guarded by kDiscardExecutionEnabled and the exact verified binding.
+    // is populated on the main thread; expiringItemsCopy comes from IItemInventoryService.
     const void *item_bag_recycle_item = nullptr;
     Il2CppClass *item_data_class = nullptr;
+    const void *item_data_ctor = nullptr;
+    Il2CppClass *medicine_data_class = nullptr;
+    const void *medicine_data_ctor = nullptr;
+    Il2CppClass *project_context_class = nullptr;
+    Il2CppClass *di_container_class = nullptr;
+    const void *di_try_resolve = nullptr;
+    Il2CppClass *item_inventory_service_class = nullptr;
+    Il2CppClass *item_inventory_service_impl_class = nullptr;
+    const void *item_inventory_list_sorted = nullptr;
+    void *item_inventory_filter_delegate = nullptr;
+    void *item_inventory_service = nullptr;
+    const void *item_inventory_get_expiring_items = nullptr;
+    Il2CppClass *hash_set_item_class = nullptr;
+    const void *hash_set_item_ctor = nullptr;
+    const void *hash_set_item_supplier = nullptr;
     bool discard_verified = false;
     // Transfer executor. Per the 0.427.0 dump, Niantic.Holoholo.Internal
     // .PokemonBagImpl (IPokemonBag) exposes:
@@ -345,6 +360,7 @@ struct RuntimeBinding {
     const void *pokemon_inventory_release = nullptr;
     bool transfer_verified = false;
     void *game_master_data = nullptr;
+    const void *game_master_get_item_settings = nullptr;
     const void *pokemon_proto_is_legendary = nullptr;
     const void *pokemon_proto_is_mythic = nullptr;
 };

@@ -30,6 +30,8 @@ import dev.pogoroot.automation.events.AutomationEventType
 import dev.pogoroot.automation.events.ToastAutomationEventSink
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
 import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
+import dev.pogoroot.automation.core.automation.AutoFortNavigationCoordinator
+import dev.pogoroot.automation.location.AutoFortNavigationBus
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
@@ -39,6 +41,7 @@ class HeadlessAutomationService : Service() {
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
     private lateinit var structuredController: StructuredAutomationController
+    private lateinit var autoFortNavigationCoordinator: AutoFortNavigationCoordinator
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var scanResultRepository: ScanResultRepository
@@ -71,6 +74,10 @@ class HeadlessAutomationService : Service() {
                 )
             },
         )
+        autoFortNavigationCoordinator = AutoFortNavigationCoordinator(commandSink = { command ->
+            Log.i(LOG_TAG, "auto fort navigation command=$command")
+            AutoFortNavigationBus.publish(command)
+        })
         structuredController = StructuredAutomationController(
             bridge = runtimeBridge!!,
             eventSink = eventSink,
@@ -86,6 +93,10 @@ class HeadlessAutomationService : Service() {
                     mapTargetRepository.publish(target)
                 }
             },
+            onNavigationEnabledChanged = autoFortNavigationCoordinator::setEnabled,
+            onNavigationSnapshot = autoFortNavigationCoordinator::onSnapshot,
+            onNavigationSignal = autoFortNavigationCoordinator::onSignal,
+            onNavigationReset = autoFortNavigationCoordinator::reset,
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
@@ -156,6 +167,9 @@ class HeadlessAutomationService : Service() {
             joystickAutoStartCoordinator.stop()
         }
         apiServer.stop()
+        if (::autoFortNavigationCoordinator.isInitialized) {
+            autoFortNavigationCoordinator.reset()
+        }
         engine.shutdown()
         super.onDestroy()
     }

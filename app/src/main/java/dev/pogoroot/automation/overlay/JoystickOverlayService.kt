@@ -9,6 +9,8 @@ import android.os.IBinder
 import android.os.Looper
 import android.view.ContextThemeWrapper
 import android.view.WindowManager
+import android.util.Log
+import dev.pogoroot.automation.core.automation.AutoFortNavigationCommand
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.scan.ScanMatchType
 import dev.pogoroot.automation.core.time.TeleportCooldown
@@ -24,6 +26,7 @@ import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
+import dev.pogoroot.automation.location.AutoFortNavigationBus
 import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.Locale
 import java.util.concurrent.Executors
@@ -37,6 +40,7 @@ class JoystickOverlayService : Service() {
 
         private const val COOLDOWN_REFRESH_MS = 1_000L
         private const val FOREGROUND_POLL_MS = 750L
+        private const val LOG_TAG = "PogoRootAutomation"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -68,6 +72,15 @@ class JoystickOverlayService : Service() {
     private var lastPersistAt = 0L
     private var latestTeleportCooldown: TeleportCooldown? = null
     private var cooldownMode = TeleportCooldownMode.CURRENT_POSITION
+    private var latestAutoFortCommand: AutoFortNavigationCommand? = null
+
+    private val autoFortNavigationListener: (AutoFortNavigationCommand) -> Unit = { command ->
+        mainHandler.post {
+            if (destroyed) return@post
+            latestAutoFortCommand = command
+            applyAutoFortNavigationCommand()
+        }
+    }
 
     private val cooldownTick = object : Runnable {
         override fun run() {
@@ -99,6 +112,7 @@ class JoystickOverlayService : Service() {
             sink = RootMockLocationProvider(this),
             onStateChanged = ::onLocationStateChanged,
         )
+        AutoFortNavigationBus.register(autoFortNavigationListener)
         foregroundPoll = foregroundExecutor.scheduleWithFixedDelay(
             ::pollGameForeground,
             0L,
@@ -127,6 +141,7 @@ class JoystickOverlayService : Service() {
         if (!controllerStarted) {
             controllerStarted = true
             controller.start(positionStore.loadPointOrDefault())
+            applyAutoFortNavigationCommand()
         }
         return START_NOT_STICKY
     }
@@ -144,6 +159,7 @@ class JoystickOverlayService : Service() {
 
     override fun onDestroy() {
         destroyed = true
+        AutoFortNavigationBus.unregister()
         foregroundPoll?.cancel(true)
         foregroundExecutor.shutdownNow()
         mainHandler.removeCallbacks(cooldownTick)
@@ -405,6 +421,26 @@ class JoystickOverlayService : Service() {
         val target = mapTargetRepository.read() ?: return
         mapTargetRepository.clear()
         controller.walkTo(target.target)
+    }
+
+    private fun applyAutoFortNavigationCommand() {
+        if (!controllerStarted) return
+        when (val command = latestAutoFortCommand) {
+            is AutoFortNavigationCommand.WalkTo -> {
+                if (controller.snapshot().point == null) return
+                Log.i(
+                    LOG_TAG,
+                    "auto fort navigation walk fort=${command.fortId} " +
+                        "target=${command.target.latitude},${command.target.longitude}",
+                )
+                controller.walkTo(command.target)
+            }
+            is AutoFortNavigationCommand.Stop -> {
+                Log.i(LOG_TAG, "auto fort navigation stop reason=${command.reason}")
+                controller.stopWalking()
+            }
+            null -> Unit
+        }
     }
 
     private fun renderCooldown() {

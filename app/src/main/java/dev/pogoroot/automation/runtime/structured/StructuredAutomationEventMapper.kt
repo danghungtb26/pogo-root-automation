@@ -2,6 +2,7 @@ package dev.pogoroot.automation.runtime.structured
 
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayload
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventType
+import dev.pogoroot.automation.core.automation.AutoFortNavigationSignal
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventType
 
@@ -48,6 +49,13 @@ internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent?
         "Discard failed: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
     )
     RuntimeAutomationEventType.UNKNOWN -> null
+}
+
+internal fun RuntimeAutomationEventPayload.toAutoFortNavigationSignal(): AutoFortNavigationSignal? = when (type) {
+    RuntimeAutomationEventType.POKEMON_FOUND -> AutoFortNavigationSignal.POKEMON_FOUND
+    RuntimeAutomationEventType.POKEMON_CAUGHT -> AutoFortNavigationSignal.POKEMON_CAUGHT
+    RuntimeAutomationEventType.POKEMON_FLED -> AutoFortNavigationSignal.POKEMON_FLED
+    else -> null
 }
 
 private fun Long.toUnsignedDecimal(): String = toULong().toString()

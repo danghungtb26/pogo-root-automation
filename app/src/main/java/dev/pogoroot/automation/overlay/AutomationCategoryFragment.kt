@@ -63,6 +63,7 @@ class AutomationCategoryFragment : Fragment() {
     private fun buildAutomationEditor(host: AutomationSettingsActivity): Pair<LinearLayout, () -> Unit> {
         val config = host.repository.read()
         val mapTapWalk = switch(host, "Walk to verified map taps", config.mapTapWalkEnabled)
+        val autoWalkToFort = switch(host, "Walk between forts when no Pokémon", config.autoWalkToFort)
         val autoCatch = switch(host, "Auto catch", config.autoCatch)
         val catchAll = switch(host, "Catch all nearby Pokémon", config.catchAll)
         val throwQualityGroup = RadioGroup(host).apply { orientation = RadioGroup.VERTICAL }
@@ -84,6 +85,8 @@ class AutomationCategoryFragment : Fragment() {
             addView(description(host, "Start or stop the live automation master switch from the floating overlay. It is process-local and is never stored."))
             addView(description(host, "Only verified MAP_TARGET observations from the exact runtime binding can start a walk."))
             addView(mapTapWalk)
+            addView(description(host, "When enabled, an empty complete map scan walks to the nearest available PokéStop. A Pokémon found during the walk pauses movement until catch/flee is complete."))
+            addView(autoWalkToFort)
             addView(autoCatch)
             addView(catchAll)
             addView(description(host, "Auto throw quality is a client-owned request. Excellent is used only when the exact runtime advertises THROW_CONTROL and OBSERVE_THROW_OUTCOME; it is not a guaranteed catch."))
@@ -101,6 +104,7 @@ class AutomationCategoryFragment : Fragment() {
             host.repository.update { current ->
                 current.copy(
                     mapTapWalkEnabled = mapTapWalk.isChecked,
+                    autoWalkToFort = autoWalkToFort.isChecked,
                     autoCatch = autoCatch.isChecked,
                     catchAll = catchAll.isChecked,
                     catchThrowQuality = throwQualityOptions.first { it.second.isChecked }.first,
@@ -122,6 +126,12 @@ class AutomationCategoryFragment : Fragment() {
         val ballLimit = numberInput(host, config.discardLimits[1] ?: 200)
         val greatBallLimit = numberInput(host, config.discardLimits[2] ?: 150)
         val ultraBallLimit = numberInput(host, config.discardLimits[3] ?: 100)
+        val potionLimit = numberInput(host, config.discardLimits[101] ?: 50)
+        val superPotionLimit = numberInput(host, config.discardLimits[102] ?: 50)
+        val hyperPotionLimit = numberInput(host, config.discardLimits[103] ?: 50)
+        val maxPotionLimit = numberInput(host, config.discardLimits[104] ?: 20)
+        val reviveLimit = numberInput(host, config.discardLimits[201] ?: 50)
+        val maxReviveLimit = numberInput(host, config.discardLimits[202] ?: 30)
         val razzLimit = numberInput(host, config.discardLimits[701] ?: 50)
         val nanabLimit = numberInput(host, config.discardLimits[703] ?: 50)
         val pinapLimit = numberInput(host, config.discardLimits[705] ?: 80)
@@ -130,6 +140,12 @@ class AutomationCategoryFragment : Fragment() {
             addLimitRow("Poké Ball", ballLimit)
             addLimitRow("Great Ball", greatBallLimit)
             addLimitRow("Ultra Ball", ultraBallLimit)
+            addLimitRow("Potion", potionLimit)
+            addLimitRow("Super Potion", superPotionLimit)
+            addLimitRow("Hyper Potion", hyperPotionLimit)
+            addLimitRow("Max Potion", maxPotionLimit)
+            addLimitRow("Revive", reviveLimit)
+            addLimitRow("Max Revive", maxReviveLimit)
             addLimitRow("Razz Berry", razzLimit)
             addLimitRow("Nanab Berry", nanabLimit)
             addLimitRow("Pinap Berry", pinapLimit)
@@ -139,6 +155,12 @@ class AutomationCategoryFragment : Fragment() {
                 1 to ballLimit.intValue(200),
                 2 to greatBallLimit.intValue(150),
                 3 to ultraBallLimit.intValue(100),
+                101 to potionLimit.intValue(50),
+                102 to superPotionLimit.intValue(50),
+                103 to hyperPotionLimit.intValue(50),
+                104 to maxPotionLimit.intValue(20),
+                201 to reviveLimit.intValue(50),
+                202 to maxReviveLimit.intValue(30),
                 701 to razzLimit.intValue(50),
                 703 to nanabLimit.intValue(50),
                 705 to pinapLimit.intValue(80),

@@ -33,6 +33,8 @@ data class HeadlessAutomationConfig(
     val snapshotEncounterMode: EncounterMode = EncounterMode.STANDARD,
     /** Accept verified MAP_TARGET observations and start app-side walking. */
     val mapTapWalkEnabled: Boolean = false,
+    /** Walk to another spin-available PokéStop when a complete scan has no Pokémon. */
+    val autoWalkToFort: Boolean = false,
     /** Only effective when the verified runtime advertises CATCH_AND_CLOSE_PREVIEW. */
     val autoCloseCatchPreview: Boolean = false,
     val autoSpin: Boolean = true,
@@ -61,6 +63,12 @@ data class HeadlessAutomationConfig(
             1 to 200,   // Poké Ball
             2 to 150,   // Great Ball
             3 to 100,   // Ultra Ball
+            101 to 50,  // Potion
+            102 to 50,  // Super Potion
+            103 to 50,  // Hyper Potion
+            104 to 20,  // Max Potion
+            201 to 50,  // Revive
+            202 to 30,  // Max Revive
             701 to 50,  // Razz Berry
             703 to 50,  // Nanab Berry
             705 to 80,  // Pinap Berry
@@ -90,6 +98,7 @@ class AutomationConfigRepository(context: Context) {
         autoSnapshotDuringEncounter = prefs.getBoolean(KEY_AUTO_SNAPSHOT, false),
         snapshotEncounterMode = enumPreference(KEY_SNAPSHOT_ENCOUNTER_MODE, EncounterMode.STANDARD),
         mapTapWalkEnabled = prefs.getBoolean(KEY_MAP_TAP_WALK, false),
+        autoWalkToFort = prefs.getBoolean(KEY_AUTO_WALK_TO_FORT, false),
         autoCloseCatchPreview = prefs.getBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, false),
         autoSpin = prefs.getBoolean(KEY_AUTO_SPIN, true),
         autoEncounter = prefs.getBoolean(KEY_AUTO_ENCOUNTER, true),
@@ -143,6 +152,7 @@ class AutomationConfigRepository(context: Context) {
             .putBoolean(KEY_AUTO_SNAPSHOT, next.autoSnapshotDuringEncounter)
             .putString(KEY_SNAPSHOT_ENCOUNTER_MODE, next.snapshotEncounterMode.name)
             .putBoolean(KEY_MAP_TAP_WALK, next.mapTapWalkEnabled)
+            .putBoolean(KEY_AUTO_WALK_TO_FORT, next.autoWalkToFort)
             .putBoolean(KEY_AUTO_CLOSE_CATCH_PREVIEW, next.autoCloseCatchPreview)
             .putBoolean(KEY_AUTO_SPIN, next.autoSpin)
             .putBoolean(KEY_AUTO_ENCOUNTER, next.autoEncounter)
@@ -222,6 +232,7 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_AUTO_SNAPSHOT = "auto_snapshot_during_encounter"
         private const val KEY_SNAPSHOT_ENCOUNTER_MODE = "snapshot_encounter_mode"
         private const val KEY_MAP_TAP_WALK = "map_tap_walk"
+        private const val KEY_AUTO_WALK_TO_FORT = "auto_walk_to_fort"
         private const val KEY_AUTO_CLOSE_CATCH_PREVIEW = "auto_close_catch_preview"
         private const val KEY_AUTO_SPIN = "auto_spin"
         private const val KEY_AUTO_ENCOUNTER = "auto_encounter"

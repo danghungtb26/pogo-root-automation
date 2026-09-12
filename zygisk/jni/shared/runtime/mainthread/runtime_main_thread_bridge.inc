@@ -215,6 +215,10 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     if (task_type == MainThreadTaskType::kFindObject) {
         result = find_unity_object_on_main_thread(*context, name_space.c_str(), class_name.c_str());
         task_success = result != nullptr;
+        if (task_success && name_space == "Niantic.Holoholo" && class_name == "MapSceneContext") {
+            std::lock_guard<std::mutex> binding_lock(context->binding_mutex);
+            context->binding.map_scene_context = result;
+        }
     } else if (task_type == MainThreadTaskType::kReadMap) {
         task_success = read_runtime_map_snapshot_on_main_thread(*context, &nearby, &forts);
     } else if (task_type == MainThreadTaskType::kReadInventory) {

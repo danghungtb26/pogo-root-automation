@@ -9,6 +9,7 @@ struct RuntimeCatchSpinConfig {
     bool auto_spin = false;
     bool auto_encounter = false;
     bool catch_all = true;
+    bool auto_walk_to_fort = false;
     uint64_t spin_settle_delay_ms = 0U;
     uint64_t catch_settle_delay_ms = 0U;
 };
@@ -130,6 +131,7 @@ bool apply_runtime_catch_spin_config(
                 request.auto_spin != g_runtime_catch_spin_config.auto_spin ||
                 request.auto_encounter != g_runtime_catch_spin_config.auto_encounter ||
                 request.catch_all != g_runtime_catch_spin_config.catch_all ||
+                request.auto_walk_to_fort != g_runtime_catch_spin_config.auto_walk_to_fort ||
                 request.spin_settle_delay_ms != g_runtime_catch_spin_config.spin_settle_delay_ms ||
                 request.catch_settle_delay_ms != g_runtime_catch_spin_config.catch_settle_delay_ms)) {
             conflict = true;
@@ -141,6 +143,7 @@ bool apply_runtime_catch_spin_config(
             g_runtime_catch_spin_config.auto_spin = request.auto_spin;
             g_runtime_catch_spin_config.auto_encounter = request.auto_encounter;
             g_runtime_catch_spin_config.catch_all = request.catch_all;
+            g_runtime_catch_spin_config.auto_walk_to_fort = request.auto_walk_to_fort;
             g_runtime_catch_spin_config.spin_settle_delay_ms = request.spin_settle_delay_ms;
             g_runtime_catch_spin_config.catch_settle_delay_ms = request.catch_settle_delay_ms;
             applied = true;
@@ -164,7 +167,7 @@ bool apply_runtime_catch_spin_config(
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "catch_spin config %s revision=%llu armed=%d catch=%d spin=%d encounter=%d catch_all=%d spin_delay_ms=%llu catch_delay_ms=%llu",
+        "catch_spin config %s revision=%llu armed=%d catch=%d spin=%d encounter=%d catch_all=%d fort_walk=%d spin_delay_ms=%llu catch_delay_ms=%llu",
         applied ? "applied" : "already applied",
         static_cast<unsigned long long>(current.revision),
         current.armed ? 1 : 0,
@@ -172,6 +175,7 @@ bool apply_runtime_catch_spin_config(
         current.auto_spin ? 1 : 0,
         current.auto_encounter ? 1 : 0,
         current.catch_all ? 1 : 0,
+        current.auto_walk_to_fort ? 1 : 0,
         static_cast<unsigned long long>(current.spin_settle_delay_ms),
         static_cast<unsigned long long>(current.catch_settle_delay_ms)
     );

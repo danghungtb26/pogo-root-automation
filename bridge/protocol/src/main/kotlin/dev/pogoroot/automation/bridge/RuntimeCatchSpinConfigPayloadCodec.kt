@@ -13,6 +13,7 @@ data class RuntimeCatchSpinConfig(
     val autoSpin: Boolean,
     val autoEncounter: Boolean,
     val catchAll: Boolean,
+    val autoWalkToFort: Boolean = false,
     val spinSettleDelayMs: Long,
     val catchSettleDelayMs: Long,
 ) {
@@ -27,7 +28,7 @@ data class RuntimeCatchSpinConfig(
     }
 
     companion object {
-        const val SCHEMA_VERSION: Int = 1
+        const val SCHEMA_VERSION: Int = 2
         const val MAX_SETTLE_DELAY_MS: Long = 60_000L
     }
 }
@@ -77,6 +78,7 @@ object RuntimeCatchSpinConfigPayloadCodec {
                 output.writeBoolean(request.config.autoSpin)
                 output.writeBoolean(request.config.autoEncounter)
                 output.writeBoolean(request.config.catchAll)
+                output.writeBoolean(request.config.autoWalkToFort)
                 output.writeLong(request.config.spinSettleDelayMs)
                 output.writeLong(request.config.catchSettleDelayMs)
                 output.writeLong(request.expiresAtElapsedNs)
@@ -118,6 +120,7 @@ object RuntimeCatchSpinConfigPayloadCodec {
                 autoSpin = input.readBoolean(),
                 autoEncounter = input.readBoolean(),
                 catchAll = input.readBoolean(),
+                autoWalkToFort = input.readBoolean(),
                 spinSettleDelayMs = input.readLong(),
                 catchSettleDelayMs = input.readLong(),
             )

@@ -114,9 +114,11 @@ The executor is wired like native transfer:
   GC-handle retention and Promise polling; dispatched in `runtime_control.inc`.
 - Binding: `IItemBag.RecycleItem(ItemData, int, ISet<Item>)` + the `ItemData`
   class are resolved in `runtime_probe_discovery.inc`, setting `discard_verified`.
-- `recycle_runtime_item_on_main_thread` constructs `ItemData` via `object_new` + field writes
-  (`item`@0x10, `count`@0x1C, `recyclable`@0x21 from the 0.427.0 dump) and calls
-  `RecycleItem(itemData, amount, null)`.
+- `recycle_runtime_item_on_main_thread` reads the live stack count via
+  `GetItemCount`, populates the verified `ItemData` layout (`item`, `type`,
+  `category`, stack `count`, flags, optional `MedicineData` for potions/revives)
+  and calls `RecycleItem(itemData, numToRecycle, expiringItemsCopy)` using
+  `IItemInventoryService.get_ExpiringItemsCopy()` when available.
 - `kDiscardExecutionEnabled` is a compile-time safety gate; the runtime binding
   diagnostic must still verify `RecycleItem` and its `ItemData` parameter class.
 
