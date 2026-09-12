@@ -396,12 +396,12 @@ class StructuredAutomationController(
     private fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent = when (type) {
         RuntimeAutomationEventType.POKEMON_FOUND -> AutomationEvent(
             AutomationEventType.INFO,
-            "Found Pokémon #$secondaryId to catch",
+            "Found Pokémon #${secondaryId.toUnsignedDecimal()} to catch",
         )
         RuntimeAutomationEventType.POKEMON_CAUGHT -> AutomationEvent(
             AutomationEventType.CAUGHT,
-            if (secondaryId > 0L) {
-                "Catch success: Pokémon #$secondaryId"
+            if (secondaryId != 0L) {
+                "Catch success: Pokémon #${secondaryId.toUnsignedDecimal()}"
             } else {
                 "Catch success"
             },
@@ -412,9 +412,11 @@ class StructuredAutomationController(
         )
         RuntimeAutomationEventType.POKEMON_TRANSFERRED -> AutomationEvent(
             AutomationEventType.TRANSFERRED,
-            "Transfer success: Pokémon #$primaryId",
+            "Transfer success: Pokémon #${primaryId.toUnsignedDecimal()}",
         )
     }
+
+    private fun Long.toUnsignedDecimal(): String = toULong().toString()
 
     private fun isAuthoritativeCatchResult(
         request: dev.pogoroot.automation.core.automation.ActionRequest,

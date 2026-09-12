@@ -21,9 +21,9 @@ object RuntimeAutomationEventPayloadCodec {
     private const val MAGIC = 0x504F4745
 
     fun decode(payload: ByteArray): Result<RuntimeAutomationEventPayload> = runCatching {
-            require(payload.size <= BridgeProtocol.HARD_MESSAGE_BYTES) {
-                "runtime automation event exceeds hard limit"
-            }
+        require(payload.size <= BridgeProtocol.HARD_MESSAGE_BYTES) {
+            "runtime automation event exceeds hard limit"
+        }
         DataInputStream(ByteArrayInputStream(payload)).use { input ->
             require(input.readInt() == MAGIC) { "invalid runtime automation event marker" }
             val eventTypeWire = input.readInt()
@@ -32,8 +32,9 @@ object RuntimeAutomationEventPayloadCodec {
             } ?: error("unknown runtime automation event type")
             val primaryId = input.readLong()
             val secondaryId = input.readLong()
-            require(primaryId > 0L) { "runtime automation event primary id is invalid" }
-            require(secondaryId >= 0L) { "runtime automation event secondary id is invalid" }
+            // Native IDs are uint64_t. Long preserves the raw 64-bit pattern,
+            // so a valid ID may appear negative when its high bit is set.
+            require(primaryId != 0L) { "runtime automation event primary id is invalid" }
             require(input.available() == 0) { "trailing runtime automation event bytes" }
             RuntimeAutomationEventPayload(type, primaryId, secondaryId)
         }
