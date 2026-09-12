@@ -81,7 +81,7 @@ The unresolved questions from earlier passes are now answered by the shipped run
 | Wild map Pokémon | `Niantic.Holoholo.Map.WildMapPokemon` (per `MapEntityCell.eghw` wild dictionary, reached from `MapEntityService.GetCells()`) | `zygisk/jni/runtime_map_reader.inc` |
 | PokéStop | `Niantic.Holoholo.Pokestop.MapPokestop` (`get_Id`, `get_Location`, `get_IsCoolingDown`) | `zygisk/jni/runtime_map_forts.inc` |
 | PokéStop directory | `Niantic.Holoholo.Map.MapPlaceDirectoryService` → pokestops dictionary | `zygisk/jni/runtime_map_forts.inc` |
-| Spin execution | `PoiItemSpinner.Spin` (main-thread invoke) | `zygisk/jni/modules/catch_spin/spin.inc` |
+| Spin execution | `MapPokestop.StartInteractiveMode` → `PoiItemSpinner.ckko` → `FortSearch` RPC 101; `Spin(float)` is physics-only | `zygisk/jni/modules/catch_spin/spin_server_action.inc` |
 
 **Observer control model is now mode B (dirty-flag), falling back to mode C.** `runtime_observation_thread` re-reads the map only when `ProbeContext.world_dirty` is set (or a rare reconcile), instead of every tick. Until the map-query batch callback is inline-hooked, a periodic tick marks it dirty, so it still behaves like the old mode-C poll with no regression. The underlying read is still `read_runtime_map_snapshot_on_main_thread` walking `GetCells()` + the PokéStop dictionary (`runtime_map_reader.inc`, `kMapReaderStage = 5`). Seams `world_dirty`, `mark_world_dirty()`, and `RuntimeBinding.map_query_hook_installed` are in place; the remaining mode-B work (resolve + inline-hook the batch callback, capture its ARM64 prologue from the live `libil2cpp.so`) is device-dependent. See `docs/architecture/independent-runtime-control.md` → "Observation mechanism (mode B: dirty-flag)". Raw per-entity mode A is intentionally skipped (burst lag).
 
@@ -308,7 +308,7 @@ Missing mechanism 2 — **range thresholds.** Do not hardcode. GameMaster carrie
 The two available ways to know "in range":
 
 - **Compute in Kotlin (preferred, matches the architecture rule):** haversine(player, target) ≤ range. Distance/scoring/selection is a Kotlin concern; native only supplies the raw coordinates + cooldown it already has.
-- **Read the game's own booleans (execute-time guard only):** `IMapPokestopInteractive` exposes `get_CanSpin`, `get_IsPlayerInRange`, `get_Distance`, `get_CooldownTimer`, `get_Interactable`. These are version-drift-proof but the interactive object typically only exists while the Fort is in view, and it adds a main-thread managed call. Use it as a final chokepoint right before `PoiItemSpinner.Spin`, not as the discovery mechanism.
+- **Read the game's own booleans (execute-time guard only):** use only properties confirmed in the pinned dump. The `IMapPokestopInteractive` interface in `0.427.0` is empty, so the native path uses the verified `MapPokestop.get_IsCoolingDown` check plus the distance filter before calling `PoiItemSpinner.ckko`; do not assume the earlier candidate properties exist on this interface.
 
 Eligibility predicates (Kotlin `AutomationPolicy`):
 

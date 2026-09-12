@@ -249,6 +249,16 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
             : poll_result == RuntimeDirectCatchPromisePollResult::kNoPending
                 ? MainThreadActionOutcome::kRejected
                 : MainThreadActionOutcome::kIndeterminate;
+    } else if (task_type == MainThreadTaskType::kPollSpin) {
+        const RuntimeSpinPromisePollResult poll_result =
+            poll_pending_runtime_spin_on_main_thread(*context);
+        task_success = poll_result != RuntimeSpinPromisePollResult::kNoPending;
+        action_outcome = poll_result == RuntimeSpinPromisePollResult::kWaiting ||
+                poll_result == RuntimeSpinPromisePollResult::kCompleted
+            ? MainThreadActionOutcome::kInvoked
+            : poll_result == RuntimeSpinPromisePollResult::kNoPending
+                ? MainThreadActionOutcome::kRejected
+                : MainThreadActionOutcome::kIndeterminate;
     } else if (task_type == MainThreadTaskType::kPollEncounter) {
         action_outcome = poll_runtime_encounter_on_main_thread(*context, encounter_id);
         task_success = action_outcome != MainThreadActionOutcome::kRejected;

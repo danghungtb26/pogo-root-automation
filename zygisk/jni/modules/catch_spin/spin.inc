@@ -74,19 +74,27 @@ RuntimeActionResult execute_runtime_spin(
         result.message = "command was already attempted in this runtime session";
         return result;
     }
+    if (!begin_pending_runtime_spin(context, command.encounter_id, command.command_id.c_str())) {
+        result.phase = kCommandPhaseIndeterminate;
+        result.error_code = "spin_promise_pending";
+        result.message = "another FortSearch Promise is still being observed";
+        return result;
+    }
     context.last_action_command_id = command.command_id;
     const MainThreadActionOutcome outcome = request_main_thread_spin(
         context, command.encounter_id
     );
     if (outcome == MainThreadActionOutcome::kInvoked) {
-        result.phase = kCommandPhaseCompleted;
-        result.error_code = "spin_invoked";
-        result.message = "PoiItemSpinner.Spin was invoked; fort state will be refreshed from the next map observation";
+        result.phase = kCommandPhaseIndeterminate;
+        result.error_code = "spin_promise_pending";
+        result.message = "FortSearch request was sent; native is waiting for its Promise result";
     } else if (outcome == MainThreadActionOutcome::kIndeterminate) {
+        abandon_pending_runtime_spin(context, "spin_main_thread_outcome_indeterminate");
         result.phase = kCommandPhaseIndeterminate;
         result.error_code = "invoke_outcome_indeterminate";
-        result.message = "PoiItemSpinner.Spin may have run but the main-thread result was lost";
+        result.message = "FortSearch may have run but the main-thread result was lost";
     } else {
+        abandon_pending_runtime_spin(context, "spin_target_unavailable");
         result.error_code = "spin_target_unavailable";
         result.message = "the requested PokéStop is unavailable or cooling down";
     }

@@ -272,6 +272,12 @@ struct RuntimeBinding {
     const void *map_pokestop_start_interactive = nullptr;
     const void *map_pokestop_interactive_item_spinner = nullptr;
     const void *poi_item_spinner_spin = nullptr;
+    // PoiItemSpinner.ckko() -> IPromise<FortSearchOutProto> (build 0.427.0).
+    // This is the actual FortSearch sender; Spin(float) only starts physics.
+    const void *poi_item_spinner_request_items = nullptr;
+    // PoiItemSpinner.ckkq(FortSearchOutProto), the game's result callback used
+    // to update spinner/UI state after a successful FortSearch response.
+    const void *poi_item_spinner_result_callback = nullptr;
     const void *map_pokemon_try_capture = nullptr;
     const void *map_pokemon_get_spawn_point_id = nullptr;
     // WildMapPokemon.SendEncounterRequest (RPC Encounter=102). Fired in the
@@ -355,6 +361,7 @@ enum class MainThreadTaskType : uint32_t {
     kPollTransfer = 11U,
     kStartTransfer = 12U,
     kPollEncounter = 13U,
+    kPollSpin = 14U,
 };
 
 enum class MainThreadActionOutcome : uint32_t {
@@ -562,6 +569,8 @@ MainThreadActionOutcome request_main_thread_direct_catch(
 
 MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &context);
 
+MainThreadActionOutcome request_main_thread_poll_spin(ProbeContext &context);
+
 MainThreadActionOutcome request_main_thread_poll_encounter(
     ProbeContext &context,
     uint64_t encounter_id
@@ -589,6 +598,43 @@ enum class RuntimeTransferPromisePollResult : uint32_t {
     kFailed = 3U,
     kTimedOut = 4U,
 };
+
+enum class RuntimeSpinPromisePollResult : uint32_t {
+    kNoPending = 0U,
+    kWaiting = 1U,
+    kCompleted = 2U,
+    kFailed = 3U,
+    kTimedOut = 4U,
+};
+
+bool begin_pending_runtime_spin(
+    ProbeContext &context,
+    const std::string &fort_id,
+    const char *command_id
+);
+
+bool runtime_spin_is_pending(ProbeContext &context);
+
+void abandon_pending_runtime_spin(ProbeContext &context, const char *reason);
+
+bool retain_pending_runtime_spin(
+    ProbeContext &context,
+    const std::string &fort_id,
+    void *spinner,
+    void *promise
+);
+
+RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
+    ProbeContext &context
+);
+
+bool consume_terminal_runtime_spin(
+    ProbeContext &context,
+    std::string *fort_id,
+    int32_t *server_result
+);
+
+void reset_runtime_spin_state(ProbeContext &context);
 
 bool begin_pending_direct_catch(
     ProbeContext &context,

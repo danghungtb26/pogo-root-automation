@@ -747,3 +747,25 @@ server đã nhận và xử lý lệnh.
 | AC-SPIN-SERVER-4 | Chống request lặp | Trong lúc Promise chưa settle, fort đang xử lý không được trigger Spin mới. |
 | AC-SPIN-SERVER-5 | Refresh map | Sau result thành công, map/fort state được refresh hoặc cooldown được cập nhật trước cycle tiếp theo. |
 | AC-SPIN-SERVER-6 | Fail closed | Nếu không bind được private method/RPC observer đúng version, không giả vờ báo catch/spin thành công. |
+
+## 19. Triển khai server-side Spin và Promise observer — 2026-09-12
+
+Đã triển khai theo kết luận của mục 18:
+
+- Bổ sung binding exact-build cho `PoiItemSpinner.ckko()` và `ckkq(FortSearchOutProto)`. Capability
+  Spin chỉ được bật khi `ckko` đã resolve; method `Spin(float)` không còn được dùng làm bằng
+  chứng server request.
+- Sau `StartInteractiveMode`, native đọc và kiểm tra dependency `mapPlace`/`IRpcHandler` rồi
+  gọi `ckko()` trên Unity main thread. Promise trả về được giữ bằng GC handle.
+- Thêm task poll main-thread và observer đọc `completeCalled`, `errorCalled`, `completedValue`
+  và `FortSearchOutProto.Result`. Log phân biệt rõ `FORT_SEARCH RPC 101 sent`, Promise state,
+  result code và callback refresh.
+- Khi result thành công, native gọi `ckkq(FortSearchOutProto)` để chạy phần cập nhật state của
+  spinner trong game. Fort đã thành công được giữ trong memory để không gửi lặp khi map chưa
+  kịp reload; Promise pending cũng chặn mọi Spin mới.
+- Manual Spin trả trạng thái indeterminate/pending ban đầu và gửi late result sau khi Promise
+  settle; auto Spin tiếp tục quyết định hoàn toàn trong native.
+
+Build validation: `scripts/build-magisk.sh` pass cho `arm64-v8a` và `x86_64`; `./gradlew test
+assembleDebug` pass. Hai file protocol test được mô tả trong `AGENTS.md` hiện không tồn tại
+trong working tree nên không thể chạy riêng bước host test đó.

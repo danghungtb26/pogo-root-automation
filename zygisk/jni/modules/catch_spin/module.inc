@@ -29,7 +29,7 @@ public:
     }
 
     void on_disable(ProbeContext &context) override {
-        (void)context;
+        reset_runtime_spin_state(context);
         reset_runtime_catch_spin_coordinator();
     }
 

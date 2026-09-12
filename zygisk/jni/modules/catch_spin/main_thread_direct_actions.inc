@@ -97,6 +97,12 @@ MainThreadActionOutcome request_main_thread_poll_direct_catch(ProbeContext &cont
     );
 }
 
+MainThreadActionOutcome request_main_thread_poll_spin(ProbeContext &context) {
+    return request_main_thread_direct_action(
+        context, MainThreadTaskType::kPollSpin, 0U, ""
+    );
+}
+
 MainThreadActionOutcome request_main_thread_poll_encounter(
     ProbeContext &context,
     uint64_t encounter_id

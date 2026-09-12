@@ -52,6 +52,8 @@
 #include "modules/catch_spin/direct_map_actions.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
+#include "modules/catch_spin/spin_promise_observer.inc"
+#include "modules/catch_spin/spin_server_action.inc"
 #include "modules/catch_spin/direct_catch_promise_observer.inc"
 #include "modules/catch_spin/direct_catch_map_sync.inc"
 

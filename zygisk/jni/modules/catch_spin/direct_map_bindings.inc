@@ -54,7 +54,7 @@ void update_direct_map_fort_capabilities(RuntimeBinding *binding) {
     binding->spin_verified = binding->forts_read_verified &&
         binding->map_pokestop_start_interactive != nullptr &&
         binding->map_pokestop_interactive_item_spinner != nullptr &&
-        binding->poi_item_spinner_spin != nullptr;
+        binding->poi_item_spinner_request_items != nullptr;
 }
 
 void bind_direct_map_place_directory(
@@ -251,6 +251,16 @@ void discover_direct_map_bindings(
     binding->poi_item_spinner_spin = find_direct_map_instance_method_with_parameter(
         api, spinner_class, "Spin", "System.Single"
     );
+    // In 0.427.0 Spin(float) only starts the physics coroutine. ckko() is the
+    // private zero-argument method that constructs FortSearchOutProto and sends
+    // RPC method 101 through IRpcHandler. ckkq(FortSearchOutProto) is the
+    // result continuation used by the game to update spinner state.
+    binding->poi_item_spinner_request_items = find_direct_map_instance_method(
+        api, spinner_class, "ckko", 0U
+    );
+    binding->poi_item_spinner_result_callback = find_direct_map_instance_method_with_parameter(
+        api, spinner_class, "ckkq", "Holoholo.Rpc.FortSearchOutProto"
+    );
 
     update_direct_map_fort_capabilities(binding);
 
@@ -305,11 +315,13 @@ void discover_direct_map_bindings(
     __android_log_print(
         binding->spin_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "managed diagnostic: direct spin binding verified=%d get_pokestop=%p start=%p spinner_field=%p spin=%p",
+        "managed diagnostic: direct spin binding verified=%d get_pokestop=%p start=%p spinner_field=%p spin=%p request_items=%p result_callback=%p",
         binding->spin_verified ? 1 : 0,
         binding->map_place_directory_get_pokestop,
         binding->map_pokestop_start_interactive,
         binding->map_pokestop_interactive_item_spinner,
-        binding->poi_item_spinner_spin
+        binding->poi_item_spinner_spin,
+        binding->poi_item_spinner_request_items,
+        binding->poi_item_spinner_result_callback
     );
 }
