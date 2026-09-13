@@ -1,5 +1,9 @@
 # Automation Flow — Target Architecture (mô tả theo ý user)
 
+> Historical design notes. Current implementation: native owns all feature
+> scheduling and auto-walk decisions; Kotlin is UI/service/config transport.
+> See [native runtime ownership](architecture/independent-runtime-control.md).
+
 > File nháp brainstorm lại flow. User mô tả từng phần, Claude ghi lại + sau đó làm từng phần.
 > **Nguyên tắc cốt lõi:** sau khi được `start`, mỗi module **tự chạy độc lập bên trong nó**,
 > KHÔNG còn bị central engine/loop gốc điều khiển theo từng cycle.

@@ -37,7 +37,10 @@ public:
 
         const RuntimeDiscardConfig config = runtime_discard_config_snapshot();
         if (!config.configured || !config.auto_discard || runtime_discard_has_pending() ||
-            runtime_transfer_has_pending() || tick.context.active_encounter_id.load() != 0U) return;
+            runtime_transfer_blocks_catch_spin() || runtime_discard_blocks_catch_spin() ||
+            runtime_direct_catch_is_pending(tick.context) || runtime_spin_is_pending(tick.context) ||
+            runtime_encounter_request_is_pending(tick.context) ||
+            tick.context.active_encounter_id.load() != 0U) return;
         for (const auto &stack : inventory.items) {
             int32_t max_count = 0;
             if (!runtime_discard_config_find_limit(config, stack.item_id, &max_count) ||

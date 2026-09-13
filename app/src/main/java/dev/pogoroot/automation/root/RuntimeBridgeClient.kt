@@ -12,7 +12,6 @@ import dev.pogoroot.automation.bridge.BridgePayloadCodec
 import dev.pogoroot.automation.bridge.BridgeProtocol
 import dev.pogoroot.automation.bridge.CommandPhase
 import dev.pogoroot.automation.bridge.RuntimeBridge
-import dev.pogoroot.automation.bridge.ModuleControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeControlRequest
@@ -26,9 +25,6 @@ import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
-import dev.pogoroot.automation.bridge.RuntimeModuleControlAction
-import dev.pogoroot.automation.bridge.RuntimeModuleControlPayloadCodec
-import dev.pogoroot.automation.bridge.RuntimeModuleControlRequest
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
@@ -49,15 +45,14 @@ data class RuntimeModuleLoadStatus(
  * the broker/peer; the app never attaches to the Pokémon GO process itself.
  *
  * Connecting is deliberately side-effect free. START only prepares the native
- * runtime host; feature groups are activated independently through
- * [setModuleEnabled].
+ * runtime host. Native activates feature modules from revisioned config.
  */
 class RuntimeBridgeClient(
     private val socketName: String = DEFAULT_SOCKET_NAME,
     private val connectTimeoutMs: Long = 3_000L,
     private val rootShell: RootShell = ProcessRootShell(),
     private val onModuleLoadStatus: (RuntimeModuleLoadStatus) -> Unit = {},
-) : RuntimeBridge {
+) : RuntimeBridge, RuntimeControlBridge {
     private val outgoingSeq = AtomicLong(0L)
     private val events = ConcurrentLinkedQueue<BridgeEvent>()
     private val controlResults = ConcurrentLinkedQueue<BridgeEvent.AutomationCommandResult>()
@@ -73,7 +68,7 @@ class RuntimeBridgeClient(
     override val connected: Boolean
         get() = socket?.isConnected == true && readerError == null
 
-    fun currentRuntimeReady(): BridgeEvent.RuntimeReady? =
+    override fun currentRuntimeReady(): BridgeEvent.RuntimeReady? =
         runtimeReady?.takeIf { connected }
 
     /** Invoked on the bridge reader thread whenever a fresh [BridgeEvent.RuntimeReady] arrives. */
@@ -135,21 +130,21 @@ class RuntimeBridgeClient(
     }
 
     /** Start the conservative native host. No feature module is enabled here. */
-    fun startRuntime(): Result<Unit> {
+    override fun startRuntime(): Result<Unit> {
         invalidateManagedReadiness()
         return requestRuntimeControl(RuntimeControlAction.START).map { Unit }
     }
 
     /** Disable all feature modules and leave the Zygisk process attachment idle. */
-    fun stopRuntime(): Result<Unit> =
+    override fun stopRuntime(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.STOP).map { Unit }
 
     /** Read-only runtime readiness/binding check; it does not enable modules. */
-    fun requestRuntimeDiagnostic(): Result<Unit> =
+    override fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
 
     /** Apply the complete, revisioned catch_spin config to the native session. */
-    fun setCatchSpinConfig(config: RuntimeCatchSpinConfig): Result<Unit> = runCatching {
+    override fun setCatchSpinConfig(config: RuntimeCatchSpinConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-catch-spin-config-${config.configRevision}-${System.nanoTime()}"
         val request = RuntimeCatchSpinConfigRequest(
@@ -176,7 +171,7 @@ class RuntimeBridgeClient(
     }
 
     /** Apply the complete, revisioned transfer keep policy to native. */
-    fun setTransferConfig(config: RuntimeTransferConfig): Result<Unit> = runCatching {
+    override fun setTransferConfig(config: RuntimeTransferConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-transfer-config-${config.configRevision}-${System.nanoTime()}"
         val request = RuntimeTransferConfigRequest(
@@ -203,7 +198,7 @@ class RuntimeBridgeClient(
     }
 
     /** Apply the complete, revisioned auto-discard policy to native. */
-    fun setDiscardConfig(config: RuntimeDiscardConfig): Result<Unit> = runCatching {
+    override fun setDiscardConfig(config: RuntimeDiscardConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-discard-config-${config.configRevision}-${System.nanoTime()}"
         val request = RuntimeDiscardConfigRequest(
@@ -244,16 +239,6 @@ class RuntimeBridgeClient(
         }
     }
 
-    fun setModuleEnabled(module: RuntimeFeatureModule, enabled: Boolean): Result<Unit> =
-        requestRuntimeModuleControl(
-            module = module,
-            action = if (enabled) {
-                RuntimeModuleControlAction.ENABLE
-            } else {
-                RuntimeModuleControlAction.DISABLE
-            },
-        ).map { Unit }
-
     override fun disconnect() {
         val oldSocket = socket
         socket = null
@@ -271,14 +256,6 @@ class RuntimeBridgeClient(
     /** Send a runtime lifecycle control action (START/STOP/DIAGNOSTIC). */
     private fun requestRuntimeControl(
         action: RuntimeControlAction,
-        requestIdSuffix: String? = null,
-        cycleId: Long? = null,
-    ): Result<BridgeEvent.AutomationCommandResult> =
-        dispatchControlFrame(action.wireValue, action.name, requestIdSuffix, cycleId)
-
-    /** Send a module-owned control action (declared in [ModuleControlAction]). */
-    private fun requestModuleControl(
-        action: ModuleControlAction,
         requestIdSuffix: String? = null,
         cycleId: Long? = null,
     ): Result<BridgeEvent.AutomationCommandResult> =
@@ -307,30 +284,6 @@ class RuntimeBridgeClient(
             sendPayload(
                 messageType = BridgeMessageType.COMMAND,
                 payload = RuntimeControlPayloadCodec.encode(request).getOrThrow(),
-            )
-        }.getOrThrow()
-    }
-
-    private fun requestRuntimeModuleControl(
-        module: RuntimeFeatureModule,
-        action: RuntimeModuleControlAction,
-    ): Result<BridgeEvent.AutomationCommandResult> = runCatching {
-        val ready = currentRuntimeReady() ?: connect().getOrThrow()
-        val requestId = "runtime-module-${module.name.lowercase()}-${action.name.lowercase()}-${System.nanoTime()}"
-        val request = RuntimeModuleControlRequest(
-            runtimeSessionId = ready.runtimeSessionId,
-            requestId = requestId,
-            module = module,
-            action = action,
-            expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
-            pid = ready.pid,
-            processName = ready.processName,
-            packageName = ready.packageName,
-        )
-        awaitControlResult(requestId) {
-            sendPayload(
-                messageType = BridgeMessageType.COMMAND,
-                payload = RuntimeModuleControlPayloadCodec.encode(request).getOrThrow(),
             )
         }.getOrThrow()
     }

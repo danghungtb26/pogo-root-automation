@@ -7,7 +7,6 @@ import dev.pogoroot.automation.core.automation.DEFAULT_SPIN_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.EncounterMode
 import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.core.automation.ThrowQualityTarget
-import dev.pogoroot.automation.engine.AutomationRunState
 
 enum class BerryMode {
     NONE,
@@ -19,8 +18,9 @@ enum class BerryMode {
 }
 
 data class HeadlessAutomationConfig(
-    /** Compatibility field; the live master switch is [AutomationRunState]. */
-    val enabled: Boolean = false,
+    /** Persisted service intent; runtime readiness still gates all actions. */
+    val enabled: Boolean = true,
+    val catchSpinArmed: Boolean = true,
     /** Monotonic persisted revision used when synchronizing config to native. */
     val configRevision: Long = DEFAULT_CONFIG_REVISION,
     val autoCatch: Boolean = true,
@@ -84,8 +84,8 @@ class AutomationConfigRepository(context: Context) {
     }
 
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
-        // The master switch is process-local. A cold start must always be off.
-        enabled = false,
+        enabled = prefs.getBoolean(KEY_ENABLED, true),
+        catchSpinArmed = prefs.getBoolean("catch_spin_armed", true),
         configRevision = prefs.getLong(
             KEY_CONFIG_REVISION,
             HeadlessAutomationConfig.DEFAULT_CONFIG_REVISION,
@@ -140,9 +140,8 @@ class AutomationConfigRepository(context: Context) {
         }
         val next = transformed.copy(configRevision = nextRevision)
         prefs.edit()
-            // Never persist the volatile master switch, including a stale value
-            // written by an older APK.
-            .remove(KEY_ENABLED)
+            .putBoolean(KEY_ENABLED, next.enabled)
+            .putBoolean("catch_spin_armed", next.catchSpinArmed)
             .putLong(KEY_CONFIG_REVISION, next.configRevision)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
             .putBoolean(KEY_CATCH_ALL, next.catchAll)
@@ -184,7 +183,6 @@ class AutomationConfigRepository(context: Context) {
      */
     private fun migrateLegacyPreferences() {
         val editor = prefs.edit()
-        editor.remove(KEY_ENABLED)
         if (!prefs.contains(KEY_AUTO_ENCOUNTER) && prefs.contains(KEY_LEGACY_ENCOUNTER_SWEEP)) {
             editor.putBoolean(
                 KEY_AUTO_ENCOUNTER,

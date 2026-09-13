@@ -54,6 +54,7 @@ void finish_runtime_transfer(
 ) {
     Il2CppGcHandle handle = 0U;
     uint64_t pokemon_id = 0U;
+    int32_t species_id = 0;
     std::string command_id;
     bool release_attempted = false;
     bool release_invoked = false;
@@ -62,6 +63,7 @@ void finish_runtime_transfer(
         if (!g_runtime_transfer.active) return;
         handle = g_runtime_transfer.promise_gc_handle;
         pokemon_id = g_runtime_transfer.pokemon_id;
+        species_id = g_runtime_transfer.species_id;
         command_id = g_runtime_transfer.command_id;
         release_attempted = g_runtime_transfer.release_attempted;
         release_invoked = g_runtime_transfer.release_invoked;
@@ -98,7 +100,7 @@ void finish_runtime_transfer(
             transfer_success
                 ? pogo_runtime::RuntimeAutomationEventType::kPokemonTransferred
                 : pogo_runtime::RuntimeAutomationEventType::kPokemonTransferFailed,
-            pokemon_id
+            pokemon_id, static_cast<uint64_t>(species_id)
         );
     }
     if (!command_id.empty()) {
@@ -301,6 +303,11 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         pending.command_id.empty() ? "auto" : "manual"
     );
     void *release_exception = nullptr;
+    (void)send_runtime_automation_event(
+        context,
+        pogo_runtime::RuntimeAutomationEventType::kPokemonTransferTriggered,
+        pending.pokemon_id, static_cast<uint64_t>(species_id)
+    );
     void *promise = release_runtime_pokemon_on_main_thread(
         context, pokemon, &release_exception
     );
@@ -356,11 +363,6 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         static_cast<unsigned long long>(pending.pokemon_id),
         promise,
         static_cast<unsigned long long>(handle)
-    );
-    (void)send_runtime_automation_event(
-        context,
-        pogo_runtime::RuntimeAutomationEventType::kPokemonTransferTriggered,
-        pending.pokemon_id
     );
     return RuntimeTransferPromisePollResult::kWaiting;
 }

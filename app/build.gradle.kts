@@ -16,6 +16,7 @@ android {
 }
 
 dependencies {
+    testImplementation(kotlin("test-junit"))
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation("com.google.protobuf:protobuf-java:3.23.0")
 

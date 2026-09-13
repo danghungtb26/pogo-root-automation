@@ -29,7 +29,6 @@ import dev.pogoroot.automation.location.RootMockLocationProvider
 import dev.pogoroot.automation.location.AutoFortNavigationBus
 import dev.pogoroot.automation.scan.ScanResultRepository
 import dev.pogoroot.automation.service.HeadlessAutomationService
-import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -304,10 +303,7 @@ class JoystickOverlayService : Service() {
 
     private fun applyAutomationToggle(key: String, enabled: Boolean) {
         if (key == "automation") {
-            // Master arm for the catch_spin cluster: a volatile, default-off RAM
-            // switch (never persisted). The engine itself runs while Pokémon GO is
-            // foreground (started by the service); this only gates whether catch/
-            // spin act. Catch/Spin toggles select what the armed cluster does.
+            automationConfigRepository.update { it.copy(catchSpinArmed = enabled) }
             CatchSpinArmState.setArmed(enabled)
             renderShortcutStates()
             requestRuntimeConfigSync()
@@ -475,13 +471,6 @@ class JoystickOverlayService : Service() {
         cooldownOverlay.render(remaining)
     }
 
-    private fun formatCooldown(remainingMillis: Long): String {
-        val totalMinutes = (remainingMillis + 59_999L) / 60_000L
-        val hours = totalMinutes / 60L
-        val minutes = totalMinutes % 60L
-        return String.format(Locale.US, "%02d:%02d", hours, minutes)
-    }
-
     private fun lastActiveCooldown(
         activity: LastActiveGameAction?,
         destination: GeoPoint?,
@@ -504,12 +493,7 @@ class JoystickOverlayService : Service() {
         persistPoint(point)
     }
 
-    private fun persistPoint(point: GeoPoint?) {
-        positionStore.persistPoint(point)
-    }
+    private fun persistPoint(point: GeoPoint?) = positionStore.persistPoint(point)
 
-    private fun persistCooldown(cooldown: TeleportCooldown) {
-        positionStore.persistCooldown(cooldown)
-    }
-
+    private fun persistCooldown(cooldown: TeleportCooldown) = positionStore.persistCooldown(cooldown)
 }

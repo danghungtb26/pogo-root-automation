@@ -131,14 +131,21 @@ bool send_runtime_catch_spin_payload(
     return sent;
 }
 
+RuntimeAutomationSubjectNames g_runtime_automation_names;
+
 bool send_runtime_automation_event(
     ProbeContext &context,
     pogo_runtime::RuntimeAutomationEventType type,
     uint64_t primary_id,
-    uint64_t secondary_id = 0U
+    uint64_t secondary_id = 0U,
+    const char *detail = ""
 ) {
     if (!context.map_live_verified.load(std::memory_order_acquire)) return false;
-    const pogo_runtime::RuntimeAutomationEvent event{type, primary_id, secondary_id};
+    const pogo_runtime::RuntimeAutomationEvent event{
+        type, primary_id, secondary_id,
+        g_runtime_automation_names.resolve(type, primary_id, secondary_id),
+        detail == nullptr ? "" : detail
+    };
     std::vector<uint8_t> envelope;
     if (!pogo_runtime::encode_runtime_automation_event(
             event,

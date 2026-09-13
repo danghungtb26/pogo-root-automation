@@ -64,6 +64,13 @@ void set_pending_direct_catch_terminal(
     context.pending_direct_catch.captured_pokemon_id = captured_pokemon_id;
     context.pending_direct_catch.error_code = error_code == nullptr ? "" : error_code;
     context.pending_direct_catch.message = message == nullptr ? "" : message;
+    if (context.pending_direct_catch.command_id.empty() &&
+        catch_outcome_wire != 1U && catch_outcome_wire != 4U) {
+        (void)send_runtime_automation_event(
+            context, pogo_runtime::RuntimeAutomationEventType::kCatchFailed,
+            context.pending_direct_catch.encounter_id, catch_outcome_wire
+        );
+    }
 }
 
 void publish_pending_direct_catch_result(

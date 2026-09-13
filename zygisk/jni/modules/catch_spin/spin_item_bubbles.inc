@@ -70,13 +70,12 @@ void *create_award_bubble_data_list(
     const Il2CppApi &api,
     Il2CppClass *list_class
 ) {
-    if (list_class == nullptr || api.object_new == nullptr || api.runtime_object_init == nullptr ||
+    if (list_class == nullptr || api.object_new == nullptr || api.runtime_invoke == nullptr ||
         api.class_get_method_from_name == nullptr) return nullptr;
     void *list = api.object_new(list_class);
     if (!is_probable_managed_pointer(list)) return nullptr;
-    api.runtime_object_init(list);
     const void *ctor = api.class_get_method_from_name(list_class, ".ctor", 0);
-    if (ctor == nullptr) return list;
+    if (ctor == nullptr) return nullptr;
     void *exception = nullptr;
     api.runtime_invoke(ctor, list, nullptr, &exception);
     return exception == nullptr ? list : nullptr;
@@ -255,8 +254,13 @@ bool spawn_award_bubbles_at_canvas(
         );
     }
     RuntimeAwardBubbleConfig config{};
+    // 0.427.0 AwardItemBubbleService owns this RecyclableScope. SpawnBubbles
+    // schedules work against it; a null scope can leave the bubbles unspawned.
+    if (!read_runtime_field(api, service, "dwwf", &config.scope) ||
+        !is_probable_managed_pointer(config.scope)) return false;
     config.position = canvas_position;
     config.delay_sec = 0.15f;
+    config.is_additive = 1U;
     void *spawn_args[] = {bubble_list, &config};
     void *spawn_exception = nullptr;
     api.runtime_invoke(

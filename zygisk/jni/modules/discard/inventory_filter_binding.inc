@@ -122,16 +122,10 @@ void discard_warmup_inventory_filter_host_class(
     if (api.class_get_field_from_name == nullptr || api.field_static_get_value == nullptr) {
         return;
     }
-    const void *singleton_field = api.class_get_field_from_name(host_class, "<>9");
-    if (singleton_field != nullptr) {
-        void *singleton = nullptr;
-        api.field_static_get_value(const_cast<void *>(singleton_field), &singleton);
-        if (singleton != nullptr && api.runtime_object_init != nullptr) {
-            api.runtime_object_init(singleton);
-        }
-    }
-    api.runtime_class_init(host_class);
+    // The singleton constructor has already run; never initialize it twice.
 }
+
+#include "inventory_filter_factory.inc"
 
 void *read_discard_inventory_filter_delegate(
     const Il2CppApi &api,
@@ -142,6 +136,7 @@ void *read_discard_inventory_filter_delegate(
     if (filter_field == nullptr) return nullptr;
     void *delegate = nullptr;
     api.field_static_get_value(const_cast<void *>(filter_field), &delegate);
+    if (delegate == nullptr) delegate = create_discard_inventory_filter(api, host_class, filter_field);
     return delegate;
 }
 

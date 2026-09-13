@@ -53,8 +53,29 @@ jobs:
           test "$(git hash-object app/libs/parser-1.6.0.aar)" = "477b7512e2aa76283330de9e659635a4f9a19680"
           test "$(git hash-object app/libs/virtualjoystick-1.10.1.aar)" = "de697c4501bf8b2fac31343b1bee7f572eee208c"
 
-      - name: Build controller APK
-        run: gradle :app:assembleDebug
+      - name: Test and build controller APK
+        run: ./gradlew test assembleDebug
+
+      - name: Test native readiness, navigation and telemetry
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni \
+            zygisk/tests/runtime_readiness_retry_test.cpp -o /tmp/runtime_readiness_retry_test
+          /tmp/runtime_readiness_retry_test
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni \
+            zygisk/tests/runtime_auto_fort_navigation_test.cpp -o /tmp/runtime_auto_fort_navigation_test
+          /tmp/runtime_auto_fort_navigation_test
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni/shared/bridge_kotlin \
+            zygisk/tests/runtime_automation_event_protocol_test.cpp -o /tmp/runtime_automation_event_protocol_test
+          /tmp/runtime_automation_event_protocol_test
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni \
+            zygisk/tests/runtime_automation_subject_names_test.cpp -o /tmp/runtime_automation_subject_names_test
+          /tmp/runtime_automation_subject_names_test
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni \
+            zygisk/tests/runtime_discard_filter_factory_test.cpp -o /tmp/runtime_discard_filter_factory_test
+          /tmp/runtime_discard_filter_factory_test
+          c++ -std=c++17 -Wall -Wextra -Werror -Izygisk/jni \
+            zygisk/tests/runtime_discard_preparation_test.cpp -o /tmp/runtime_discard_preparation_test
+          /tmp/runtime_discard_preparation_test
 
       - name: Fetch canonical Zygisk API header
         run: |

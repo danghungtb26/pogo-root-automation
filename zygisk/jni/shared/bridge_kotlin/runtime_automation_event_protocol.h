@@ -8,7 +8,7 @@
 namespace pogo_runtime {
 
 constexpr uint32_t kAutomationEventObservationType = 10U;
-constexpr uint32_t kRuntimeAutomationEventPayloadVersion = 1U;
+constexpr uint32_t kRuntimeAutomationEventPayloadVersion = 2U;
 constexpr uint32_t kRuntimeAutomationEventPayloadMagic = 0x504F4745U;  // POGE
 
 enum class RuntimeAutomationEventType : uint32_t {
@@ -21,28 +21,37 @@ enum class RuntimeAutomationEventType : uint32_t {
     kItemDiscardTriggered = 7U,
     kItemDiscarded = 8U,
     kItemDiscardFailed = 9U,
+    kSpinStarted = 10U,
+    kSpinCompleted = 11U,
+    kSpinFailed = 12U,
+    kCatchFailed = 13U,
+    kSpinBubblesFailed = 14U,
 };
 
 struct RuntimeAutomationEvent {
     RuntimeAutomationEventType type = RuntimeAutomationEventType::kPokemonFound;
     uint64_t primary_id = 0U;
     uint64_t secondary_id = 0U;
+    std::string subject_name = "";
+    std::string detail = "";
 };
 
 inline bool encode_runtime_automation_event_payload(
     const RuntimeAutomationEvent &value,
     std::vector<uint8_t> *payload
 ) {
-    if (payload == nullptr || value.primary_id == 0U) {
+    if (payload == nullptr || value.primary_id == 0U ||
+        value.subject_name.size() > 256U || value.detail.size() > 512U) {
         return false;
     }
     const uint32_t event_type = static_cast<uint32_t>(value.type);
-    if (event_type == 0U || event_type > 9U) return false;
+    if (event_type == 0U || event_type > 14U) return false;
     payload->clear();
     append_u32(payload, kRuntimeAutomationEventPayloadMagic);
     append_u32(payload, event_type);
     append_u64(payload, value.primary_id);
     append_u64(payload, value.secondary_id);
+    if (!append_string(payload, value.subject_name) || !append_string(payload, value.detail)) return false;
     return true;
 }
 

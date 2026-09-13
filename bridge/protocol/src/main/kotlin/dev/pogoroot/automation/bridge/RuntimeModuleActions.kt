@@ -5,9 +5,8 @@ package dev.pogoroot.automation.bridge
  * action). Sent as a raw [wireValue] in the control frame; the native dispatcher
  * routes it via the module owner map, exactly like a gameplay action tag.
  *
- * This is the protocol-layer (wire) declaration. The full per-module action
- * ownership + config-desired rules live in the app-layer
- * `RuntimeFeatureModuleCatalog`, which references these values.
+ * This is the wire declaration. Action ownership and config activation rules
+ * live in the native module registry; Kotlin only serializes configuration.
  */
 enum class ModuleControlAction(val wireValue: Int, val owner: RuntimeFeatureModule) {
     /** Replace the validated catch_spin runtime configuration snapshot. */

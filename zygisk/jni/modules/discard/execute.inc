@@ -86,7 +86,8 @@ void finish_runtime_discard(
             context,
             pogo_runtime::RuntimeAutomationEventType::kItemDiscardFailed,
             static_cast<uint64_t>(item_id),
-            static_cast<uint64_t>(amount)
+            static_cast<uint64_t>(amount),
+            message
         );
     }
     if (!command_id.empty()) {
@@ -110,141 +111,7 @@ void reset_runtime_discard_state(ProbeContext &context) {
     free_runtime_discard_handle(context, handle);
 }
 
-void *recycle_runtime_item_on_main_thread(
-    ProbeContext &context,
-    int32_t item_id,
-    int32_t amount,
-    void **exception
-) {
-    RuntimeBinding binding = runtime_binding_snapshot(context);
-    const Il2CppApi &api = context.il2cpp_api;
-    if (exception != nullptr) *exception = nullptr;
-    if (!binding.discard_verified || binding.item_bag == nullptr ||
-        binding.item_bag_recycle_item == nullptr || binding.item_data_class == nullptr ||
-        api.runtime_invoke == nullptr ||
-        item_id <= 0 || amount <= 0) return nullptr;
-
-    const int32_t stack_count = read_runtime_item_count(api, binding, item_id);
-    if (stack_count <= 0 || amount > stack_count) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard stack unavailable item_id=%d amount=%d stack_count=%d",
-            item_id,
-            amount,
-            stack_count
-        );
-        return nullptr;
-    }
-
-    void *item_data = create_recycle_item_data_on_main_thread(
-        context,
-        item_id,
-        stack_count,
-        exception
-    );
-    if (exception != nullptr && *exception != nullptr) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard ItemData build exception item_id=%d stack_count=%d exception=%p",
-            item_id,
-            stack_count,
-            *exception
-        );
-        return nullptr;
-    }
-    if (!is_probable_managed_pointer(item_data)) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard ItemData unavailable item_id=%d stack_count=%d",
-            item_id,
-            stack_count
-        );
-        return nullptr;
-    }
-    {
-        std::lock_guard<std::mutex> lock(context.binding_mutex);
-        binding = context.binding;
-    }
-    int32_t verified_item_id = 0;
-    int32_t verified_count = 0;
-    uint8_t verified_recyclable = 0U;
-    (void)read_runtime_field(api, item_data, "item", &verified_item_id);
-    (void)read_runtime_field(api, item_data, "count", &verified_count);
-    (void)read_runtime_field(api, item_data, "recyclable", &verified_recyclable);
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        kLogTag,
-        "native discard ItemData verify item_id=%d row_item=%d row_count=%d recyclable=%u",
-        item_id,
-        verified_item_id,
-        verified_count,
-        static_cast<unsigned>(verified_recyclable)
-    );
-
-    void *expiring_exception = nullptr;
-    void *expiring_items = resolve_recycle_expiring_items_copy(
-        api,
-        binding,
-        &expiring_exception
-    );
-    if (expiring_exception != nullptr) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard expiring items unavailable item_id=%d exception=%p",
-            item_id,
-            expiring_exception
-        );
-        expiring_items = nullptr;
-    }
-    if (!is_probable_managed_pointer(expiring_items)) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard expiring set missing item_id=%d supplier=%p hash_set=%p ctor=%p",
-            item_id,
-            binding.hash_set_item_supplier,
-            binding.hash_set_item_class,
-            binding.hash_set_item_ctor
-        );
-        return nullptr;
-    }
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        kLogTag,
-        "native discard invoke prep item_id=%d amount=%d stack_count=%d item_data=%p expiring=%p",
-        item_id,
-        amount,
-        stack_count,
-        item_data,
-        expiring_items
-    );
-
-    int32_t num_to_recycle = amount;
-    void *arguments[] = {item_data, &num_to_recycle, expiring_items};
-    void *promise = api.runtime_invoke(
-        binding.item_bag_recycle_item,
-        binding.item_bag,
-        arguments,
-        exception
-    );
-    if (exception != nullptr && *exception != nullptr) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard RecycleItem exception item_id=%d amount=%d stack_count=%d exception=%p",
-            item_id,
-            amount,
-            stack_count,
-            *exception
-        );
-        return nullptr;
-    }
-    return promise;
-}
+#include "recycle_item_action.inc"
 
 MainThreadActionOutcome start_runtime_discard_on_main_thread(
     ProbeContext &context,
@@ -289,18 +156,19 @@ MainThreadActionOutcome start_runtime_discard_on_main_thread(
     );
 
     void *exception = nullptr;
-    void *promise = recycle_runtime_item_on_main_thread(context, item_id, amount, &exception);
+    bool invoked = false;
+    const char *failure = "Inventory unavailable";
+    void *promise = recycle_runtime_item_on_main_thread(
+        context, item_id, amount, &exception, &invoked, &failure);
     if (exception != nullptr || !is_probable_managed_pointer(promise)) {
         finish_runtime_discard(
             context,
-            kCommandPhaseIndeterminate,
-            "discard_invoke_indeterminate",
-            exception != nullptr
-                ? "RecycleItem threw before returning a Promise"
-                : "RecycleItem did not return a Promise",
-            false
+            invoked ? kCommandPhaseIndeterminate : kCommandPhaseRejected,
+            invoked ? "discard_invoke_indeterminate" : "discard_preparation_failed",
+            failure,
+            invoked
         );
-        return MainThreadActionOutcome::kIndeterminate;
+        return invoked ? MainThreadActionOutcome::kIndeterminate : MainThreadActionOutcome::kRejected;
     }
     const Il2CppGcHandle handle = api.gchandle_new(promise, false);
     if (handle == 0U) {
@@ -335,151 +203,7 @@ MainThreadActionOutcome start_runtime_discard_on_main_thread(
     return MainThreadActionOutcome::kInvoked;
 }
 
-RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
-    ProbeContext &context
-) {
-    PendingRuntimeDiscard pending;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
-        pending = g_runtime_discard;
-    }
-    if (!pending.active) return RuntimeDiscardPromisePollResult::kNoPending;
-    const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
-    if (pending.started_at_ns != 0U && now >= pending.started_at_ns &&
-        now - pending.started_at_ns > kRuntimeDiscardPromiseTimeoutNs) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseIndeterminate,
-            "discard_promise_timeout",
-            "RecycleItem Promise did not complete before the native deadline",
-            false
-        );
-        return RuntimeDiscardPromisePollResult::kTimedOut;
-    }
-
-    const Il2CppApi &api = context.il2cpp_api;
-    void *promise = api.gchandle_get_target == nullptr
-        ? nullptr : api.gchandle_get_target(pending.promise_gc_handle);
-    if (promise == nullptr) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseIndeterminate,
-            "discard_promise_target_unavailable",
-            "RecycleItem Promise GC target is no longer available",
-            false
-        );
-        return RuntimeDiscardPromisePollResult::kFailed;
-    }
-    bool complete_called = false;
-    bool error_called = false;
-    void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
-    uint32_t poll_count = 0U;
-    {
-        std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
-        if (g_runtime_discard.active &&
-            g_runtime_discard.promise_gc_handle == pending.promise_gc_handle) {
-            poll_count = ++g_runtime_discard.poll_count;
-        }
-    }
-    __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "native discard promise state item_id=%d amount=%d promise=%p complete=%d error=%d "
-        "value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
-        pending.item_id,
-        pending.amount,
-        promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
-        completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
-    );
-    if (!fields_read) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseIndeterminate,
-            "discard_promise_layout_unavailable",
-            "RecycleItem Promise completion fields could not be read",
-            true
-        );
-        return RuntimeDiscardPromisePollResult::kFailed;
-    }
-    if (error_called) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseCompleted,
-            "discard_failed",
-            "RecycleItem Promise completed with an error",
-            false
-        );
-        return RuntimeDiscardPromisePollResult::kFailed;
-    }
-    if (!complete_called) return RuntimeDiscardPromisePollResult::kWaiting;
-    if (completed_value == nullptr ||
-        !runtime_object_is_exact_class(api, completed_value, "Holoholo.Rpc", "RecycleItemOutProto")) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseIndeterminate,
-            "discard_result_type_mismatch",
-            "RecycleItem Promise returned an unexpected result type",
-            true
-        );
-        return RuntimeDiscardPromisePollResult::kFailed;
-    }
-    int32_t result = 0;
-    int32_t new_count = -1;
-    if (!read_runtime_field(api, completed_value, "Result", &result) ||
-        !read_runtime_field(api, completed_value, "NewCount", &new_count)) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseIndeterminate,
-            "discard_result_layout_unavailable",
-            "RecycleItemOutProto result fields could not be read",
-            true
-        );
-        return RuntimeDiscardPromisePollResult::kFailed;
-    }
-    __android_log_print(
-        result == 1 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "native discard promise result item_id=%d amount=%d result=%d new_count=%d",
-        pending.item_id,
-        pending.amount,
-        result,
-        new_count
-    );
-    if (result == 1) {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseCompleted,
-            "",
-            "RecycleItem completed with SUCCESS",
-            false
-        );
-    } else {
-        finish_runtime_discard(
-            context,
-            kCommandPhaseCompleted,
-            "discard_rejected",
-            "RecycleItem completed without SUCCESS",
-            false
-        );
-    }
-    return RuntimeDiscardPromisePollResult::kCompleted;
-}
+#include "promise_observer.inc"
 
 RuntimeActionResult execute_runtime_discard(
     ProbeContext &context,

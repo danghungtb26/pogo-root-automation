@@ -348,7 +348,8 @@ void *invoke_inventory_list_sorted(
     void **exception
 ) {
     if (exception != nullptr) *exception = nullptr;
-    if (!is_probable_managed_pointer(service) || api.runtime_invoke == nullptr) return nullptr;
+    if (!is_probable_managed_pointer(service) || api.runtime_invoke == nullptr ||
+        !is_probable_managed_pointer(filter_delegate)) return nullptr;
     const void *resolved_list_sorted = list_sorted;
     if (resolved_list_sorted == nullptr && api.object_get_class != nullptr &&
         api.class_get_method_from_name != nullptr) {
@@ -412,25 +413,7 @@ void *lookup_recycle_item_data_from_inventory_service(
         filter_delegate,
         exception
     );
-    if ((exception != nullptr && *exception != nullptr) || !is_probable_managed_pointer(list)) {
-        if (exception != nullptr) *exception = nullptr;
-        if (filter_delegate == nullptr) {
-            __android_log_print(
-                ANDROID_LOG_WARN,
-                kLogTag,
-                "native discard inventory list unavailable item_id=%d filter=0x0",
-                item_id
-            );
-            return nullptr;
-        }
-        list = invoke_inventory_list_sorted(
-            api,
-            service,
-            binding.item_inventory_list_sorted,
-            nullptr,
-            exception
-        );
-    }
+    // A null usableFilter is not a fallback: it is the original failure.
     if (exception != nullptr && *exception != nullptr) {
         __android_log_print(
             ANDROID_LOG_WARN,

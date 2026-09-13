@@ -1,8 +1,20 @@
+#include "runtime_readiness_retry.h"
 namespace {
+RuntimeReadinessRetry g_runtime_readiness_retry;
 constexpr int kMapReadinessPollTimeoutMs = 500;
 
 void maybe_probe_pending_map_readiness(ProbeContext &context) {
     if (!g_runtime_active.load()) return;
+
+    if (g_runtime_readiness_retry.due(
+            static_cast<uint64_t>(now_elapsed_nanos()), pogo_runtime_module::any_enabled())) {
+        if (run_managed_runtime_diagnostic(context)) {
+            g_runtime_readiness_retry.completed();
+            pogo_runtime_module::probe_map_live(context);
+            send_runtime_capability_update(context.fd, runtime_binding_snapshot(context),
+                context.map_live_verified.load(std::memory_order_acquire));
+        }
+    }
 
     RuntimeBinding binding = runtime_binding_snapshot(context);
     const bool live_before = context.map_live_verified.load(std::memory_order_relaxed);

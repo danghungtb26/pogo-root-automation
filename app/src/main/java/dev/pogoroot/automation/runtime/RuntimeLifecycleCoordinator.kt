@@ -1,8 +1,7 @@
 package dev.pogoroot.automation.runtime
 
-import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.bridge.BridgeEvent
-import dev.pogoroot.automation.root.RuntimeBridgeClient
+import dev.pogoroot.automation.root.RuntimeControlBridge
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 
 enum class RuntimeControlState {
@@ -23,25 +22,20 @@ data class RuntimeControlSnapshot(
 /**
  * Kotlin control plane for the injected runtime host.
  *
- * Owns connect/START/STOP, managed DIAGNOSTIC scheduling, and CONFIG_SET mirrors.
+ * Owns the service connection, host START/STOP intent, and CONFIG_SET mirrors.
+ * Native schedules readiness discovery; DIAGNOSTIC here is a manual UI request.
  * Feature-module enable/disable and map-ready gating live entirely in native
  * (`sync_auto_enabled_modules`).
  */
 class RuntimeLifecycleCoordinator(
-    private val bridge: RuntimeBridgeClient,
+    private val bridge: RuntimeControlBridge,
 ) {
-    private companion object {
-        const val AUTO_DIAGNOSTIC_INITIAL_DELAY_MS = 3_000L
-        const val AUTO_DIAGNOSTIC_RETRY_DELAY_MS = 5_000L
-    }
-
     @Volatile private var state = RuntimeControlState.DETACHED
     @Volatile private var activeRuntimeSessionId: String? = null
     @Volatile private var managedReadySessionId: String? = null
     @Volatile private var managedReadinessBlockedBeforeMessageSeq: Long? = null
     @Volatile private var lastError: String? = null
     @Volatile private var managedConfigsApplied = false
-    private var nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
     private var onManagedConfigsAppliedListener: (() -> Unit)? = null
     private val catchSpinConfigDispatcher = CatchSpinConfigDispatcher(bridge)
     private val transferConfigDispatcher = TransferConfigDispatcher(bridge)
@@ -68,7 +62,6 @@ class RuntimeLifecycleCoordinator(
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
-            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.ATTACHED_IDLE
         }
 
@@ -79,19 +72,12 @@ class RuntimeLifecycleCoordinator(
             bridge.startRuntime().getOrThrow()
             activeRuntimeSessionId = ready.runtimeSessionId
             managedReadySessionId = null
-            nextAutomaticDiagnosticAtNanos = System.nanoTime() +
-                AUTO_DIAGNOSTIC_INITIAL_DELAY_MS * 1_000_000L
             state = RuntimeControlState.RUNNING
             lastError = null
             resetConfigDispatchers()
         }
 
-        var advertisedReady = bridge.currentRuntimeReady() ?: ready
-        if (!isManagedRuntimeReadyForSession(advertisedReady)) {
-            runAutomaticDiagnosticIfDue()
-            advertisedReady = bridge.currentRuntimeReady() ?: advertisedReady
-        }
-        val effectiveReady = effectiveReady(advertisedReady)
+        val advertisedReady = bridge.currentRuntimeReady() ?: ready
         if (isManagedRuntimeReadyForSession(advertisedReady)) {
             managedReadySessionId = advertisedReady.runtimeSessionId
             // Push CONFIG_SET only after managed DIAGNOSTIC publishes the verified
@@ -99,7 +85,7 @@ class RuntimeLifecycleCoordinator(
             // and was resetting the diagnostic timer through ERROR/START loops.
             syncRuntimeConfigs(config)
         }
-        effectiveReady
+        effectiveReady(advertisedReady)
     }.onFailure(::recordFailure)
 
     @Synchronized
@@ -108,7 +94,6 @@ class RuntimeLifecycleCoordinator(
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
-            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             lastError = null
             resetConfigDispatchers()
@@ -122,7 +107,6 @@ class RuntimeLifecycleCoordinator(
         activeRuntimeSessionId = null
         managedReadySessionId = null
         managedReadinessBlockedBeforeMessageSeq = null
-        nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.ATTACHED_IDLE
         lastError = null
         resetConfigDispatchers()
@@ -132,8 +116,6 @@ class RuntimeLifecycleCoordinator(
     fun runDiagnostic(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
         bridge.connect().getOrThrow()
         bridge.requestRuntimeDiagnostic().getOrThrow()
-        nextAutomaticDiagnosticAtNanos = System.nanoTime() +
-            AUTO_DIAGNOSTIC_RETRY_DELAY_MS * 1_000_000L
         val advertisedReady = bridge.currentRuntimeReady()
         if (advertisedReady != null && isManagedRuntimeReadyForSession(advertisedReady)) {
             managedReadySessionId = advertisedReady.runtimeSessionId
@@ -197,19 +179,16 @@ class RuntimeLifecycleCoordinator(
         activeRuntimeSessionId = null
         managedReadySessionId = null
         managedReadinessBlockedBeforeMessageSeq = null
-        nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.DETACHED
         resetConfigDispatchers()
     }
 
     private fun syncRuntimeConfigs(config: HeadlessAutomationConfig) {
         if (state != RuntimeControlState.RUNNING) return
-        val applied = syncCatchSpinConfig(config, CatchSpinArmState.isArmed()).isSuccess &&
-            syncTransferConfig(config).isSuccess &&
-            syncDiscardConfig(config).isSuccess
-        if (applied) {
-            markManagedConfigsApplied()
-        }
+        syncCatchSpinConfig(config, config.catchSpinArmed).getOrThrow()
+        syncTransferConfig(config).getOrThrow()
+        syncDiscardConfig(config).getOrThrow()
+        markManagedConfigsApplied()
     }
 
     private fun markManagedConfigsApplied() {
@@ -237,21 +216,6 @@ class RuntimeLifecycleCoordinator(
         return ready.messageSeq > blockedBefore
     }
 
-    private fun runAutomaticDiagnosticIfDue() {
-        if (System.nanoTime() < nextAutomaticDiagnosticAtNanos) return
-        nextAutomaticDiagnosticAtNanos = System.nanoTime() +
-            AUTO_DIAGNOSTIC_RETRY_DELAY_MS * 1_000_000L
-        val result = runCatching {
-            bridge.requestRuntimeDiagnostic().getOrThrow()
-        }
-        result.onSuccess {
-            lastError = null
-        }.onFailure { error ->
-            lastError = "runtime diagnostic pending: " +
-                (error.message ?: error::class.java.simpleName)
-        }
-    }
-
     private fun resetConfigDispatchers() {
         catchSpinConfigDispatcher.reset()
         transferConfigDispatcher.reset()
@@ -260,17 +224,16 @@ class RuntimeLifecycleCoordinator(
     }
 
     private fun recordFailure(error: Throwable) {
+        managedConfigsApplied = false
         lastError = error.message ?: error::class.java.simpleName
         if (bridge.connected) {
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
-            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.ERROR
         } else {
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
-            nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             resetConfigDispatchers()
         }

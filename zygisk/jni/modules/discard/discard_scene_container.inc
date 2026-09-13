@@ -164,7 +164,10 @@ void *resolve_runtime_scene_container_from_registry(
         void *moved = api.runtime_invoke(move_next, enumerator, nullptr, exception);
         if (exception != nullptr && *exception != nullptr) break;
         bool has_next = false;
-        if (moved != nullptr) memcpy(&has_next, moved, sizeof(has_next));
+        if (moved == nullptr || api.object_unbox == nullptr) break;
+        void *unboxed = api.object_unbox(moved);
+        if (unboxed == nullptr) break;
+        memcpy(&has_next, unboxed, sizeof(has_next));
         if (!has_next) break;
         if (exception != nullptr) *exception = nullptr;
         void *scene_context = api.runtime_invoke(get_current, enumerator, nullptr, exception);

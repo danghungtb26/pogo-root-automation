@@ -1,6 +1,5 @@
 package dev.pogoroot.automation.engine
 
-import dev.pogoroot.automation.adapter.GameCapability
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
 import dev.pogoroot.automation.runtime.observation.RuntimeObservationRouter
@@ -20,13 +19,11 @@ internal class AutomationCycle(
         }
         runtimeCoordinator.ensureRunning(config)
             .onSuccess { ready ->
-                if (!ready.strongIdentityVerified ||
-                    GameCapability.READ_NEARBY.name !in ready.capabilities
-                ) {
+                if (!ready.strongIdentityVerified) {
                     observationRouter.stop()
                     statusReporter.publishRuntimeDiagnosticPending(ready.runtimeSessionId)
                 } else {
-                    observationRouter.tick(config)
+                    observationRouter.tick()
                         .onSuccess(statusReporter::publishTick)
                         .onFailure { error ->
                             statusReporter.recordError(
@@ -37,6 +34,7 @@ internal class AutomationCycle(
                 }
             }
             .onFailure { error ->
+                observationRouter.stop()
                 statusReporter.recordError(
                     message = "runtime start: ${error.message ?: error::class.java.simpleName}",
                     runtimeSessionId = runtimeCoordinator.snapshot().runtimeSessionId,

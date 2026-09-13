@@ -7,9 +7,8 @@ import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.bridge.ObservationType
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeBridge
-import dev.pogoroot.automation.config.HeadlessAutomationConfig
-import dev.pogoroot.automation.core.automation.AutoFortNavigationSignal
-import dev.pogoroot.automation.core.automation.AutomationSnapshot
+import dev.pogoroot.automation.bridge.RuntimeNavigationPayload
+import dev.pogoroot.automation.bridge.RuntimeNavigationPayloadCodec
 import dev.pogoroot.automation.core.model.MapTargetObservation
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
@@ -27,20 +26,18 @@ class RuntimeObservationRouter(
     private val bridge: RuntimeBridge,
     private val eventSink: AutomationEventSink = AutomationEventSink { },
     private val onMapTarget: (MapTargetObservation) -> Unit = {},
-    private val onNavigationEnabledChanged: (Boolean) -> Unit = {},
-    private val onNavigationSnapshot: (AutomationSnapshot) -> Unit = {},
-    private val onNavigationSignal: (AutoFortNavigationSignal) -> Unit = {},
+    private val onNavigation: (RuntimeNavigationPayload, Long) -> Unit = { _, _ -> },
     private val onNavigationReset: () -> Unit = {},
 ) {
     private val source = BridgePogoRuntimeSource(bridge)
     private val adapter = PogoGameAdapter(source, actionExecutor = null)
     private var connected = false
+    private var runtimeSessionId: String? = null
     private var processedObservationSeq = 0L
     private var lastError: String? = null
     private var mapAutomationReady = false
 
-    fun tick(config: HeadlessAutomationConfig): Result<RuntimeObservationTick> = runCatching {
-        onNavigationEnabledChanged(config.autoWalkToFort)
+    fun tick(): Result<RuntimeObservationTick> = runCatching {
         ensureConnected()
         source.refresh().getOrThrow()
         var observationSeq: Long? = null
@@ -49,7 +46,7 @@ class RuntimeObservationRouter(
             when (event) {
                 is BridgeEvent.ObservationEvent -> {
                     if (event.messageSeq <= processedObservationSeq) continue
-                    if (handleObservation(event, config)) {
+                    if (handleObservation(event)) {
                         processedObservationSeq = event.messageSeq
                         observationSeq = event.messageSeq
                     }
@@ -80,17 +77,24 @@ class RuntimeObservationRouter(
 
     fun stop() = resetForAutomationDisable()
 
+    fun stopNavigation() = onNavigationReset()
+
     private fun ensureConnected() {
-        if (connected) return
+        val ready = bridge.connect().getOrThrow()
+        if (connected && runtimeSessionId == ready.runtimeSessionId) return
+        onNavigationReset()
         source.connect().getOrThrow()
+        runtimeSessionId = ready.runtimeSessionId
         processedObservationSeq = 0L
         connected = true
         lastError = null
     }
 
     private fun disconnect(reason: String? = null, clearProcessedSeq: Boolean = false) {
+        onNavigationReset()
         if (connected) source.disconnect()
         connected = false
+        runtimeSessionId = null
         mapAutomationReady = false
         if (clearProcessedSeq) processedObservationSeq = 0L
         if (reason != null) lastError = reason
@@ -98,13 +102,10 @@ class RuntimeObservationRouter(
 
     private fun handleObservation(
         event: BridgeEvent.ObservationEvent,
-        config: HeadlessAutomationConfig,
     ): Boolean = when (event.observationType) {
         ObservationType.AUTOMATION_EVENT -> {
-            if (!mapAutomationReady) return true
-            RuntimeAutomationEventPayloadCodec.decode(event.payload)
+            RuntimeAutomationEventPayloadCodec.decode(event.payload, event.payloadVersion)
                 .onSuccess { decoded ->
-                    decoded.toAutoFortNavigationSignal()?.let(onNavigationSignal)
                     decoded.toAutomationEvent()?.let(eventSink::publish)
                         ?: Log.w(
                             LOG_TAG,
@@ -146,14 +147,16 @@ class RuntimeObservationRouter(
                 }
             true
         }
-        ObservationType.REQUEST_CATCH_SPIN -> {
-            if (config.autoWalkToFort && mapAutomationReady) {
-                source.selectObservation(event.messageSeq).getOrThrow()
-                try {
-                    onNavigationSnapshot(adapter.readNavigationSnapshot())
-                } finally {
-                    source.clearObservationSelection()
-                }
+        ObservationType.NAVIGATION -> {
+            if (event.payloadVersion == RuntimeNavigationPayloadCodec.VERSION) {
+                RuntimeNavigationPayloadCodec.decode(event.payload)
+                    .onSuccess { onNavigation(it, event.observedAtElapsedNs) }
+                    .onFailure {
+                        onNavigationReset()
+                        lastError = "navigation decode: ${it.message}"
+                    }
+            } else {
+                onNavigationReset()
             }
             true
         }

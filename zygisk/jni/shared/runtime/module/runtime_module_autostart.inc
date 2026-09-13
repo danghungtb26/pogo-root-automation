@@ -1,8 +1,8 @@
 namespace {
 constexpr Module kAutoStartModules[] = {
-    Module::kCatchSpin,
-    Module::kDiscard,
     Module::kTransfer,
+    Module::kDiscard,
+    Module::kCatchSpin,
 };
 
 bool catch_spin_desired_by_config() {

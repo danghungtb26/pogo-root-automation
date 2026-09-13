@@ -166,8 +166,8 @@ phải xác nhận `CAUGHT` và có capability `CATCH_AND_CLOSE_PREVIEW` trướ
   safety.
 - Android compile verifies the structured-only app boundary.
 - Native tests verify the runtime command protocol.
-- `bash scripts/structured-only-source-guard.sh` rejects deleted visual/input
-  symbols, direct manual routes and accidental removal of `RootShell`.
+- Native readiness/navigation/telemetry tests verify the runtime-owned execution
+  boundary. The retired split-mode source guard has been removed.
 - Device smoke should verify runtime attach/readiness and safe rejection while
   observations/capabilities are unavailable.
 

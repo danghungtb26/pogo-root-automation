@@ -90,6 +90,14 @@ void mark_runtime_spin_terminal(
         terminal = g_runtime_spin;
     }
     publish_runtime_spin_terminal(context, terminal);
+    (void)send_runtime_automation_event(
+        context,
+        server_result == 1 && terminal.error_code.empty()
+            ? pogo_runtime::RuntimeAutomationEventType::kSpinCompleted
+            : pogo_runtime::RuntimeAutomationEventType::kSpinFailed,
+        terminal.requested_at_ns,
+        static_cast<uint64_t>(server_result)
+    );
 }
 }  // namespace
 
@@ -98,7 +106,6 @@ bool begin_pending_runtime_spin(
     const std::string &fort_id,
     const char *command_id
 ) {
-    (void)context;
     if (fort_id.empty()) return false;
     std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
     if (g_runtime_spin.active) {
@@ -109,6 +116,10 @@ bool begin_pending_runtime_spin(
     g_runtime_spin.fort_id = fort_id;
     g_runtime_spin.command_id = command_id == nullptr ? "" : command_id;
     g_runtime_spin.requested_at_ns = static_cast<uint64_t>(now_elapsed_nanos());
+    (void)send_runtime_automation_event(
+        context, pogo_runtime::RuntimeAutomationEventType::kSpinStarted,
+        g_runtime_spin.requested_at_ns
+    );
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -126,6 +137,7 @@ bool runtime_spin_is_pending(ProbeContext &context) {
 }
 
 void abandon_pending_runtime_spin(ProbeContext &context, const char *reason) {
+    mark_runtime_spin_terminal(context, 0, reason, "Spin invocation did not complete");
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
     std::string fort_id;
@@ -339,16 +351,18 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
     }
 
     const RuntimeBinding binding = runtime_binding_snapshot(context);
+    if (server_result == 1 && !spawn_runtime_spin_item_bubbles_on_main_thread(
+            context, pending.fort_id, completed_value)) {
+        (void)send_runtime_automation_event(
+            context, pogo_runtime::RuntimeAutomationEventType::kSpinBubblesFailed,
+            pending.requested_at_ns
+        );
+    }
     if (server_result == 1 && binding.poi_item_spinner_result_callback != nullptr) {
         void *spinner = api.gchandle_get_target == nullptr
             ? nullptr : api.gchandle_get_target(pending.spinner_gc_handle);
         if (spinner != nullptr && runtime_object_is_exact_class(
                 api, spinner, "Niantic.Holoholo.Map", "PoiItemSpinner")) {
-            (void)spawn_runtime_spin_item_bubbles_on_main_thread(
-                context,
-                pending.fort_id,
-                completed_value
-            );
             void *callback_arguments[] = {completed_value};
             void *callback_exception = nullptr;
             api.runtime_invoke(

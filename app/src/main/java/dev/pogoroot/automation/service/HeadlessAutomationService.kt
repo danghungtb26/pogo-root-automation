@@ -18,6 +18,7 @@ import java.util.concurrent.TimeUnit
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.engine.AutomationRunState
+import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.engine.HeadlessAutomationEngine
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
@@ -25,7 +26,7 @@ import dev.pogoroot.automation.events.AutomationEventType
 import dev.pogoroot.automation.events.ToastAutomationEventSink
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
 import dev.pogoroot.automation.runtime.observation.RuntimeObservationRouter
-import dev.pogoroot.automation.core.automation.AutoFortNavigationCoordinator
+import dev.pogoroot.automation.location.NativeNavigationReceiver
 import dev.pogoroot.automation.location.AutoFortNavigationBus
 
 class HeadlessAutomationService : Service() {
@@ -36,7 +37,7 @@ class HeadlessAutomationService : Service() {
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
     private lateinit var observationRouter: RuntimeObservationRouter
-    private lateinit var autoFortNavigationCoordinator: AutoFortNavigationCoordinator
+    private lateinit var navigationReceiver: NativeNavigationReceiver
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
@@ -46,7 +47,9 @@ class HeadlessAutomationService : Service() {
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        AutomationRunState.setActive(false)
+        val restoredConfig = configRepository.read()
+        AutomationRunState.setActive(restoredConfig.enabled)
+        CatchSpinArmState.setArmed(restoredConfig.catchSpinArmed)
         eventSink = ToastAutomationEventSink(this, configRepository)
         mapTargetRepository = MapTargetRepository(this)
         runtimeBridge = RuntimeBridgeClient(
@@ -56,10 +59,7 @@ class HeadlessAutomationService : Service() {
             bridge = runtimeBridge!!,
         )
         runtimeCoordinator.setOnManagedConfigsAppliedListener(::flushPendingModuleLoadStatuses)
-        autoFortNavigationCoordinator = AutoFortNavigationCoordinator(commandSink = { command ->
-            Log.i(LOG_TAG, "auto fort navigation command=$command")
-            AutoFortNavigationBus.publish(command)
-        })
+        navigationReceiver = NativeNavigationReceiver(eventSink, AutoFortNavigationBus::publish)
         observationRouter = RuntimeObservationRouter(
             bridge = runtimeBridge!!,
             eventSink = eventSink,
@@ -68,10 +68,8 @@ class HeadlessAutomationService : Service() {
                     mapTargetRepository.publish(target)
                 }
             },
-            onNavigationEnabledChanged = autoFortNavigationCoordinator::setEnabled,
-            onNavigationSnapshot = autoFortNavigationCoordinator::onSnapshot,
-            onNavigationSignal = autoFortNavigationCoordinator::onSignal,
-            onNavigationReset = autoFortNavigationCoordinator::reset,
+            onNavigation = navigationReceiver::receive,
+            onNavigationReset = { navigationReceiver.reset() },
         )
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
@@ -86,7 +84,6 @@ class HeadlessAutomationService : Service() {
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
-            onGameAvailable = ::enableAutomationForGameForeground,
         )
 
         createNotificationChannel()
@@ -145,8 +142,8 @@ class HeadlessAutomationService : Service() {
             joystickAutoStartCoordinator.stop()
         }
         apiServer.stop()
-        if (::autoFortNavigationCoordinator.isInitialized) {
-            autoFortNavigationCoordinator.reset()
+        if (::navigationReceiver.isInitialized) {
+            navigationReceiver.reset()
         }
         engine.shutdown()
         super.onDestroy()
@@ -203,12 +200,6 @@ class HeadlessAutomationService : Service() {
 
     private fun syncJoystickAutoStart() {
         runCatching { joystickAutoStartCoordinator.sync() }
-    }
-
-    private fun enableAutomationForGameForeground() {
-        if (AutomationRunState.isActive()) return
-        Log.i(LOG_TAG, "automation auto-enabled: Pokémon GO is foreground")
-        engine.activate()
     }
 
     private fun createNotificationChannel() {

@@ -73,7 +73,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     // START is intentionally native-only. The probe can reach this path while
     // il2cpp_init and Unity graphics/scene initialization are still in flight;
     // managed discovery at that point can kill the target process. The
-    // controller issues DIAGNOSTIC after a short post-start settling period.
+    // native control loop schedules discovery after a post-start settling period.
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -82,6 +82,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     discard_pending_throw_events(context);
     pogo_runtime_module::reset_map_live_verified(context);
     g_runtime_active.store(true);
+    g_runtime_readiness_retry.start(static_cast<uint64_t>(now_elapsed_nanos()));
     g_runtime_explicit_snapshot_mode.store(true);
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
@@ -100,6 +101,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
 }
 
 bool stop_runtime(ProbeContext &context, const char *request_id) {
+    g_runtime_readiness_retry.stop();
     __android_log_print(ANDROID_LOG_INFO, kLogTag, "runtime host stop requested");
     pogo_runtime_module::disable_all_modules(context);
     pogo_runtime_module::reset_map_live_verified(context);
@@ -144,6 +146,7 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
             "managed runtime diagnostic could not verify the initialized runtime"
         );
     }
+    g_runtime_readiness_retry.completed();
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     pogo_runtime_module::probe_map_live(context);
     send_runtime_capability_update(
@@ -217,54 +220,11 @@ bool handle_runtime_module_control(
         );
     }
 
-    const bool enable = request.action == pogo_runtime_module::Action::kEnable;
-    if (enable && !g_runtime_active.load()) {
-        return send_runtime_rejected(
-            context.fd,
-            request.request_id.c_str(),
-            "runtime_inactive",
-            "runtime host must be STARTed before enabling a feature module"
-        );
-    }
-
-    std::string error_code;
-    std::string message;
-    const bool changed = pogo_runtime_module::set_module_enabled(
-        context,
-        request.module,
-        enable,
-        &error_code,
-        &message
-    );
-    __android_log_print(
-        changed ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-        kLogTag,
-        "runtime module control module=%s enabled=%d success=%d",
-        pogo_runtime_module::module_name(request.module),
-        enable ? 1 : 0,
-        changed ? 1 : 0
-    );
-    if (!changed) {
-        return send_runtime_rejected(
-            context.fd,
-            request.request_id.c_str(),
-            error_code.empty() ? "runtime_module_control_failed" : error_code.c_str(),
-            message.empty() ? "runtime feature module could not change state" : message.c_str()
-        );
-    }
-    const RuntimeBinding updated_binding = runtime_binding_snapshot(context);
-    send_runtime_capability_update(
-        context.fd,
-        updated_binding,
-        context.map_live_verified.load(std::memory_order_acquire)
-    );
-    if (request.module == pogo_runtime_module::Module::kEncounter) {
-        discard_pending_throw_events(context);
-    }
-    return send_runtime_control_completed(
+    return send_runtime_rejected(
         context.fd,
         request.request_id.c_str(),
-        message.c_str()
+        "native_module_lifecycle_owned",
+        "feature lifecycle follows native config; send CONFIG_SET or host STOP"
     );
 }
 

@@ -61,6 +61,8 @@ enum class ObservationType(val wireValue: Int) {
     REQUEST_CATCH_SPIN(9),
     /** Native catch/transfer lifecycle events for app-owned UI feedback. */
     AUTOMATION_EVENT(10),
+    /** Native-decided walk/stop instruction for the Android location service. */
+    NAVIGATION(11),
 }
 
 enum class CommandPhase(val wireValue: Int) {

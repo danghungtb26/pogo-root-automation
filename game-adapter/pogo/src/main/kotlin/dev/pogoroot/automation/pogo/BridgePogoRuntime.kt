@@ -238,7 +238,7 @@ class BridgePogoRuntimeSource(
         val structuredCatchSpin = event.observationType == ObservationType.REQUEST_CATCH_SPIN &&
             event.payloadVersion == BridgeProtocol.RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION
         val structuredAutomationEvent = event.observationType == ObservationType.AUTOMATION_EVENT &&
-            event.payloadVersion == BridgeProtocol.OBSERVATION_PAYLOAD_VERSION
+            event.payloadVersion in 1..dev.pogoroot.automation.bridge.RuntimeAutomationEventPayloadCodec.VERSION
         if (event.payloadVersion != BridgeProtocol.OBSERVATION_PAYLOAD_VERSION &&
             !structuredEncounter && !structuredNearby && !structuredForts && !structuredInventory &&
             !structuredCatchSpin && !structuredAutomationEvent) {
@@ -341,6 +341,7 @@ class BridgePogoRuntimeSource(
             ObservationType.MAP_TARGET,
             ObservationType.THROW_DIAGNOSTIC,
             ObservationType.AUTOMATION_EVENT,
+            ObservationType.NAVIGATION,
             -> Unit
         }
         observationStates[event.messageSeq] =

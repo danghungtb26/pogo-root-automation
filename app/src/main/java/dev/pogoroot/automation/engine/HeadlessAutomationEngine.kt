@@ -42,11 +42,13 @@ class HeadlessAutomationEngine(
     private val cycle = AutomationCycle(runtimeCoordinator, observationRouter, statusReporter)
 
     fun activate() {
+        configRepository.update { it.copy(enabled = true) }
         AutomationRunState.setActive(true)
         start()
     }
 
     fun deactivate() {
+        configRepository.update { it.copy(enabled = false) }
         AutomationRunState.setActive(false)
         resetRequested.set(true)
     }
@@ -87,6 +89,16 @@ class HeadlessAutomationEngine(
     private fun runLoop() {
         while (loopActive.get()) {
             if (resetRequested.compareAndSet(true, false)) {
+                observationRouter.stopNavigation()
+                val stopped = runtimeCoordinator.ensureIdle()
+                if (stopped.isFailure) {
+                    // Keep the control connection for retry; disconnecting here
+                    // would lose the ability to stop a still-running native host.
+                    resetRequested.set(true)
+                    statusReporter.recordError("runtime stop: ${stopped.exceptionOrNull()?.message}")
+                    sleepInterruptibly(700L)
+                    continue
+                }
                 observationRouter.resetForAutomationDisable()
             }
             val config = configRepository.read()

@@ -235,6 +235,11 @@ bool any_enabled() {
     return g_runtime_module_registry.any_enabled();
 }
 
+bool auto_transfer_module_enabled() {
+    const RuntimeFeatureModuleBase *feature = resolve_module(Module::kTransfer);
+    return feature != nullptr && feature->enabled();
+}
+
 // Named-namespace entry point (declared in the prelude) so the shared observer
 // thread can dispatch a tick to every enabled module's observe() hook.
 void observe_enabled_modules(ObserverTickContext &tick) {
@@ -269,11 +274,6 @@ bool module_registry_initialized() {
     return g_registry_initialized;
 }
 
-const char *module_name(Module module) {
-    RuntimeFeatureModuleBase *feature = resolve_module(module);
-    return feature == nullptr ? "unknown" : feature->name();
-}
-
 bool set_module_enabled(
     ProbeContext &context,
     Module module,
@@ -295,9 +295,11 @@ bool set_module_enabled(
     }
 
     if (!enabled) {
+        // Join before releasing Promise handles or resetting module state.
+        stop_runtime_observation(context);
         feature->set_enabled(false);
         feature->on_disable(context);
-        if (!g_runtime_module_registry.any_enabled()) stop_runtime_observation(context);
+        (void)ensure_observer_for_enabled_modules(context);
         if (message != nullptr) {
             *message = std::string(feature->name()) + " module disabled";
         }
@@ -337,7 +339,9 @@ bool set_module_enabled(
         return false;
     }
 
+    stop_runtime_observation(context);
     if (!feature->on_enable(context)) {
+        (void)ensure_observer_for_enabled_modules(context);
         if (error_code != nullptr) *error_code = "runtime_module_start_failed";
         if (message != nullptr) {
             *message = std::string(feature->name()) + " module failed to initialize";
@@ -364,10 +368,10 @@ bool set_module_enabled(
 }
 
 void disable_all_modules(ProbeContext &context) {
+    stop_runtime_observation(context);
     if (g_registry_initialized) {
         g_runtime_module_registry.disable_all(context);
     }
-    stop_runtime_observation(context);
     context.active_encounter_id.store(0U);
 }
 

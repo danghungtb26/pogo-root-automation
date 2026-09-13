@@ -7,8 +7,8 @@ import dev.pogoroot.automation.location.RootMockLocationProvider
 class AutomationApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        // A package update or process recreation must never inherit an active
-        // automation master switch from the previous process instance.
+        // Clear live execution first. The service restores persisted intent,
+        // then waits for a fresh verified game session before enabling modules.
         AutomationRunState.resetForProcessStart()
         // A killed process may not receive Service.onDestroy(), so remove
         // test providers left behind by an earlier joystick session before

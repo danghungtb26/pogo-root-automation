@@ -2,7 +2,6 @@ package dev.pogoroot.automation.runtime.observation
 
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayload
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventType
-import dev.pogoroot.automation.core.automation.AutoFortNavigationSignal
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventType
 
@@ -10,52 +9,54 @@ import dev.pogoroot.automation.events.AutomationEventType
 internal fun RuntimeAutomationEventPayload.toAutomationEvent(): AutomationEvent? = when (type) {
     RuntimeAutomationEventType.POKEMON_FOUND -> AutomationEvent(
         AutomationEventType.INFO,
-        "Found Pokémon #${secondaryId.toUnsignedDecimal()} to catch",
+        "Catch started: ${pokemonName()}",
     )
     RuntimeAutomationEventType.POKEMON_CAUGHT -> AutomationEvent(
         AutomationEventType.CAUGHT,
-        if (secondaryId != 0L) {
-            "Catch success: Pokémon #${secondaryId.toUnsignedDecimal()}"
-        } else {
-            "Catch success"
-        },
+        "Catch success: ${pokemonName()}",
     )
     RuntimeAutomationEventType.POKEMON_FLED -> AutomationEvent(
         AutomationEventType.RAN_AWAY,
-        "Pokémon fled",
+        "${pokemonName()} fled",
     )
     RuntimeAutomationEventType.POKEMON_TRANSFERRED -> AutomationEvent(
         AutomationEventType.TRANSFERRED,
-        "Transfer success: Pokémon #${primaryId.toUnsignedDecimal()}",
+        "Transfer success: ${pokemonName()}",
     )
     RuntimeAutomationEventType.POKEMON_TRANSFER_TRIGGERED -> AutomationEvent(
         AutomationEventType.INFO,
-        "Transfer started: Pokémon #${primaryId.toUnsignedDecimal()}",
+        "Transfer started: ${pokemonName()}",
     )
     RuntimeAutomationEventType.POKEMON_TRANSFER_FAILED -> AutomationEvent(
         AutomationEventType.ERROR,
-        "Transfer failed: Pokémon #${primaryId.toUnsignedDecimal()}",
+        "Transfer failed: ${pokemonName()}",
     )
     RuntimeAutomationEventType.ITEM_DISCARD_TRIGGERED -> AutomationEvent(
         AutomationEventType.INFO,
-        "Discard started: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+        "Discard started: ${itemName()} ×$secondaryId",
     )
     RuntimeAutomationEventType.ITEM_DISCARDED -> AutomationEvent(
         AutomationEventType.DISCARDED,
-        "Discard success: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+        "Discard success: ${itemName()} ×$secondaryId",
     )
     RuntimeAutomationEventType.ITEM_DISCARD_FAILED -> AutomationEvent(
         AutomationEventType.ERROR,
-        "Discard failed: item #${primaryId.toUnsignedDecimal()} x$secondaryId",
+        "Discard failed: ${itemName()} ×$secondaryId" + detail.takeIf { it.isNotBlank() }
+            ?.let { " — $it" }.orEmpty(),
+    )
+    RuntimeAutomationEventType.SPIN_STARTED -> AutomationEvent(AutomationEventType.INFO, "Spin started")
+    RuntimeAutomationEventType.SPIN_COMPLETED -> AutomationEvent(AutomationEventType.SPUN, "Spin success")
+    RuntimeAutomationEventType.SPIN_FAILED -> AutomationEvent(
+        AutomationEventType.ERROR, "Spin failed (result $secondaryId)",
+    )
+    RuntimeAutomationEventType.SPIN_BUBBLES_FAILED -> AutomationEvent(
+        AutomationEventType.ERROR, "Spin succeeded; game reward bubbles unavailable",
+    )
+    RuntimeAutomationEventType.CATCH_FAILED -> AutomationEvent(
+        AutomationEventType.ERROR, "Catch unsuccessful: ${pokemonName()}",
     )
     RuntimeAutomationEventType.UNKNOWN -> null
 }
 
-internal fun RuntimeAutomationEventPayload.toAutoFortNavigationSignal(): AutoFortNavigationSignal? = when (type) {
-    RuntimeAutomationEventType.POKEMON_FOUND -> AutoFortNavigationSignal.POKEMON_FOUND
-    RuntimeAutomationEventType.POKEMON_CAUGHT -> AutoFortNavigationSignal.POKEMON_CAUGHT
-    RuntimeAutomationEventType.POKEMON_FLED -> AutoFortNavigationSignal.POKEMON_FLED
-    else -> null
-}
-
-private fun Long.toUnsignedDecimal(): String = toULong().toString()
+private fun RuntimeAutomationEventPayload.pokemonName(): String = subjectName.ifBlank { "Pokémon" }
+private fun RuntimeAutomationEventPayload.itemName(): String = subjectName.ifBlank { "Item" }

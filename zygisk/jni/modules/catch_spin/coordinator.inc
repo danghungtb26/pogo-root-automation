@@ -3,7 +3,6 @@
 namespace {
 constexpr uint64_t kCatchSpinScanEveryTicks = 20U;  // ~2 s at a 100 ms tick.
 constexpr uint64_t kCatchSpinActionRetryDelayNs = 250000000ULL;
-constexpr uint64_t kCatchSpinPostCatchDelayMs = 1000U;
 constexpr double kCatchSpinFortInteractionRangeMeters = 80.0;
 
 struct RuntimeCatchSpinCoordinatorState {
@@ -18,6 +17,8 @@ struct RuntimeCatchSpinCoordinatorState {
 };
 
 RuntimeCatchSpinCoordinatorState g_runtime_catch_spin_coordinator;
+
+#include "navigation.inc"
 
 bool runtime_catch_spin_valid_coordinate(double latitude, double longitude) {
     return std::isfinite(latitude) && latitude >= -90.0 && latitude <= 90.0 &&
@@ -132,9 +133,16 @@ void runtime_catch_spin_execute_catch(
         target.spawn_id,
         static_cast<uint64_t>(target.species_id)
     );
+    pause_runtime_navigation(context, "catch in progress");
     const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
         context, target.spawn_id
     );
+    if (outcome != MainThreadActionOutcome::kInvoked) {
+        (void)send_runtime_automation_event(
+            context, pogo_runtime::RuntimeAutomationEventType::kCatchFailed,
+            target.spawn_id
+        );
+    }
     switch (outcome) {
         case MainThreadActionOutcome::kInvoked:
             g_runtime_catch_spin_coordinator.requested_catch_ids.insert(target.spawn_id);
@@ -191,6 +199,7 @@ void runtime_catch_spin_execute_spin(
         runtime_catch_spin_log_rejected("spin", "fort_search_promise_pending");
         return;
     }
+    pause_runtime_navigation(context, "spin in progress");
     const MainThreadActionOutcome outcome = request_main_thread_spin(context, fort.fort_id);
     switch (outcome) {
         case MainThreadActionOutcome::kInvoked:
@@ -250,8 +259,13 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
             // leave catch-spin suspended forever.
             g_runtime_catch_spin_coordinator.suspended = false;
             const bool catch_success = terminal.catch_outcome_wire == 1U;
+            // Breakout/missed are authoritative failures and can be retried.
+            // Unknown outcomes stay remembered to avoid duplicating a mutation.
+            if (terminal.catch_outcome_wire == 2U || terminal.catch_outcome_wire == 3U) {
+                g_runtime_catch_spin_coordinator.requested_catch_ids.erase(terminal.encounter_id);
+            }
             if (catch_success) {
-                runtime_catch_spin_settle(kCatchSpinPostCatchDelayMs);
+                runtime_catch_spin_settle(runtime_catch_spin_config_snapshot().catch_settle_delay_ms);
             }
             __android_log_print(
                 terminal.catch_outcome_wire == 1U ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
@@ -262,7 +276,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
                 terminal.catch_outcome_wire,
                 transfer_busy ? 1 : 0,
                 static_cast<unsigned long long>(
-                    catch_success ? kCatchSpinPostCatchDelayMs : 0U
+                    catch_success ? runtime_catch_spin_config_snapshot().catch_settle_delay_ms : 0U
                 )
             );
         }
@@ -312,6 +326,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     std::lock_guard<std::mutex> lock(g_runtime_catch_spin_coordinator.mutex);
 
     const RuntimeCatchSpinConfig config = runtime_catch_spin_config_snapshot();
+    pause_runtime_navigation_if_busy(tick.context, config);
     if (!g_runtime_active.load() || !config.configured || !config.armed ||
         !((config.auto_catch && config.catch_all) || config.auto_spin ||
             config.auto_walk_to_fort)) return;
@@ -361,6 +376,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         snapshot.has_player_position ? 1 : 0
     );
     (void)send_runtime_catch_spin_payload(tick.context, snapshot);
+    update_runtime_navigation(tick.context, config, snapshot);
 
     const int32_t ball_count = runtime_pokeball_count(snapshot);
     const int32_t total_ball_count = snapshot.inventory_available

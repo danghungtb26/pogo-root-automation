@@ -29,6 +29,9 @@ public:
     }
 
     void on_disable(ProbeContext &context) override {
+        publish_runtime_navigation(context, g_runtime_fort_navigation.reset());
+        abandon_pending_direct_catch(context, "catch_spin_disabled");
+        clear_pending_encounter_request(context, "catch_spin_disabled");
         reset_runtime_spin_state(context);
         reset_runtime_catch_spin_coordinator();
     }

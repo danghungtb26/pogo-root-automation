@@ -2,6 +2,10 @@
 // reports an authoritative captured storage id; transfer owns all policy and
 // release decisions from this point onward.
 
+namespace pogo_runtime_module {
+bool auto_transfer_module_enabled();
+}
+
 void on_runtime_catch_succeeded_on_main_thread(
     ProbeContext &context,
     uint64_t captured_pokemon_id
@@ -24,7 +28,8 @@ void on_runtime_catch_succeeded_on_main_thread(
         config.auto_transfer ? 1 : 0,
         static_cast<unsigned long long>(config.revision)
     );
-    if (!config.configured || !config.auto_transfer) {
+    if (!config.configured || !config.auto_transfer ||
+        !pogo_runtime_module::auto_transfer_module_enabled()) {
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
