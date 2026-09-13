@@ -1,3 +1,5 @@
+#include "../../shared/runtime/inventory/runtime_inventory_full.inc"
+
 namespace {
 constexpr uint64_t kCatchSpinScanEveryTicks = 20U;  // ~2 s at a 100 ms tick.
 constexpr uint64_t kCatchSpinActionRetryDelayNs = 250000000ULL;
@@ -10,6 +12,7 @@ struct RuntimeCatchSpinCoordinatorState {
     uint64_t settle_until_ns = 0U;
     bool suspended = false;
     bool out_of_balls = false;
+    bool item_inventory_full = false;
     std::unordered_set<uint64_t> requested_catch_ids;
     RuntimeFortCooldownDeadlines fort_cooldown_deadlines;
 };
@@ -45,7 +48,11 @@ bool runtime_catch_spin_read_snapshot(
     }
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     if (binding.map_entity_read_verified != before.map_entity_read_verified) {
-        send_runtime_capability_update(context.fd, binding);
+        send_runtime_capability_update(
+            context.fd,
+            binding,
+            context.map_live_verified.load(std::memory_order_acquire)
+        );
     }
 
     pogo_runtime::RuntimeInventoryObservation inventory;
@@ -213,6 +220,7 @@ void reset_runtime_catch_spin_coordinator() {
     g_runtime_catch_spin_coordinator.settle_until_ns = 0U;
     g_runtime_catch_spin_coordinator.suspended = false;
     g_runtime_catch_spin_coordinator.out_of_balls = false;
+    g_runtime_catch_spin_coordinator.item_inventory_full = false;
     g_runtime_catch_spin_coordinator.requested_catch_ids.clear();
     g_runtime_catch_spin_coordinator.fort_cooldown_deadlines.clear();
 }
@@ -281,15 +289,21 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
                 runtime_catch_spin_settle(
                     runtime_catch_spin_config_snapshot().spin_settle_delay_ms
                 );
+                if (server_result == 4) {
+                    g_runtime_catch_spin_coordinator.item_inventory_full = true;
+                } else if (server_result == 1) {
+                    g_runtime_catch_spin_coordinator.item_inventory_full = false;
+                }
                 __android_log_print(
                     server_result == 1 ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
                     "native catch_spin FortSearch Promise settled fort=%s result=%d(%s) success=%d "
-                    "cooldown_complete_ms=%lld",
+                    "inventory_full=%d cooldown_complete_ms=%lld",
                     fort_id.c_str(),
                     server_result,
                     server_result == 1 ? "SUCCESS" : "REJECTED_OR_FAILED",
                     server_result == 1 ? 1 : 0,
+                    g_runtime_catch_spin_coordinator.item_inventory_full ? 1 : 0,
                     static_cast<long long>(cooldown_complete_ms)
                 );
             }
@@ -363,6 +377,10 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     );
     if (ball_count == 0) g_runtime_catch_spin_coordinator.out_of_balls = true;
     if (ball_count > 0) g_runtime_catch_spin_coordinator.out_of_balls = false;
+    if (binding.inventory_full_read_verified) {
+        g_runtime_catch_spin_coordinator.item_inventory_full =
+            runtime_item_bag_is_full(tick.context.il2cpp_api, binding);
+    }
 
     prune_requested_catch_ids(
         &g_runtime_catch_spin_coordinator.requested_catch_ids,
@@ -393,6 +411,10 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     const bool force_spin_for_balls = catch_enabled && target != nullptr &&
         g_runtime_catch_spin_coordinator.out_of_balls;
     if (!config.auto_spin && !force_spin_for_balls) return;
+    if (g_runtime_catch_spin_coordinator.item_inventory_full) {
+        runtime_catch_spin_log_rejected("spin", "inventory_full");
+        return;
+    }
     double fort_distance_meters = 0.0;
     size_t in_range_forts = 0U;
     const long long epoch_now = now_epoch_millis();

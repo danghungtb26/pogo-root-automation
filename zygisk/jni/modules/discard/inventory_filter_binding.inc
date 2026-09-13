@@ -81,7 +81,6 @@ Il2CppClass *find_item_inventory_gui_filter_host_class(
         return nullptr;
     }
     Il2CppClassGetDeclaringType get_declaring = discard_lookup_class_get_declaring_type(api);
-    if (get_declaring == nullptr) return nullptr;
     for (size_t assembly_index = 0U; assembly_index < assembly_count; ++assembly_index) {
         const Il2CppAssembly *assembly = assemblies[assembly_index];
         if (assembly == nullptr) continue;
@@ -93,8 +92,17 @@ Il2CppClass *find_item_inventory_gui_filter_host_class(
             if (klass == nullptr) continue;
             const char *class_name = api.class_get_name(klass);
             if (class_name == nullptr || strcmp(class_name, "<>c") != 0) continue;
-            if (get_declaring(klass) != gui_service_class) continue;
             if (!discard_class_has_inventory_usable_filter_method(api, klass)) continue;
+            if (get_declaring != nullptr) {
+                if (get_declaring(klass) != gui_service_class) continue;
+            } else if (!discard_nested_class_belongs_to_item_inventory_gui_service(
+                    api,
+                    klass,
+                    gui_service_class
+                )) {
+                continue;
+            }
+            if (find_discard_inventory_filter_field(api, klass) == nullptr) continue;
             return klass;
         }
     }

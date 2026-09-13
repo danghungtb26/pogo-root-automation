@@ -6,7 +6,7 @@ import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.runtime.RuntimeControlState
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
-import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
+import dev.pogoroot.automation.runtime.observation.RuntimeObservationRouter
 
 data class HeadlessAutomationStatus(
     val running: Boolean = false,
@@ -26,22 +26,20 @@ data class HeadlessAutomationStatus(
 )
 
 /**
- * Structured-only automation loop. This is a thin lifecycle + pacing shell:
- * [HeadlessAutomationStatusReporter] owns the observable status and
- * [AutomationCycle] owns the per-cycle scan/dispatch work. The engine only starts
- * the runtime, drives idle vs. active pacing, and tears down on shutdown.
+ * Headless automation loop: runtime lifecycle + observation drain pacing.
+ * Native owns module enable/disable and gameplay mutations.
  */
 class HeadlessAutomationEngine(
     private val configRepository: AutomationConfigRepository,
     private val runtimeCoordinator: RuntimeLifecycleCoordinator,
-    private val structuredController: StructuredAutomationController,
+    private val observationRouter: RuntimeObservationRouter,
     eventSink: AutomationEventSink = AutomationEventSink { },
 ) {
     private val executor = Executors.newSingleThreadExecutor()
     private val loopActive = AtomicBoolean(false)
     private val resetRequested = AtomicBoolean(false)
     private val statusReporter = HeadlessAutomationStatusReporter(runtimeCoordinator, eventSink)
-    private val cycle = AutomationCycle(runtimeCoordinator, structuredController, statusReporter)
+    private val cycle = AutomationCycle(runtimeCoordinator, observationRouter, statusReporter)
 
     fun activate() {
         AutomationRunState.setActive(true)
@@ -71,17 +69,25 @@ class HeadlessAutomationEngine(
         resetRequested.set(true)
         loopActive.set(false)
         runCatching { runtimeCoordinator.ensureIdle().getOrThrow() }
-        structuredController.stop()
+        observationRouter.stop()
         runtimeCoordinator.shutdown()
         executor.shutdownNow()
     }
 
     fun snapshot(): HeadlessAutomationStatus = statusReporter.snapshot()
 
+    /** Push config to native on the engine thread (overlay/API path). */
+    fun pushRuntimeConfigs() {
+        executor.execute {
+            if (!AutomationRunState.isActive()) return@execute
+            runtimeCoordinator.pushRuntimeConfigs(configRepository.read())
+        }
+    }
+
     private fun runLoop() {
         while (loopActive.get()) {
             if (resetRequested.compareAndSet(true, false)) {
-                structuredController.resetForAutomationDisable()
+                observationRouter.resetForAutomationDisable()
             }
             val config = configRepository.read()
             if (!AutomationRunState.isActive()) {
@@ -97,17 +103,12 @@ class HeadlessAutomationEngine(
                 continue
             }
 
-            when (cycle.run(config)) {
-                CycleWait.WAIT_FOR_RESULT -> sleepInterruptibly(200L)
-                CycleWait.WAIT_AFTER_ACTION -> sleepInterruptibly(config.loopIntervalMs)
-                CycleWait.NORMAL -> sleepInterruptibly(
-                    if (structuredController.awaitingActionResult()) 200L else config.loopIntervalMs,
-                )
-            }
+            cycle.run(config)
+            sleepInterruptibly(config.loopIntervalMs)
         }
 
         runCatching { runtimeCoordinator.ensureIdle().getOrThrow() }
-        structuredController.stop()
+        observationRouter.stop()
         statusReporter.setRunning(false)
     }
 

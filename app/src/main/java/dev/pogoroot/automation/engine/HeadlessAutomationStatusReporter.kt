@@ -5,9 +5,8 @@ import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.AutomationEventType
 import dev.pogoroot.automation.runtime.RuntimeControlSnapshot
-import dev.pogoroot.automation.runtime.RuntimeFeatureModuleSnapshot
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
-import dev.pogoroot.automation.runtime.structured.StructuredAutomationTick
+import dev.pogoroot.automation.runtime.observation.RuntimeObservationTick
 
 /**
  * Owns the observable [HeadlessAutomationStatus] and all of its transitions
@@ -31,7 +30,7 @@ internal class HeadlessAutomationStatusReporter(
         return status.get().copy(
             enabled = AutomationRunState.isActive(),
             runtimeControlState = runtime.state.name,
-            runtimeModules = runtime.moduleStates(),
+            runtimeModules = emptyMap(),
             updatedAtEpochMs = now(),
         )
     }
@@ -44,7 +43,7 @@ internal class HeadlessAutomationStatusReporter(
                 enabled = false,
                 runtimeSessionId = runtime.runtimeSessionId,
                 runtimeControlState = runtime.state.name,
-                runtimeModules = runtime.moduleStates(),
+                runtimeModules = emptyMap(),
                 runtimeStrongIdentityVerified = false,
                 runtimeCapabilities = emptySet(),
                 runtimeMutationPermissionGranted = false,
@@ -66,7 +65,7 @@ internal class HeadlessAutomationStatusReporter(
                 enabled = true,
                 runtimeSessionId = runtimeSessionId,
                 runtimeControlState = runtime.state.name,
-                runtimeModules = runtime.moduleStates(),
+                runtimeModules = emptyMap(),
                 runtimeStrongIdentityVerified = false,
                 runtimeCapabilities = emptySet(),
                 runtimeMutationPermissionGranted = false,
@@ -80,26 +79,23 @@ internal class HeadlessAutomationStatusReporter(
         }
     }
 
-    fun publishTick(tick: StructuredAutomationTick) {
+    fun publishTick(tick: RuntimeObservationTick) {
         val runtime = runtimeCoordinator.snapshot()
-        val moduleErrors = runtime.modules.values
-            .mapNotNull(RuntimeFeatureModuleSnapshot::lastError)
-            .distinct()
         status.updateAndGet {
             it.copy(
                 running = true,
                 enabled = true,
                 runtimeSessionId = tick.runtimeSessionId,
                 runtimeControlState = runtime.state.name,
-                runtimeModules = runtime.moduleStates(),
+                runtimeModules = emptyMap(),
                 runtimeStrongIdentityVerified = tick.strongIdentityVerified,
                 runtimeCapabilities = tick.runtimeCapabilities,
-                runtimeMutationPermissionGranted = tick.mutationPermissionGranted,
+                runtimeMutationPermissionGranted = false,
                 runtimeLifecycle = tick.lifecycleState.name,
-                runtimeSuspended = tick.suspended,
+                runtimeSuspended = false,
                 observationSeq = tick.observationSeq,
-                lastAction = tick.lastAction,
-                lastError = tick.lastError ?: moduleErrors.firstOrNull(),
+                lastAction = tick.observationSeq?.let { "observing" },
+                lastError = tick.lastError ?: runtime.lastError,
                 updatedAtEpochMs = now(),
             )
         }
@@ -119,7 +115,7 @@ internal class HeadlessAutomationStatusReporter(
                 enabled = enabled,
                 runtimeSessionId = runtimeSessionId,
                 runtimeControlState = runtime.state.name,
-                runtimeModules = runtime.moduleStates(),
+                runtimeModules = emptyMap(),
                 runtimeStrongIdentityVerified = false,
                 runtimeCapabilities = emptySet(),
                 runtimeMutationPermissionGranted = false,
@@ -132,9 +128,6 @@ internal class HeadlessAutomationStatusReporter(
         }
         eventSink.publish(AutomationEvent(AutomationEventType.ERROR, message))
     }
-
-    private fun RuntimeControlSnapshot.moduleStates(): Map<String, String> =
-        modules.values.associate { it.module.name to it.state.name }
 
     private fun now(): Long = System.currentTimeMillis()
 }

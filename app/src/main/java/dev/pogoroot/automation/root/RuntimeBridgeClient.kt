@@ -68,12 +68,18 @@ class RuntimeBridgeClient(
     @Volatile private var runtimeReady: BridgeEvent.RuntimeReady? = null
     @Volatile private var readerError: Throwable? = null
     @Volatile private var readerExecutor: ExecutorService? = null
+    @Volatile private var runtimeReadyListener: ((BridgeEvent.RuntimeReady) -> Unit)? = null
 
     override val connected: Boolean
         get() = socket?.isConnected == true && readerError == null
 
     fun currentRuntimeReady(): BridgeEvent.RuntimeReady? =
         runtimeReady?.takeIf { connected }
+
+    /** Invoked on the bridge reader thread whenever a fresh [BridgeEvent.RuntimeReady] arrives. */
+    fun setRuntimeReadyListener(listener: ((BridgeEvent.RuntimeReady) -> Unit)?) {
+        runtimeReadyListener = listener
+    }
 
     override fun connect(): Result<BridgeEvent.RuntimeReady> {
         currentRuntimeReady()?.let { return Result.success(it) }
@@ -252,6 +258,7 @@ class RuntimeBridgeClient(
         val oldSocket = socket
         socket = null
         runtimeReady = null
+        runtimeReadyListener = null
         readerError = null
         runCatching { oldSocket?.close() }
         readerExecutor?.shutdownNow()
@@ -394,6 +401,7 @@ class RuntimeBridgeClient(
                                 "capabilities=${event.capabilities.sorted()}",
                         )
                         events.add(event)
+                        runtimeReadyListener?.invoke(event)
                     }
 
                     is BridgeEvent.ObservationEvent -> {

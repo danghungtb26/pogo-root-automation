@@ -265,6 +265,7 @@ void discover_runtime_owners(
     };
     static const ServiceCandidate services[] = {
         {"Niantic.Holoholo", "IItemBag", "IItemBag", "ItemBagImpl"},
+        {"Niantic.Holoholo", "IPlayerService", "IPlayerService", "PlayerService"},
         {"Niantic.Holoholo.UI.Items", "IItemInventoryService", "IItemInventoryService", "ItemInventoryService"},
         {"Niantic.Holoholo", "IPokemonBag", "IPokemonBag", "PokemonBagImpl"},
         {"", "IGameMasterData", "IGameMasterData", "GameMasterData"},
@@ -278,6 +279,7 @@ void discover_runtime_owners(
         {"Niantic.Holoholo.NearbyPokemon", "INearbyPokemonService", "INearbyPokemonService", "NearbyPokemonService"},
         {"Niantic.Holoholo.Map", "IMapSceneViewService", "IMapSceneViewService", "MapSceneViewService"},
         {"Niantic.Holoholo.Services.DynamicTappables", "IDynamicTappablesService", "IDynamicTappablesService", "DynamicTappablesService"},
+        {"Niantic.Holoholo.UI", "IAwardItemBubbleService", "IAwardItemBubbleService", "AwardItemBubbleService"},
     };
     for (const ServiceCandidate &service : services) {
         Il2CppClass *service_class = find_runtime_class(
@@ -341,11 +343,22 @@ void discover_runtime_owners(
                     binding->item_bag_get_item_count = get_item_count;
                     binding->inventory_read_verified = true;
                 }
+                const void *get_total_items = api.class_get_method_from_name == nullptr
+                    ? nullptr
+                    : api.class_get_method_from_name(owner_class, "GetTotalItems", 0);
+                if (get_total_items != nullptr) {
+                    binding->item_bag = owner;
+                    binding->item_bag_get_total_items = get_total_items;
+                }
                 __android_log_print(
                     binding->inventory_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
-                    "managed diagnostic: inventory read verified=%d item_bag=%p get_item_count=%p",
-                    binding->inventory_read_verified ? 1 : 0, owner, get_item_count
+                    "managed diagnostic: inventory read verified=%d item_bag=%p get_item_count=%p "
+                    "get_total_items=%p",
+                    binding->inventory_read_verified ? 1 : 0,
+                    owner,
+                    get_item_count,
+                    get_total_items
                 );
                 // Discard executor binding (RecycleItem + the ItemData data class).
                 // ItemData is a nested type with an empty namespace in this build;
@@ -397,6 +410,54 @@ void discover_runtime_owners(
                     binding->medicine_data_ctor
                 );
             }
+        }
+        if (strcmp(service.label, "IPlayerService") == 0 && owner != nullptr &&
+            api.object_get_class != nullptr && api.class_get_name != nullptr) {
+            Il2CppClass *owner_class = api.object_get_class(owner);
+            const char *owner_class_name = owner_class == nullptr
+                ? nullptr
+                : api.class_get_name(owner_class);
+            const bool is_player_service = owner_class_name != nullptr &&
+                strcmp(owner_class_name, "PlayerService") == 0;
+            const void *bag_is_full = is_player_service && api.class_get_method_from_name != nullptr
+                ? api.class_get_method_from_name(owner_class, "get_BagIsFull", 0)
+                : nullptr;
+            const void *max_items = is_player_service && api.class_get_method_from_name != nullptr
+                ? api.class_get_method_from_name(owner_class, "get_MaxItems", 0)
+                : nullptr;
+            if (bag_is_full != nullptr) {
+                binding->player_service = owner;
+                binding->player_get_bag_is_full = bag_is_full;
+                binding->player_get_max_items = max_items;
+                binding->inventory_full_read_verified = true;
+            }
+            __android_log_print(
+                binding->inventory_full_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                kLogTag,
+                "managed diagnostic: inventory full read verified=%d player_service=%p "
+                "bag_is_full=%p max_items=%p",
+                binding->inventory_full_read_verified ? 1 : 0,
+                owner,
+                bag_is_full,
+                max_items
+            );
+        }
+        if (strcmp(service.label, "IAwardItemBubbleService") == 0 && owner != nullptr &&
+            runtime_object_is_exact_class(
+                api, owner, "Niantic.Holoholo.UI", "AwardItemBubbleService"
+            )) {
+            binding->award_item_bubble_service_class = service_class;
+            bind_spin_item_bubble_service_methods(api, binding, owner);
+            update_spin_item_bubble_capabilities(binding);
+            __android_log_print(
+                binding->spin_item_bubbles_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+                kLogTag,
+                "managed diagnostic: award item bubble service resolved=%p verified=%d gather=%p spawn=%p",
+                owner,
+                binding->spin_item_bubbles_verified ? 1 : 0,
+                binding->award_bubble_gather_fort_search,
+                binding->award_bubble_spawn_bubbles
+            );
         }
         if (strcmp(service.label, "IItemInventoryService") == 0 && owner != nullptr &&
             runtime_object_is_exact_class(

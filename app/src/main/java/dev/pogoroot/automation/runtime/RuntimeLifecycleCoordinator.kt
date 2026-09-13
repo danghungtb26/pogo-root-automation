@@ -1,8 +1,7 @@
 package dev.pogoroot.automation.runtime
 
-import android.util.Log
+import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.bridge.BridgeEvent
-import dev.pogoroot.automation.bridge.RuntimeFeatureModule
 import dev.pogoroot.automation.root.RuntimeBridgeClient
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 
@@ -18,38 +17,22 @@ enum class RuntimeControlState {
 data class RuntimeControlSnapshot(
     val state: RuntimeControlState = RuntimeControlState.DETACHED,
     val runtimeSessionId: String? = null,
-    val modules: Map<RuntimeFeatureModule, RuntimeFeatureModuleSnapshot> = emptyMap(),
     val lastError: String? = null,
-) {
-    val enabledModules: Set<RuntimeFeatureModule>
-        get() = modules.values
-            .filter { it.state == RuntimeFeatureModuleState.ENABLED }
-            .mapTo(linkedSetOf(), RuntimeFeatureModuleSnapshot::module)
-}
+)
 
 /**
- * Service-owned control plane for the injected runtime host and its independent
- * native feature modules.
+ * Kotlin control plane for the injected runtime host.
  *
- * Zygisk attachment is process-driven. START starts a conservative native host;
- * managed binding verification is scheduled after startup and module activation
- * is synchronized separately from [HeadlessAutomationConfig].
+ * Owns connect/START/STOP, managed DIAGNOSTIC scheduling, and CONFIG_SET mirrors.
+ * Feature-module enable/disable and map-ready gating live entirely in native
+ * (`sync_auto_enabled_modules`).
  */
 class RuntimeLifecycleCoordinator(
     private val bridge: RuntimeBridgeClient,
-    /**
-     * Resolves which feature modules should be enabled for a given config. Injected
-     * so the service can supply the current arm state (the 2-axis lifecycle in
-     * docs/automation-flow.md — Phần 1) without this control plane knowing which
-     * module depends on the arm. Defaults to the disarmed activation set.
-     */
-    private val desiredModulesFor: (HeadlessAutomationConfig) -> Set<RuntimeFeatureModule> =
-        { RuntimeFeatureModuleCatalog.activeModules(ModuleActivationContext(it, armed = false)) },
 ) {
     private companion object {
         const val AUTO_DIAGNOSTIC_INITIAL_DELAY_MS = 3_000L
         const val AUTO_DIAGNOSTIC_RETRY_DELAY_MS = 5_000L
-        const val LOG_TAG = "PogoRootAutomation"
     }
 
     @Volatile private var state = RuntimeControlState.DETACHED
@@ -57,8 +40,9 @@ class RuntimeLifecycleCoordinator(
     @Volatile private var managedReadySessionId: String? = null
     @Volatile private var managedReadinessBlockedBeforeMessageSeq: Long? = null
     @Volatile private var lastError: String? = null
+    @Volatile private var managedConfigsApplied = false
     private var nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
-    private val modules = linkedMapOf<RuntimeFeatureModule, RuntimeFeatureModuleSnapshot>()
+    private var onManagedConfigsAppliedListener: (() -> Unit)? = null
     private val catchSpinConfigDispatcher = CatchSpinConfigDispatcher(bridge)
     private val transferConfigDispatcher = TransferConfigDispatcher(bridge)
     private val discardConfigDispatcher = DiscardConfigDispatcher(bridge)
@@ -66,16 +50,21 @@ class RuntimeLifecycleCoordinator(
     val connected: Boolean
         get() = bridge.connected
 
+    val configsAppliedToNative: Boolean
+        get() = managedConfigsApplied
+
+    @Synchronized
+    fun setOnManagedConfigsAppliedListener(listener: (() -> Unit)?) {
+        onManagedConfigsAppliedListener = listener
+    }
+
     @Synchronized
     fun ensureRunning(config: HeadlessAutomationConfig): Result<BridgeEvent.RuntimeReady> = runCatching {
         val ready = bridge.connect().getOrThrow()
         val sessionChanged = activeRuntimeSessionId != null &&
             activeRuntimeSessionId != ready.runtimeSessionId
         if (sessionChanged) {
-            resetModules()
-            resetCatchSpinConfig()
-            resetTransferConfig()
-            resetDiscardConfig()
+            resetConfigDispatchers()
             activeRuntimeSessionId = null
             managedReadySessionId = null
             managedReadinessBlockedBeforeMessageSeq = null
@@ -94,10 +83,7 @@ class RuntimeLifecycleCoordinator(
                 AUTO_DIAGNOSTIC_INITIAL_DELAY_MS * 1_000_000L
             state = RuntimeControlState.RUNNING
             lastError = null
-            resetModules()
-            resetCatchSpinConfig()
-            resetTransferConfig()
-            resetDiscardConfig()
+            resetConfigDispatchers()
         }
 
         var advertisedReady = bridge.currentRuntimeReady() ?: ready
@@ -105,20 +91,14 @@ class RuntimeLifecycleCoordinator(
             runAutomaticDiagnosticIfDue()
             advertisedReady = bridge.currentRuntimeReady() ?: advertisedReady
         }
-        val wasManagedReady = managedReadySessionId == advertisedReady.runtimeSessionId
-        val managedReady = isManagedRuntimeReadyForSession(advertisedReady)
-        if (managedReady) {
-            // Capability updates arrive asynchronously after DIAGNOSTIC. Once
-            // observed for this process session, they are the only readiness
-            // signal that permits module activation and structured automation.
-            managedReadySessionId = advertisedReady.runtimeSessionId
-        }
         val effectiveReady = effectiveReady(advertisedReady)
-        syncModules(
-            config = config,
-            ready = effectiveReady,
-            forceUnavailableRetry = managedReady && !wasManagedReady,
-        )
+        if (isManagedRuntimeReadyForSession(advertisedReady)) {
+            managedReadySessionId = advertisedReady.runtimeSessionId
+            // Push CONFIG_SET only after managed DIAGNOSTIC publishes the verified
+            // build fingerprint. Sending earlier rejects with build_fingerprint_mismatch
+            // and was resetting the diagnostic timer through ERROR/START loops.
+            syncRuntimeConfigs(config)
+        }
         effectiveReady
     }.onFailure(::recordFailure)
 
@@ -131,15 +111,10 @@ class RuntimeLifecycleCoordinator(
             nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
             lastError = null
-            resetModules()
-            resetCatchSpinConfig()
-            resetTransferConfig()
-            resetDiscardConfig()
+            resetConfigDispatchers()
             return@runCatching
         }
 
-        // STOP is idempotent and disables every native feature module in one
-        // operation, leaving only the lightweight process attachment alive.
         if (state != RuntimeControlState.ATTACHED_IDLE) {
             state = RuntimeControlState.STOPPING
             bridge.stopRuntime().getOrThrow()
@@ -150,10 +125,7 @@ class RuntimeLifecycleCoordinator(
         nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.ATTACHED_IDLE
         lastError = null
-        resetModules()
-        resetCatchSpinConfig()
-        resetTransferConfig()
-        resetDiscardConfig()
+        resetConfigDispatchers()
     }.onFailure(::recordFailure)
 
     @Synchronized
@@ -165,11 +137,7 @@ class RuntimeLifecycleCoordinator(
         val advertisedReady = bridge.currentRuntimeReady()
         if (advertisedReady != null && isManagedRuntimeReadyForSession(advertisedReady)) {
             managedReadySessionId = advertisedReady.runtimeSessionId
-            syncModules(
-                config = config,
-                ready = advertisedReady,
-                forceUnavailableRetry = true,
-            )
+            syncRuntimeConfigs(config)
         }
         if (state != RuntimeControlState.RUNNING) {
             state = RuntimeControlState.ATTACHED_IDLE
@@ -177,40 +145,37 @@ class RuntimeLifecycleCoordinator(
         lastError = null
     }.onFailure(::recordFailure)
 
-    /**
-     * Push the latest Kotlin-owned snapshot into the enabled native catch_spin
-     * module. The revision and session cache make this edge-triggered: a config
-     * update is sent once, then native remains the runtime source for this session.
-     */
     @Synchronized
     fun syncCatchSpinConfig(
         config: HeadlessAutomationConfig,
         armed: Boolean,
     ): Result<Unit> = runCatching {
-        val module = modules[RuntimeFeatureModule.CATCH_SPIN]
         catchSpinConfigDispatcher.sync(
             config = config,
             armed = armed,
-            moduleEnabled = module?.state == RuntimeFeatureModuleState.ENABLED,
         ).getOrThrow()
     }.onFailure(::recordFailure)
 
     @Synchronized
     fun syncTransferConfig(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
-        val module = modules[RuntimeFeatureModule.TRANSFER]
-        transferConfigDispatcher.sync(
-            config = config,
-            moduleEnabled = module?.state == RuntimeFeatureModuleState.ENABLED,
-        ).getOrThrow()
+        transferConfigDispatcher.sync(config).getOrThrow()
     }.onFailure(::recordFailure)
 
     @Synchronized
     fun syncDiscardConfig(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
-        val module = modules[RuntimeFeatureModule.DISCARD]
-        discardConfigDispatcher.sync(
-            config = config,
-            moduleEnabled = module?.state == RuntimeFeatureModuleState.ENABLED,
-        ).getOrThrow()
+        discardConfigDispatcher.sync(config).getOrThrow()
+    }.onFailure(::recordFailure)
+
+    /**
+     * Push the current config snapshot to native immediately (UI/API path).
+     * No-ops when the runtime is not RUNNING or managed DIAGNOSTIC is pending.
+     */
+    @Synchronized
+    fun pushRuntimeConfigs(config: HeadlessAutomationConfig): Result<Unit> = runCatching {
+        if (state != RuntimeControlState.RUNNING) return@runCatching
+        val ready = bridge.currentRuntimeReady() ?: return@runCatching
+        if (!isManagedRuntimeReadyForSession(ready)) return@runCatching
+        syncRuntimeConfigs(config)
     }.onFailure(::recordFailure)
 
     @Synchronized
@@ -222,13 +187,6 @@ class RuntimeLifecycleCoordinator(
         },
         runtimeSessionId = bridge.currentRuntimeReady()?.runtimeSessionId
             ?: activeRuntimeSessionId,
-        modules = RuntimeFeatureModule.entries.associateWith { module ->
-            modules[module] ?: RuntimeFeatureModuleSnapshot(
-                module = module,
-                desired = false,
-                state = RuntimeFeatureModuleState.DISABLED,
-            )
-        },
         lastError = lastError,
     )
 
@@ -241,108 +199,29 @@ class RuntimeLifecycleCoordinator(
         managedReadinessBlockedBeforeMessageSeq = null
         nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
         state = RuntimeControlState.DETACHED
-        resetModules()
-        resetCatchSpinConfig()
-        resetTransferConfig()
-        resetDiscardConfig()
+        resetConfigDispatchers()
     }
 
-    private fun syncModules(
-        config: HeadlessAutomationConfig,
-        ready: BridgeEvent.RuntimeReady,
-        forceUnavailableRetry: Boolean = false,
-    ) {
-        val desiredModules = desiredModulesFor(config)
-        RuntimeFeatureModule.entries.forEach { module ->
-            val desired = module in desiredModules
-            val current = modules[module]
-
-            if (desired) {
-                if (!isManagedRuntimeReadyForSession(ready)) {
-                    modules[module] = RuntimeFeatureModuleSnapshot(
-                        module = module,
-                        desired = true,
-                        state = RuntimeFeatureModuleState.UNAVAILABLE,
-                        lastError = "runtime managed diagnostic pending",
-                    )
-                    return@forEach
-                }
-                if (current?.desired == true &&
-                    (current.state == RuntimeFeatureModuleState.ENABLED ||
-                        (current.state == RuntimeFeatureModuleState.UNAVAILABLE &&
-                            !forceUnavailableRetry))
-                ) return@forEach
-                modules[module] = RuntimeFeatureModuleSnapshot(
-                    module = module,
-                    desired = true,
-                    state = RuntimeFeatureModuleState.ENABLING,
-                )
-                bridge.setModuleEnabled(module, true)
-                    .onSuccess {
-                        modules[module] = RuntimeFeatureModuleSnapshot(
-                            module = module,
-                            desired = true,
-                            state = RuntimeFeatureModuleState.ENABLED,
-                        )
-                    }
-                    .onFailure { error ->
-                        val message = error.message ?: error::class.java.simpleName
-                        modules[module] = RuntimeFeatureModuleSnapshot(
-                            module = module,
-                            desired = true,
-                            state = if (message.contains("runtime_module_unavailable")) {
-                                RuntimeFeatureModuleState.UNAVAILABLE
-                            } else {
-                                RuntimeFeatureModuleState.ERROR
-                            },
-                            lastError = message,
-                        )
-                    }
-                return@forEach
-            }
-
-            if (current == null ||
-                current.state == RuntimeFeatureModuleState.DISABLED ||
-                current.state == RuntimeFeatureModuleState.UNAVAILABLE
-            ) {
-                modules[module] = RuntimeFeatureModuleSnapshot(
-                    module = module,
-                    desired = false,
-                    state = RuntimeFeatureModuleState.DISABLED,
-                )
-                return@forEach
-            }
-
-            modules[module] = RuntimeFeatureModuleSnapshot(
-                module = module,
-                desired = false,
-                state = RuntimeFeatureModuleState.DISABLING,
-            )
-            bridge.setModuleEnabled(module, false)
-                .onSuccess {
-                    modules[module] = RuntimeFeatureModuleSnapshot(
-                        module = module,
-                        desired = false,
-                        state = RuntimeFeatureModuleState.DISABLED,
-                    )
-                }
-                .onFailure { error ->
-                    modules[module] = RuntimeFeatureModuleSnapshot(
-                        module = module,
-                        desired = false,
-                        state = RuntimeFeatureModuleState.ERROR,
-                        lastError = error.message ?: error::class.java.simpleName,
-                    )
-            }
+    private fun syncRuntimeConfigs(config: HeadlessAutomationConfig) {
+        if (state != RuntimeControlState.RUNNING) return
+        val applied = syncCatchSpinConfig(config, CatchSpinArmState.isArmed()).isSuccess &&
+            syncTransferConfig(config).isSuccess &&
+            syncDiscardConfig(config).isSuccess
+        if (applied) {
+            markManagedConfigsApplied()
         }
+    }
+
+    private fun markManagedConfigsApplied() {
+        if (managedConfigsApplied) return
+        managedConfigsApplied = true
+        onManagedConfigsAppliedListener?.invoke()
     }
 
     private fun effectiveReady(ready: BridgeEvent.RuntimeReady): BridgeEvent.RuntimeReady =
         if (managedReadySessionId == ready.runtimeSessionId && isManagedRuntimeReadyForSession(ready)) {
             ready
         } else {
-            // Preserve identity/session metadata for diagnostics, but do not
-            // expose probe-only capabilities to the automation controller.
             ready.copy(
                 strongIdentityVerified = false,
                 capabilities = emptySet(),
@@ -373,27 +252,11 @@ class RuntimeLifecycleCoordinator(
         }
     }
 
-    private fun resetModules() {
-        modules.clear()
-        RuntimeFeatureModule.entries.forEach { module ->
-            modules[module] = RuntimeFeatureModuleSnapshot(
-                module = module,
-                desired = false,
-                state = RuntimeFeatureModuleState.DISABLED,
-            )
-        }
-    }
-
-    private fun resetCatchSpinConfig() {
+    private fun resetConfigDispatchers() {
         catchSpinConfigDispatcher.reset()
-    }
-
-    private fun resetTransferConfig() {
         transferConfigDispatcher.reset()
-    }
-
-    private fun resetDiscardConfig() {
         discardConfigDispatcher.reset()
+        managedConfigsApplied = false
     }
 
     private fun recordFailure(error: Throwable) {
@@ -409,11 +272,7 @@ class RuntimeLifecycleCoordinator(
             managedReadinessBlockedBeforeMessageSeq = null
             nextAutomaticDiagnosticAtNanos = Long.MAX_VALUE
             state = RuntimeControlState.DETACHED
-            resetModules()
-            resetCatchSpinConfig()
-            resetTransferConfig()
-            resetDiscardConfig()
+            resetConfigDispatchers()
         }
     }
-
 }

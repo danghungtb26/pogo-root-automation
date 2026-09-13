@@ -28,6 +28,7 @@ import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
 import dev.pogoroot.automation.location.AutoFortNavigationBus
 import dev.pogoroot.automation.scan.ScanResultRepository
+import dev.pogoroot.automation.service.HeadlessAutomationService
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -309,6 +310,7 @@ class JoystickOverlayService : Service() {
             // spin act. Catch/Spin toggles select what the armed cluster does.
             CatchSpinArmState.setArmed(enabled)
             renderShortcutStates()
+            requestRuntimeConfigSync()
             return
         }
         automationConfigRepository.update { current ->
@@ -322,6 +324,14 @@ class JoystickOverlayService : Service() {
             }
         }
         renderShortcutStates()
+        requestRuntimeConfigSync()
+    }
+
+    private fun requestRuntimeConfigSync() {
+        runCatching { HeadlessAutomationService.requestRuntimeConfigSync(this) }
+            .onFailure { error ->
+                Log.w(LOG_TAG, "runtime config sync request failed: ${error.message}")
+            }
     }
 
     private fun showTeleportDialog() {

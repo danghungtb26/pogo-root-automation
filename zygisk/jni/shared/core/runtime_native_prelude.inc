@@ -280,6 +280,24 @@ struct RuntimeBinding {
     // PoiItemSpinner.ckkq(FortSearchOutProto), the game's result callback used
     // to update spinner/UI state after a successful FortSearch response.
     const void *poi_item_spinner_result_callback = nullptr;
+    // Native spin item bubble VFX via IAwardItemBubbleService (build 0.427.0).
+    void *award_item_bubble_service = nullptr;
+    Il2CppClass *award_item_bubble_service_class = nullptr;
+    Il2CppClass *award_bubble_data_list_class = nullptr;
+    const void *award_bubble_gather_fort_search = nullptr;
+    const void *award_bubble_spawn_bubbles = nullptr;
+    const void *award_bubble_world_to_canvas = nullptr;
+    const void *award_bubble_add_child = nullptr;
+    const void *award_bubble_set_visibility = nullptr;
+    const void *award_bubble_gather_candy = nullptr;
+    const void *award_bubble_gather_xl_candy = nullptr;
+    Il2CppClass *loot_proto_class = nullptr;
+    Il2CppClass *loot_item_proto_class = nullptr;
+    const void *map_avatar_get_position = nullptr;
+    const void *map_place_get_transform = nullptr;
+    const void *unity_transform_get_position = nullptr;
+    bool spin_item_bubbles_verified = false;
+    bool transfer_candy_bubbles_verified = false;
     const void *map_pokemon_try_capture = nullptr;
     const void *map_pokemon_get_spawn_point_id = nullptr;
     // WildMapPokemon.SendEncounterRequest (RPC Encounter=102). Fired in the
@@ -326,7 +344,12 @@ struct RuntimeBinding {
     // item_bag is resolved in the IItemBag service block. Enables READ_INVENTORY
     // and populates AutomationSnapshot.inventory for auto-discard / ball gating.
     const void *item_bag_get_item_count = nullptr;
+    const void *item_bag_get_total_items = nullptr;
     bool inventory_read_verified = false;
+    void *player_service = nullptr;
+    const void *player_get_bag_is_full = nullptr;
+    const void *player_get_max_items = nullptr;
+    bool inventory_full_read_verified = false;
     // Discard executor (IItemBag.RecycleItem(ItemData, int, ISet<Item>)). ItemData
     // is populated on the main thread; expiringItemsCopy comes from IItemInventoryService.
     const void *item_bag_recycle_item = nullptr;
@@ -497,6 +520,10 @@ struct ProbeContext {
     // reconcile). Unused in native module-owned snapshot mode. Starts true so the first
     // cycle always reads.
     std::atomic<bool> world_dirty{true};
+    // Set only after a successful main-thread map snapshot with a valid player
+    // position. Binding verification alone is not enough for module start or
+    // automation-event toasts — MapEntityService can exist before overworld.
+    std::atomic<bool> map_live_verified{false};
 };
 
 RuntimeBinding runtime_binding_snapshot(ProbeContext &context) {
@@ -515,6 +542,11 @@ struct ObserverTickContext {
 
 namespace pogo_runtime_module {
 void observe_enabled_modules(ObserverTickContext &tick);
+void sync_auto_enabled_modules(ProbeContext &context);
+bool map_binding_ready(const RuntimeBinding &binding);
+bool map_runtime_ready(ProbeContext &context);
+bool probe_map_live(ProbeContext &context);
+void reset_map_live_verified(ProbeContext &context);
 }  // namespace pogo_runtime_module
 
 bool read_runtime_map_snapshot_on_main_thread(

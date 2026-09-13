@@ -146,6 +146,7 @@ bool apply_runtime_discard_config(
         applied ? "applied" : "already applied",
         static_cast<unsigned long long>(current.revision)
     );
+    pogo_runtime_module::sync_auto_enabled_modules(context);
     return send_runtime_control_completed(
         context.fd,
         request.request_id.c_str(),

@@ -124,29 +124,32 @@ bool apply_runtime_catch_spin_config(
         std::lock_guard<std::mutex> lock(g_runtime_catch_spin_config_mutex);
         if (request.config_revision < g_runtime_catch_spin_config.revision) {
             conflict = true;
-        } else if (request.config_revision == g_runtime_catch_spin_config.revision &&
-            g_runtime_catch_spin_config.configured &&
-            (request.armed != g_runtime_catch_spin_config.armed ||
-                request.auto_catch != g_runtime_catch_spin_config.auto_catch ||
-                request.auto_spin != g_runtime_catch_spin_config.auto_spin ||
-                request.auto_encounter != g_runtime_catch_spin_config.auto_encounter ||
-                request.catch_all != g_runtime_catch_spin_config.catch_all ||
-                request.auto_walk_to_fort != g_runtime_catch_spin_config.auto_walk_to_fort ||
-                request.spin_settle_delay_ms != g_runtime_catch_spin_config.spin_settle_delay_ms ||
-                request.catch_settle_delay_ms != g_runtime_catch_spin_config.catch_settle_delay_ms)) {
-            conflict = true;
-        } else if (request.config_revision > g_runtime_catch_spin_config.revision) {
-            g_runtime_catch_spin_config.revision = request.config_revision;
-            g_runtime_catch_spin_config.configured = true;
-            g_runtime_catch_spin_config.armed = request.armed;
-            g_runtime_catch_spin_config.auto_catch = request.auto_catch;
-            g_runtime_catch_spin_config.auto_spin = request.auto_spin;
-            g_runtime_catch_spin_config.auto_encounter = request.auto_encounter;
-            g_runtime_catch_spin_config.catch_all = request.catch_all;
-            g_runtime_catch_spin_config.auto_walk_to_fort = request.auto_walk_to_fort;
-            g_runtime_catch_spin_config.spin_settle_delay_ms = request.spin_settle_delay_ms;
-            g_runtime_catch_spin_config.catch_settle_delay_ms = request.catch_settle_delay_ms;
-            applied = true;
+        } else {
+            const bool identical = g_runtime_catch_spin_config.configured &&
+                request.config_revision == g_runtime_catch_spin_config.revision &&
+                request.armed == g_runtime_catch_spin_config.armed &&
+                request.auto_catch == g_runtime_catch_spin_config.auto_catch &&
+                request.auto_spin == g_runtime_catch_spin_config.auto_spin &&
+                request.auto_encounter == g_runtime_catch_spin_config.auto_encounter &&
+                request.catch_all == g_runtime_catch_spin_config.catch_all &&
+                request.auto_walk_to_fort == g_runtime_catch_spin_config.auto_walk_to_fort &&
+                request.spin_settle_delay_ms == g_runtime_catch_spin_config.spin_settle_delay_ms &&
+                request.catch_settle_delay_ms == g_runtime_catch_spin_config.catch_settle_delay_ms;
+            if (!identical) {
+                if (request.config_revision > g_runtime_catch_spin_config.revision) {
+                    g_runtime_catch_spin_config.revision = request.config_revision;
+                }
+                g_runtime_catch_spin_config.configured = true;
+                g_runtime_catch_spin_config.armed = request.armed;
+                g_runtime_catch_spin_config.auto_catch = request.auto_catch;
+                g_runtime_catch_spin_config.auto_spin = request.auto_spin;
+                g_runtime_catch_spin_config.auto_encounter = request.auto_encounter;
+                g_runtime_catch_spin_config.catch_all = request.catch_all;
+                g_runtime_catch_spin_config.auto_walk_to_fort = request.auto_walk_to_fort;
+                g_runtime_catch_spin_config.spin_settle_delay_ms = request.spin_settle_delay_ms;
+                g_runtime_catch_spin_config.catch_settle_delay_ms = request.catch_settle_delay_ms;
+                applied = true;
+            }
         }
     }
 
@@ -188,6 +191,7 @@ bool apply_runtime_catch_spin_config(
         applied ? "applied" : "already applied",
         static_cast<unsigned long long>(current.revision)
     );
+    pogo_runtime_module::sync_auto_enabled_modules(context);
     return send_runtime_control_completed(
         context.fd,
         request.request_id.c_str(),

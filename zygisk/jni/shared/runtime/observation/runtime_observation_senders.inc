@@ -137,6 +137,7 @@ bool send_runtime_automation_event(
     uint64_t primary_id,
     uint64_t secondary_id = 0U
 ) {
+    if (!context.map_live_verified.load(std::memory_order_acquire)) return false;
     const pogo_runtime::RuntimeAutomationEvent event{type, primary_id, secondary_id};
     std::vector<uint8_t> envelope;
     if (!pogo_runtime::encode_runtime_automation_event(

@@ -19,6 +19,7 @@ struct PendingRuntimeTransfer {
     bool release_invoked = false;
     RuntimeTransferPendingPhase phase = RuntimeTransferPendingPhase::kWaitingPokemon;
     uint64_t pokemon_id = 0U;
+    int32_t species_id = 0;
     uint64_t started_at_ns = 0U;
     uint32_t poll_count = 0U;
     Il2CppGcHandle promise_gc_handle = 0U;
@@ -224,6 +225,14 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
             pokemon
         );
         return RuntimeTransferPromisePollResult::kWaiting;
+    }
+    int32_t species_id = 0;
+    (void)read_runtime_field(context.il2cpp_api, pokemon, "pokemonId_", &species_id);
+    {
+        std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
+        if (g_runtime_transfer.active && g_runtime_transfer.pokemon_id == pending.pokemon_id) {
+            g_runtime_transfer.species_id = species_id;
+        }
     }
 
     if (pending.evaluate_keep) {

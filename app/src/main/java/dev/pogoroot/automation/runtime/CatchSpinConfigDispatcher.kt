@@ -20,9 +20,7 @@ class CatchSpinConfigDispatcher(
     fun sync(
         config: HeadlessAutomationConfig,
         armed: Boolean,
-        moduleEnabled: Boolean,
     ): Result<Unit> = runCatching {
-        if (!moduleEnabled) return@runCatching
         val ready = bridge.currentRuntimeReady() ?: return@runCatching
         val desired = config.toRuntimeCatchSpinConfig(armed)
         if (appliedSessionId == ready.runtimeSessionId && appliedConfig == desired) {

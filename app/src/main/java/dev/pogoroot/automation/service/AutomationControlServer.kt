@@ -104,6 +104,7 @@ class AutomationControlServer(
         method == "POST" && path == "/v1/config" -> {
             val config = configRepository.update { current -> applyParams(current, params) }
             engine.start()
+            engine.pushRuntimeConfigs()
             ApiResponse(200, configJson(config))
         }
         else -> ApiResponse(404, jsonError("not found"))

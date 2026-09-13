@@ -12,24 +12,19 @@ import android.util.Log
 import dev.pogoroot.automation.MainActivity
 import dev.pogoroot.automation.root.RuntimeBridgeClient
 import dev.pogoroot.automation.root.RuntimeModuleLoadStatus
-import dev.pogoroot.automation.scan.ScanResultRepository
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import dev.pogoroot.automation.config.AutomationConfigRepository
-import dev.pogoroot.automation.data.LastActiveLocationRepository
 import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.engine.AutomationRunState
-import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.engine.HeadlessAutomationEngine
-import dev.pogoroot.automation.runtime.ModuleActivationContext
-import dev.pogoroot.automation.runtime.RuntimeFeatureModuleCatalog
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.AutomationEventType
 import dev.pogoroot.automation.events.ToastAutomationEventSink
 import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
-import dev.pogoroot.automation.runtime.structured.StructuredAutomationController
+import dev.pogoroot.automation.runtime.observation.RuntimeObservationRouter
 import dev.pogoroot.automation.core.automation.AutoFortNavigationCoordinator
 import dev.pogoroot.automation.location.AutoFortNavigationBus
 
@@ -40,54 +35,34 @@ class HeadlessAutomationService : Service() {
     private lateinit var eventSink: AutomationEventSink
     private var runtimeBridge: RuntimeBridgeClient? = null
     private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
-    private lateinit var structuredController: StructuredAutomationController
+    private lateinit var observationRouter: RuntimeObservationRouter
     private lateinit var autoFortNavigationCoordinator: AutoFortNavigationCoordinator
-    private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
     private lateinit var mapTargetRepository: MapTargetRepository
-    private lateinit var scanResultRepository: ScanResultRepository
     private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
     private var joystickAutoStartPoll: ScheduledFuture<*>? = null
+    private val pendingModuleLoadStatuses = mutableListOf<RuntimeModuleLoadStatus>()
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
         AutomationRunState.setActive(false)
         eventSink = ToastAutomationEventSink(this, configRepository)
-        lastActiveLocationRepository = LastActiveLocationRepository(this)
         mapTargetRepository = MapTargetRepository(this)
-        scanResultRepository = ScanResultRepository()
-        scanResultRepository.clear()
         runtimeBridge = RuntimeBridgeClient(
             onModuleLoadStatus = ::publishRuntimeModuleLoadStatus,
         )
         runtimeCoordinator = RuntimeLifecycleCoordinator(
             bridge = runtimeBridge!!,
-            // 2-axis lifecycle (docs/automation-flow.md — Phần 1): this provider is
-            // consulted only on the running path (ensureRunning); GO-absent is handled
-            // by engine.deactivate() -> ensureIdle() which disables every module. Each
-            // module's own isActive rule decides — catch_spin reads `armed`, others
-            // ignore it — so nothing here special-cases a module.
-            desiredModulesFor = { config ->
-                RuntimeFeatureModuleCatalog.activeModules(
-                    ModuleActivationContext(config, armed = CatchSpinArmState.isArmed()),
-                )
-            },
         )
+        runtimeCoordinator.setOnManagedConfigsAppliedListener(::flushPendingModuleLoadStatuses)
         autoFortNavigationCoordinator = AutoFortNavigationCoordinator(commandSink = { command ->
             Log.i(LOG_TAG, "auto fort navigation command=$command")
             AutoFortNavigationBus.publish(command)
         })
-        structuredController = StructuredAutomationController(
+        observationRouter = RuntimeObservationRouter(
             bridge = runtimeBridge!!,
             eventSink = eventSink,
-            // A verified fingerprint must be explicitly provisioned per device/build.
-            // Empty means structured observation is available but mutations stay disabled.
-            allowedBuildFingerprintsProvider = {
-                configRepository.read().structuredAllowedBuildFingerprints
-            },
-            onGameAction = lastActiveLocationRepository::record,
-            onEncounterSnapshot = scanResultRepository::recordEncounter,
             onMapTarget = { target ->
                 if (configRepository.read().mapTapWalkEnabled) {
                     mapTargetRepository.publish(target)
@@ -101,7 +76,7 @@ class HeadlessAutomationService : Service() {
         engine = HeadlessAutomationEngine(
             configRepository = configRepository,
             runtimeCoordinator = runtimeCoordinator,
-            structuredController = structuredController,
+            observationRouter = observationRouter,
             eventSink = eventSink,
         )
         apiServer = AutomationControlServer(
@@ -112,7 +87,6 @@ class HeadlessAutomationService : Service() {
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
             onGameAvailable = ::enableAutomationForGameForeground,
-            onGameUnavailable = ::disableAutomationForGameExit,
         )
 
         createNotificationChannel()
@@ -149,6 +123,10 @@ class HeadlessAutomationService : Service() {
                 engine.deactivate()
             }
 
+            ACTION_SYNC_RUNTIME_CONFIG -> {
+                engine.pushRuntimeConfigs()
+            }
+
             ACTION_STOP_SERVICE -> {
                 engine.deactivate()
                 stopSelf()
@@ -175,8 +153,33 @@ class HeadlessAutomationService : Service() {
     }
 
     private fun publishRuntimeModuleLoadStatus(status: RuntimeModuleLoadStatus) {
+        if (!runtimeCoordinator.configsAppliedToNative) {
+            synchronized(pendingModuleLoadStatuses) {
+                pendingModuleLoadStatuses.add(status)
+            }
+            val moduleName = status.module.name
+            if (status.loaded) {
+                Log.i(LOG_TAG, "$moduleName module registered; toast deferred until config sync")
+            } else {
+                val detail = status.errorCode ?: status.message ?: "unknown error"
+                Log.w(LOG_TAG, "$moduleName module registration failed (toast deferred): $detail")
+            }
+            return
+        }
+        emitModuleLoadStatus(status)
+    }
+
+    private fun flushPendingModuleLoadStatuses() {
+        val pending = synchronized(pendingModuleLoadStatuses) {
+            pendingModuleLoadStatuses.toList().also { pendingModuleLoadStatuses.clear() }
+        }
+        pending.forEach(::emitModuleLoadStatus)
+    }
+
+    private fun emitModuleLoadStatus(status: RuntimeModuleLoadStatus) {
         val moduleName = status.module.name
         if (status.loaded) {
+            Log.i(LOG_TAG, "$moduleName module loaded")
             eventSink.publish(
                 AutomationEvent(
                     type = AutomationEventType.MODULE_LOADED,
@@ -189,6 +192,7 @@ class HeadlessAutomationService : Service() {
         val detail = status.errorCode
             ?: status.message
             ?: "unknown error"
+        Log.w(LOG_TAG, "$moduleName module load failed: $detail")
         eventSink.publish(
             AutomationEvent(
                 type = AutomationEventType.MODULE_LOAD_FAILED,
@@ -204,25 +208,7 @@ class HeadlessAutomationService : Service() {
     private fun enableAutomationForGameForeground() {
         if (AutomationRunState.isActive()) return
         Log.i(LOG_TAG, "automation auto-enabled: Pokémon GO is foreground")
-        eventSink.publish(
-            AutomationEvent(
-                type = AutomationEventType.INFO,
-                message = "Automation running while Pokémon GO is open",
-            ),
-        )
         engine.activate()
-    }
-
-    private fun disableAutomationForGameExit() {
-        if (!AutomationRunState.isActive()) return
-        Log.i(LOG_TAG, "automation auto-disabled: Pokémon GO is no longer foreground")
-        eventSink.publish(
-            AutomationEvent(
-                type = AutomationEventType.INFO,
-                message = "Automation disabled because Pokémon GO was closed",
-            ),
-        )
-        engine.deactivate()
     }
 
     private fun createNotificationChannel() {
@@ -275,6 +261,8 @@ class HeadlessAutomationService : Service() {
     companion object {
         const val ACTION_ENABLE = "dev.pogoroot.automation.action.ENABLE_HEADLESS"
         const val ACTION_DISABLE = "dev.pogoroot.automation.action.DISABLE_HEADLESS"
+        const val ACTION_SYNC_RUNTIME_CONFIG =
+            "dev.pogoroot.automation.action.SYNC_RUNTIME_CONFIG"
         const val ACTION_STOP_SERVICE = "dev.pogoroot.automation.action.STOP_HEADLESS_SERVICE"
         const val EXTRA_AUTO_CATCH = "autoCatch"
         const val EXTRA_AUTO_SPIN = "autoSpin"
@@ -312,6 +300,13 @@ class HeadlessAutomationService : Service() {
             context.startService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_DISABLE),
+            )
+        }
+
+        fun requestRuntimeConfigSync(context: Context) {
+            context.startService(
+                Intent(context, HeadlessAutomationService::class.java)
+                    .setAction(ACTION_SYNC_RUNTIME_CONFIG),
             )
         }
     }

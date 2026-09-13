@@ -269,6 +269,7 @@ void discover_direct_map_bindings(
     );
 
     update_direct_map_fort_capabilities(binding);
+    discover_spin_item_bubble_bindings(api, assemblies, assembly_count, binding);
 
     __android_log_print(
         binding->direct_catch_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,

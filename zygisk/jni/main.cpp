@@ -19,8 +19,9 @@
 #include "shared/runtime/probe/runtime_probe_owners.inc"
 #include "modules/discard/hash_set_binding.inc"
 #include "modules/discard/inventory_filter_binding.inc"
-#include "shared/runtime/probe/runtime_probe_discovery.inc"
+#include "modules/catch_spin/spin_item_bubble_bindings.inc"
 #include "modules/catch_spin/direct_map_bindings.inc"
+#include "shared/runtime/probe/runtime_probe_discovery.inc"
 #include "shared/runtime/probe/runtime_encounter_owners.inc"
 #include "shared/runtime/probe/runtime_probe_candidates.inc"
 #include "shared/runtime/mainthread/runtime_main_thread_bridge.inc"
@@ -57,6 +58,7 @@
 #include "modules/catch_spin/fort_cooldown.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
+#include "modules/catch_spin/spin_item_bubbles.inc"
 #include "modules/catch_spin/spin_promise_observer.inc"
 #include "modules/catch_spin/spin_server_action.inc"
 #include "modules/catch_spin/direct_catch_promise_observer.inc"
@@ -82,6 +84,7 @@
 #include "modules/transfer/config.inc"
 #include "modules/transfer/metadata.inc"
 #include "modules/transfer/promise_observer.inc"
+#include "modules/transfer/transfer_candy_bubbles.inc"
 #include "modules/transfer/release_promise_observer.inc"
 #include "modules/transfer/execute.inc"
 #include "modules/transfer/coordinator.inc"
@@ -96,6 +99,7 @@
 bool activate_runtime(ProbeContext &context, const char *request_id);
 bool stop_runtime(ProbeContext &context, const char *request_id);
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id);
+#include "shared/runtime/control/runtime_map_readiness.inc"
 #include "shared/runtime/module/runtime_feature_modules.inc"
 #include "shared/runtime/control/runtime_control.inc"
 }  // namespace

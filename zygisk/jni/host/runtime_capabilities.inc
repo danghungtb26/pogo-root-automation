@@ -1,4 +1,8 @@
-bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
+bool send_runtime_capability_update(
+    int fd,
+    const RuntimeBinding &binding,
+    bool map_live_verified = false
+) {
     if (!binding.exact_build_verified) return false;
     std::vector<std::string> capabilities;
     if (binding.use_berry_verified) capabilities.emplace_back("USE_BERRY");
@@ -6,7 +10,9 @@ bool send_runtime_capability_update(int fd, const RuntimeBinding &binding) {
         capabilities.emplace_back("READ_LIFECYCLE");
         capabilities.emplace_back("ENCOUNTER");
     }
-    if (binding.map_entity_read_verified) capabilities.emplace_back("READ_NEARBY");
+    if (map_live_verified && binding.map_entity_read_verified) {
+        capabilities.emplace_back("READ_NEARBY");
+    }
     if (binding.forts_read_verified) capabilities.emplace_back("READ_FORTS");
     if (binding.inventory_read_verified) capabilities.emplace_back("READ_INVENTORY");
     if (kOpenEncounterExecutionEnabled && binding.dynamic_tappables_service != nullptr &&

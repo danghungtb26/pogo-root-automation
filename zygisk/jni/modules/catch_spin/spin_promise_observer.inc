@@ -344,6 +344,11 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
             ? nullptr : api.gchandle_get_target(pending.spinner_gc_handle);
         if (spinner != nullptr && runtime_object_is_exact_class(
                 api, spinner, "Niantic.Holoholo.Map", "PoiItemSpinner")) {
+            (void)spawn_runtime_spin_item_bubbles_on_main_thread(
+                context,
+                pending.fort_id,
+                completed_value
+            );
             void *callback_arguments[] = {completed_value};
             void *callback_exception = nullptr;
             api.runtime_invoke(

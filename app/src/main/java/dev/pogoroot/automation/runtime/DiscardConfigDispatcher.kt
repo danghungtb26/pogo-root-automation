@@ -15,9 +15,7 @@ class DiscardConfigDispatcher(
     @Synchronized
     fun sync(
         config: HeadlessAutomationConfig,
-        moduleEnabled: Boolean,
     ): Result<Unit> = runCatching {
-        if (!moduleEnabled) return@runCatching
         val ready = bridge.currentRuntimeReady() ?: return@runCatching
         val desired = config.toRuntimeDiscardConfig()
         if (appliedSessionId == ready.runtimeSessionId && appliedConfig == desired) {

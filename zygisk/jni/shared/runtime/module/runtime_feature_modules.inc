@@ -182,12 +182,8 @@ RuntimeFeatureModuleBase *resolve_module(Module module) {
     return g_runtime_module_registry.resolve(module);
 }
 
-bool any_enabled() {
-    return g_runtime_module_registry.any_enabled();
-}
-
 bool ensure_observer_for_enabled_modules(ProbeContext &context) {
-    if (!any_enabled()) return true;
+    if (!g_runtime_module_registry.any_enabled()) return true;
     if (context.observation_running.load()) return true;
     if (!runtime_binding_snapshot(context).map_entity_read_verified) {
         // Give late-created map services one safe main-thread discovery pass
@@ -234,6 +230,10 @@ bool register_and_publish(int fd, RuntimeFeatureModuleBase &module) {
     return loaded;
 }
 }  // namespace
+
+bool any_enabled() {
+    return g_runtime_module_registry.any_enabled();
+}
 
 // Named-namespace entry point (declared in the prelude) so the shared observer
 // thread can dispatch a tick to every enabled module's observe() hook.
@@ -297,7 +297,7 @@ bool set_module_enabled(
     if (!enabled) {
         feature->set_enabled(false);
         feature->on_disable(context);
-        if (!any_enabled()) stop_runtime_observation(context);
+        if (!g_runtime_module_registry.any_enabled()) stop_runtime_observation(context);
         if (message != nullptr) {
             *message = std::string(feature->name()) + " module disabled";
         }
@@ -311,7 +311,23 @@ bool set_module_enabled(
         return true;
     }
 
-    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    RuntimeBinding binding = runtime_binding_snapshot(context);
+    if (module != Module::kRuntimeCore && !map_runtime_ready(context)) {
+        // Scene map services are created after login. Give the current enable
+        // attempt one main-thread discovery pass before failing closed.
+        discover_scene_runtime_owners(context);
+        probe_map_live(context);
+        binding = runtime_binding_snapshot(context);
+    }
+    if (module != Module::kRuntimeCore && !map_runtime_ready(context)) {
+        if (error_code != nullptr) *error_code = "runtime_map_not_ready";
+        if (message != nullptr) {
+            *message = std::string(feature->name()) +
+                " module blocked until map instance is ready";
+        }
+        return false;
+    }
+
     if (!feature->available(binding)) {
         if (error_code != nullptr) *error_code = "runtime_module_unavailable";
         if (message != nullptr) {
@@ -406,4 +422,6 @@ bool dispatch_control_action(
     }
     return owner->handle_control_action(context, control_action, command, request_id, cycle_id);
 }
+
+#include "runtime_module_autostart.inc"
 }  // namespace pogo_runtime_module

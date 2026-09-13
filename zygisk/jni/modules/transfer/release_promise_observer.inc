@@ -106,6 +106,12 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
         status
     );
     if (status == 1) {
+        (void)spawn_runtime_transfer_candy_bubbles_on_main_thread(
+            context,
+            pending.pokemon_id,
+            pending.species_id,
+            completed_value
+        );
         finish_runtime_transfer(
             context,
             kCommandPhaseCompleted,

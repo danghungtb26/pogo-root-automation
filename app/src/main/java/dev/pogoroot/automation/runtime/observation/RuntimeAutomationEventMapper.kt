@@ -1,4 +1,4 @@
-package dev.pogoroot.automation.runtime.structured
+package dev.pogoroot.automation.runtime.observation
 
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayload
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventType

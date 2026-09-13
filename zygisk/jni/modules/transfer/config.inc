@@ -128,6 +128,7 @@ bool apply_runtime_transfer_config(
     }
 
     const RuntimeTransferConfig current = runtime_transfer_config_snapshot();
+    pogo_runtime_module::sync_auto_enabled_modules(context);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
