@@ -2,7 +2,9 @@
 // the expiry; the local MapPokestop object is refreshed as a second layer so
 // future map reads observe the same state as the game UI.
 
+extern std::atomic<bool> g_runtime_active;
 namespace {
+RuntimeFortRefreshSchedule g_runtime_fort_refresh; // Unity main-thread only.
 
 using RuntimeFortCooldownDeadlines = std::unordered_map<std::string, uint64_t>;
 
@@ -39,14 +41,14 @@ void remember_runtime_fort_cooldown(
     (*deadlines)[fort_id] = deadline;
 }
 
-void refresh_runtime_pokestop_cooldown(
+bool refresh_runtime_pokestop_cooldown(
     ProbeContext &context,
     const std::string &fort_id,
     int64_t cooldown_complete_ms
 ) {
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     const Il2CppApi &api = context.il2cpp_api;
-    if (fort_id.empty() || cooldown_complete_ms <= 0 ||
+    if (!binding.exact_build_verified || fort_id.empty() || cooldown_complete_ms <= 0 ||
         binding.map_pokestop_set_cooldown_time == nullptr ||
         api.runtime_invoke == nullptr) {
         __android_log_print(
@@ -57,7 +59,7 @@ void refresh_runtime_pokestop_cooldown(
             static_cast<long long>(cooldown_complete_ms),
             binding.map_pokestop_set_cooldown_time
         );
-        return;
+        return false;
     }
     void *pokestop = find_runtime_pokestop_by_id(context, fort_id);
     if (pokestop == nullptr) {
@@ -67,9 +69,9 @@ void refresh_runtime_pokestop_cooldown(
             "native spin cooldown refresh skipped fort=%s reason=pokestop_not_found",
             fort_id.c_str()
         );
-        return;
+        return false;
     }
-    long cooldown_timestamp_ms = static_cast<long>(cooldown_complete_ms);
+    int64_t cooldown_timestamp_ms = cooldown_complete_ms;
     void *arguments[] = {&cooldown_timestamp_ms};
     void *exception = nullptr;
     api.runtime_invoke(
@@ -87,6 +89,35 @@ void refresh_runtime_pokestop_cooldown(
         binding.map_pokestop_set_cooldown_time,
         exception
     );
+    return exception == nullptr;
+}
+
+void maintain_runtime_map_after_actions(ProbeContext &context) {
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    if (!binding.exact_build_verified || !g_runtime_active.load()) return;
+    const uint64_t now = static_cast<uint64_t>(now_epoch_millis());
+    retry_runtime_map_refresh(context, now);
+    for (const auto &due : g_runtime_fort_refresh.due(now)) {
+        // The map may already carry a newer cooldown (e.g. a manual spin).
+        // Never clear it using an older response from automation.
+        void *pokestop = find_runtime_pokestop_by_id(context, due.id);
+        void *proto = nullptr;
+        int64_t live_deadline = 0;
+        if (pokestop == nullptr ||
+            !read_runtime_field(context.il2cpp_api, pokestop, "<FortData>k__BackingField", &proto) ||
+            !runtime_object_is_exact_class(context.il2cpp_api, proto, "Holoholo.Rpc", "PokemonFortProto") ||
+            !read_runtime_field(context.il2cpp_api, proto, "CooldownCompleteMs", &live_deadline)) continue;
+        if (live_deadline > 0 && static_cast<uint64_t>(live_deadline) > now) {
+            g_runtime_fort_refresh.schedule(due.id, static_cast<uint64_t>(live_deadline));
+            continue;
+        }
+        // Replay the expired server timestamp through the game's setter so
+        // its visual cooldown can finish. IsCoolingDown remains the spin gate.
+        if (refresh_runtime_pokestop_cooldown(context, due.id, static_cast<int64_t>(due.deadline)) &&
+            refresh_runtime_map_after_action(context, "fort cooldown expired")) {
+            g_runtime_fort_refresh.completed(due);
+        }
+    }
 }
 
 }  // namespace

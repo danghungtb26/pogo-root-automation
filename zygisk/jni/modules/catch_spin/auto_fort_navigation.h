@@ -26,6 +26,14 @@ public:
             !pogo_runtime::valid_navigation_coordinate(snapshot.player_latitude, snapshot.player_longitude)) {
             return {pause("map unavailable or incomplete")};
         }
+        // Suppress duplicate arrival only while standing at the same available
+        // fort. A cooldown or moving away starts a new visit; this is not a blacklist.
+        if (!last_arrived_.empty()) {
+            const auto previous = std::find_if(snapshot.forts.forts.begin(), snapshot.forts.forts.end(),
+                [this](const Fort &fort) { return fort.fort_id == last_arrived_; });
+            if (previous == snapshot.forts.forts.end() || !eligible(*previous) ||
+                distance(snapshot, *previous) > kArrivalMeters) last_arrived_.clear();
+        }
         if (!snapshot.nearby.spawns.empty()) return {pause("pokemon nearby")};
         std::vector<Command> commands;
         if (!target_.fort_id.empty() && distance(snapshot, target_) <= kArrivalMeters) {

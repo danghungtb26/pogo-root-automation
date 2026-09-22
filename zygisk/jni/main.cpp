@@ -6,6 +6,7 @@
 #include "shared/bridge_kotlin/runtime_automation_event_protocol.h"
 #include "shared/runtime/names/automation_subject_names.h"
 #include "modules/catch_spin/auto_fort_navigation.h"
+#include "modules/catch_spin/fort_refresh_schedule.h"
 #include "shared/bridge_kotlin/runtime_discard_config_protocol.h"
 #include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
@@ -56,12 +57,14 @@
 
 // catch_spin main-thread execution workers (dispatched by the shared bridge).
 #include "modules/catch_spin/map_actions.inc"
+#include "modules/catch_spin/map_post_action_sync.inc"
 #include "modules/catch_spin/encounter_promise_observer.inc"
 #include "modules/catch_spin/direct_map_actions.inc"
 #include "modules/catch_spin/fort_cooldown.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
 #include "modules/catch_spin/spin_item_bubbles.inc"
+#include "modules/catch_spin/spin_interaction_cleanup.inc"
 #include "modules/catch_spin/spin_promise_observer.inc"
 #include "modules/catch_spin/spin_server_action.inc"
 #include "modules/catch_spin/direct_catch_promise_observer.inc"

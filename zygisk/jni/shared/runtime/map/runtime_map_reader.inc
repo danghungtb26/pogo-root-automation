@@ -208,11 +208,14 @@ bool read_map_wild_pokemon(
     return true;
 }
 
+namespace { void maintain_runtime_map_after_actions(ProbeContext &context); }
+
 bool read_runtime_map_snapshot_on_main_thread(
     ProbeContext &context,
     pogo_runtime::RuntimeNearbyObservation *observation,
     pogo_runtime::RuntimeFortsObservation *forts
 ) {
+    maintain_runtime_map_after_actions(context);
     // Keep the collection walk staged until each IL2CPP call has passed the
     // live build smoke test. Stage 3 uses dictionary keys and never treats the
     // broken value-collection Current return as a managed object.

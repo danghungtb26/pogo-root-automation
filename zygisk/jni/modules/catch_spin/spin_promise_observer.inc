@@ -77,7 +77,8 @@ void mark_runtime_spin_terminal(
     ProbeContext &context,
     int32_t server_result,
     const char *error_code,
-    const char *message
+    const char *message,
+    bool on_main_thread = true
 ) {
     PendingRuntimeSpin terminal;
     {
@@ -88,6 +89,10 @@ void mark_runtime_spin_terminal(
         g_runtime_spin.error_code = error_code == nullptr ? "" : error_code;
         g_runtime_spin.message = message == nullptr ? "" : message;
         terminal = g_runtime_spin;
+    }
+    if (on_main_thread) {
+        complete_runtime_spin_for_spinner(context, terminal.fort_id, terminal.spinner_gc_handle);
+        (void)refresh_runtime_map_after_action(context, "spin completed");
     }
     publish_runtime_spin_terminal(context, terminal);
     (void)send_runtime_automation_event(
@@ -137,7 +142,7 @@ bool runtime_spin_is_pending(ProbeContext &context) {
 }
 
 void abandon_pending_runtime_spin(ProbeContext &context, const char *reason) {
-    mark_runtime_spin_terminal(context, 0, reason, "Spin invocation did not complete");
+    mark_runtime_spin_terminal(context, 0, reason, "Spin invocation did not complete", false);
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
     std::string fort_id;
@@ -390,6 +395,7 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         }
     }
     if ((server_result == 1 || server_result == 3) && cooldown_complete_ms > 0) {
+        g_runtime_fort_refresh.schedule(pending.fort_id, static_cast<uint64_t>(cooldown_complete_ms));
         refresh_runtime_pokestop_cooldown(
             context, pending.fort_id, cooldown_complete_ms
         );

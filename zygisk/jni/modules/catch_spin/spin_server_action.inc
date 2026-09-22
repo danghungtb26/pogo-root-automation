@@ -11,7 +11,7 @@ MainThreadActionOutcome spin_runtime_pokestop_on_main_thread(
 ) {
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     const Il2CppApi &api = context.il2cpp_api;
-    if (fort_id.empty() || !binding.spin_verified ||
+    if (fort_id.empty() || !binding.exact_build_verified || !binding.spin_verified ||
         binding.poi_item_spinner_request_items == nullptr ||
         api.runtime_invoke == nullptr) {
         return MainThreadActionOutcome::kRejected;
@@ -53,6 +53,7 @@ MainThreadActionOutcome spin_runtime_pokestop_on_main_thread(
             "MapPokestopInteractive")) {
         return MainThreadActionOutcome::kRejected;
     }
+    RuntimeSpinSetupGuard interaction{context, pokestop, interactive};
     void *spinner = nullptr;
     if (!read_runtime_field(api, interactive, "ItemSpinner", &spinner) ||
         !runtime_object_is_exact_class(
@@ -132,5 +133,6 @@ MainThreadActionOutcome spin_runtime_pokestop_on_main_thread(
         abandon_pending_runtime_spin(context, "fort_search_promise_retention_failed");
         return MainThreadActionOutcome::kIndeterminate;
     }
+    interaction.retained = true;
     return MainThreadActionOutcome::kInvoked;
 }
