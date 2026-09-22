@@ -8,15 +8,110 @@ version-specific Pokémon GO and Unity/IL2CPP bindings.
 
 The repository contains:
 
-- `core/`: pure domain models, geo math, movement planning and automation rules.
+- `core/`: pure domain models, geo math, movement planning and reusable policy helpers.
 - `bridge/protocol/`: versioned bridge frames, runtime events and payload codecs.
 - `game-adapter/api/`: capability contracts for game adapters.
 - `game-adapter/pogo/`: Pokémon GO runtime source, protobuf decoding and bridge adapter.
 - `game-adapter/fake/`: deterministic fake adapter used by tests.
-- `app/`: Android controller, headless service, overlay and mock-location provider.
-- `zygisk/`: native target-process probe and companion bridge.
+- `app/`: Android controller, config persistence, headless service, overlay and mock-location provider.
+- `zygisk/`: native gameplay automation, version-specific bindings and root companion bridge.
 - `scripts/`: device diagnostics, smoke tests and packaging helpers.
 - `docs/`: architecture, binding boundaries and feature design notes.
+
+## Project structure and ownership rules
+
+Read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) before placing new code or
+changing native/Kotlin ownership, persistence, or the bridge contract. It is the
+current structure reference; older milestone documents may describe retired
+Kotlin orchestration paths.
+
+### Native (`zygisk/`)
+
+- Put live gameplay scheduling and execution in `zygisk/jni/modules/<feature>/`.
+  Native owns catch/spin/discard/transfer decisions from current game state,
+  pending actions, outcome observation, and gameplay cooldowns. Do not add a
+  second Kotlin loop that plans or dispatches the same live actions.
+- Put reusable process/IL2CPP services in `shared/runtime/`, bootstrap and
+  low-level helpers in `shared/core/`, controller IPC in `shared/bridge_kotlin/`,
+  and the target-process/companion channel in `shared/bridge_appproc/`.
+  `host/` publishes capabilities; it must not absorb feature policy.
+- Keep `main.cpp` as composition/include wiring. Preserve the current single
+  translation unit and its include dependencies when splitting `.inc` files.
+- The injected runtime owns game objects and verified bindings. Marshal
+  main-thread-required Unity/IL2CPP work through the existing main-thread bridge.
+  The root companion owns IPC forwarding, peer authorization and diagnostics.
+
+### Kotlin (`app/`, `core/`, `bridge/`, `game-adapter/`)
+
+- Target required by the user: Kotlin owns overlay/UI and Android fake-location
+  control. It accepts user input, forwards gameplay intent through a thin
+  client and renders backend-provided state. It must not own Pokemon GO runtime
+  orchestration, gameplay decisions or raw game-state interpretation.
+- Explicit location exception: Kotlin may own joystick, teleport, walk-to-location,
+  coordinate validation, speed/bearing/step calculation, local arrival/stop state,
+  location input arbitration, Android mock-provider lifecycle and location UI
+  cooldown estimates. `JoystickLocationController`, `WalkPlanner`/`GeoMath` and
+  `RootMockLocationProvider` may remain in Kotlin; keep this logic in the
+  location/domain layer and let overlay views delegate to it.
+- A user may choose a coordinate or favorite in Kotlin. Native owns target
+  selection based on live game state (such as the next fort), gameplay pauses
+  and game action eligibility. Kotlin executes native walk/stop intents with
+  session/freshness/lease checks; local geometric arrival does not authorize a
+  catch/spin action or prove game-side arrival. Do not add PoGo hooks, object
+  reads or game-state-based target selection to the location controller.
+- The live controller path is UI-only: `RuntimeUiAutomationFacade` persists and
+  submits a full desired snapshot, while `RuntimeUiEventRouter` renders native
+  status/events and forwards location handoffs. `HeadlessAutomationEngine`,
+  `RuntimeLifecycleCoordinator`, and the old raw-observation path are no longer
+  production entry points; compatibility implementations remain only where
+  existing tests still consume them. See the evidence and boundary in [the
+  Kotlin UI-only review](docs/issues/2026-09-22/kotlin-ui-only-boundary/brainstorm.md)
+  and [the refactor plan](docs/issues/2026-09-22/kotlin-ui-only-boundary/checklists/00-overview.md).
+- Keep Android UI/service lifecycle, input validation, presentation and thin
+  IPC separate from game logic. Settings/UI persistence remains app-owned under
+  the persistence rules below; it does not authorize runtime decision logic.
+- The Android mock-location provider is an OS adapter, not a PoGo binding.
+  Preserve provider cleanup and freshness for native-issued navigation. Manual
+  joystick/teleport/walk does not require a new PoGo binding. Do not move a
+  gameplay state machine to Java and call that UI-only.
+- Keep `core/` Android-free and independent of storage, sockets, JNI, hooks,
+  offsets and game classes. Existing generic planners/runners do not establish
+  ownership of the current live gameplay loop.
+- Keep transport contracts/codecs in `bridge/protocol/`, adapter contracts in
+  `game-adapter/api/`, POGO payload interpretation in `game-adapter/pogo/`, and
+  deterministic test behavior in `game-adapter/fake/`. The current POGO adapter
+  dependency is not a target dependency of the UI-only layer.
+
+### Persistence
+
+- Kotlin repositories/stores own durable user data in app-private storage.
+  Use the existing SharedPreferences owners described in `docs/ARCHITECTURE.md`;
+  do not read/write their XML files directly from native or root shell.
+- Android config is the durable source of truth. Native receives versioned,
+  revisioned config snapshots over IPC and keeps an in-memory session mirror.
+  Reapply config after a new ready session; never restore live game pointers,
+  pending mutations, or readiness from persisted user settings.
+- Reserve `/data/adb/pogo_root_automation/` for root bridge metadata such as
+  `runtime.status` and `controller.uids`. Status files are diagnostics, not
+  gameplay state or a config/message queue.
+- Keep observations and runtime state session-scoped. The existing `map_target`
+  preference is a short-lived handoff with a 30-second default TTL, not a
+  durable route. New persisted data must specify its owner and retention rules.
+
+### Native ↔ Kotlin communication
+
+- Use the existing path: `RuntimeBridgeClient` → abstract Unix socket
+  `pogo_root_automation_runtime` → root companion broker → injected runtime.
+  Do not introduce direct cross-process JNI, shared preference polling, or
+  filesystem command queues as a second gameplay transport.
+- Change Kotlin codecs and native wire definitions together. Preserve protocol
+  versions, size limits, session/identity checks, sequence/freshness validation,
+  request correlation, capability checks and fail-closed behavior.
+- A connection, START acknowledgement, or CONFIG_SET acknowledgement does not
+  prove a gameplay action completed. Native owns readiness/module activation
+  and reports actual action outcomes; Kotlin consumes structured results/events.
+- `RuntimeMainThreadBridge.java` is an in-process JNI scheduling helper loaded
+  inside the game process, not the IPC link to the controller APK.
 
 ## Test emulator
 
@@ -162,7 +257,8 @@ checks and uploads both artifacts.
 
 ## Direct map-tap walk
 
-The map-walk path is intentionally split into two parts:
+The map-walk path is split into two parts and is permitted by the explicit
+Kotlin fake-location exception:
 
 1. A verified, version-scoped Pokémon GO Unity/IL2CPP binding observes a real
    map tap, resolves it to a `GeoPoint` using same-frame camera/map state and
@@ -182,6 +278,9 @@ fallbacks. If the runtime binding or camera state is unavailable, fail closed.
 
 ## Change and verification rules
 
+- Do not write tests: do not create test files, add test cases, or modify test
+  code as part of feature implementation or bug fixes. Running existing tests
+  is still allowed and required by the verification rules below.
 - Keep every non-Markdown source file at or below 500 lines, regardless of
   language. Split cohesive responsibilities into smaller files and use the
   language's import/include mechanism when sharing code.

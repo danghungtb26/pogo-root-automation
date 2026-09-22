@@ -20,11 +20,13 @@ std::mutex g_runtime_transfer_config_mutex;
 RuntimeTransferConfig g_runtime_transfer_config;
 
 RuntimeTransferConfig runtime_transfer_config_snapshot() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     std::lock_guard<std::mutex> lock(g_runtime_transfer_config_mutex);
     return g_runtime_transfer_config;
 }
 
 void reset_runtime_transfer_config() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     std::lock_guard<std::mutex> lock(g_runtime_transfer_config_mutex);
     g_runtime_transfer_config = RuntimeTransferConfig{};
 }
@@ -49,6 +51,7 @@ bool apply_runtime_transfer_config(
     ProbeContext &context,
     const std::vector<uint8_t> &command
 ) {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     pogo_runtime_transfer_config::Request request;
     if (!pogo_runtime_transfer_config::parse(command, &request)) return false;
 

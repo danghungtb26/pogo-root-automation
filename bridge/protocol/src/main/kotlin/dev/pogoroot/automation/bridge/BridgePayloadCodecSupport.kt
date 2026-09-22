@@ -89,6 +89,12 @@ internal object BridgePayloadCodecSupport {
     fun readNullableDouble(input: DataInputStream): Double? =
         if (input.readBoolean()) input.readDouble() else null
 
+    fun DataInputStream.readStrictBoolean(): Boolean = when (readUnsignedByte()) {
+        0 -> false
+        1 -> true
+        else -> error("invalid boolean wire value")
+    }
+
     fun writeNullablePoint(output: DataOutputStream, value: GeoPoint?) {
         output.writeBoolean(value != null)
         if (value != null) {

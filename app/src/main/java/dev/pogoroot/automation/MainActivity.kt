@@ -14,7 +14,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.service.AutomationControlServer
-import dev.pogoroot.automation.engine.AutomationRunState
 import dev.pogoroot.automation.service.HeadlessAutomationService
 import dev.pogoroot.automation.overlay.GameForegroundDetector
 import dev.pogoroot.automation.overlay.JoystickOverlayService
@@ -147,7 +146,7 @@ class MainActivity : Activity() {
         if (!::statusView.isInitialized || !::configRepository.isInitialized) return
         val config = configRepository.read()
         statusView.text = buildString {
-            append("automation: ${if (AutomationRunState.isActive()) "ON" else "OFF"}")
+            append("automation: ${if (config.enabled) "ON" else "OFF"}")
             append("\nautoCatch: ${config.autoCatch}")
             append("\nautoCloseCatchPreview: ${config.autoCloseCatchPreview}")
             append("\nautoSpin: ${config.autoSpin}")

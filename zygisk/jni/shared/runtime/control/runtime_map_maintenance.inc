@@ -53,10 +53,9 @@ void maybe_probe_pending_map_readiness(ProbeContext &context) {
             binding,
             true
         );
+        (void)send_runtime_ui_status(context);
     }
 
-    if (live_now) {
-        pogo_runtime_module::sync_auto_enabled_modules(context);
-    }
+    reconcile_runtime_desired_state(context);
 }
 }  // namespace

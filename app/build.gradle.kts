@@ -17,11 +17,8 @@ android {
 
 dependencies {
     testImplementation(kotlin("test-junit"))
-    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
-    implementation("com.google.protobuf:protobuf-java:3.23.0")
+    implementation(files("libs/virtualjoystick-1.10.1.aar"))
 
     implementation(project(":core"))
     implementation(project(":bridge:protocol"))
-    implementation(project(":game-adapter:api"))
-    implementation(project(":game-adapter:pogo"))
 }

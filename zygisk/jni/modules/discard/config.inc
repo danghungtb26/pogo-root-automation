@@ -14,11 +14,13 @@ std::mutex g_runtime_discard_config_mutex;
 RuntimeDiscardConfig g_runtime_discard_config;
 
 RuntimeDiscardConfig runtime_discard_config_snapshot() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     std::lock_guard<std::mutex> lock(g_runtime_discard_config_mutex);
     return g_runtime_discard_config;
 }
 
 void reset_runtime_discard_config() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     std::lock_guard<std::mutex> lock(g_runtime_discard_config_mutex);
     g_runtime_discard_config = RuntimeDiscardConfig{};
 }
@@ -54,6 +56,7 @@ bool apply_runtime_discard_config(
     ProbeContext &context,
     const std::vector<uint8_t> &command
 ) {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     pogo_runtime_discard_config::Request request;
     if (!pogo_runtime_discard_config::parse(command, &request)) return false;
 

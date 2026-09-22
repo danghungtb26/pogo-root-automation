@@ -14,15 +14,10 @@ import dev.pogoroot.automation.core.automation.MAX_SETTLE_DELAY_MS
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.config.BerryMode
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
-import dev.pogoroot.automation.engine.HeadlessAutomationEngine
-import dev.pogoroot.automation.engine.HeadlessAutomationStatus
 
 class AutomationControlServer(
     private val configRepository: AutomationConfigRepository,
-    private val engine: HeadlessAutomationEngine,
-    private val runtimeDiagnostic: () -> Result<Unit> = {
-        Result.failure(UnsupportedOperationException("runtime diagnostic is unavailable"))
-    },
+    private val runtimeFacade: RuntimeUiAutomationFacade,
     private val port: Int = DEFAULT_PORT,
 ) {
     private val running = AtomicBoolean(false)
@@ -84,27 +79,23 @@ class AutomationControlServer(
 
     private fun route(method: String, path: String, params: Map<String, String>): ApiResponse = when {
         method == "GET" && (path == "/health" || path == "/v1/health") -> ApiResponse(200, "{\"ok\":true}")
-        method == "GET" && path == "/v1/status" -> ApiResponse(200, statusJson(engine.snapshot(), configRepository.read()))
+        method == "GET" && path == "/v1/status" -> ApiResponse(200, statusJson(runtimeFacade.snapshot(), configRepository.read()))
         method == "POST" && path == "/v1/runtime/diagnostic" -> {
-            runtimeDiagnostic().fold(
+            runtimeFacade.requestRuntimeDiagnostic().fold(
                 onSuccess = { ApiResponse(202, "{\"ok\":true,\"queued\":true}") },
                 onFailure = { error -> ApiResponse(409, jsonError(error.message ?: "runtime diagnostic unavailable")) },
             )
         }
         method == "POST" && path == "/v1/start" -> {
-            val config = configRepository.update { current -> applyParams(current, params) }
-            engine.activate()
-            ApiResponse(200, statusJson(engine.snapshot(), config))
+            val config = runtimeFacade.enable { current -> applyParams(current, params) }
+            ApiResponse(200, statusJson(runtimeFacade.snapshot(), config))
         }
         method == "POST" && path == "/v1/stop" -> {
-            val config = configRepository.read()
-            engine.deactivate()
-            ApiResponse(200, statusJson(engine.snapshot(), config))
+            val config = runtimeFacade.disable()
+            ApiResponse(200, statusJson(runtimeFacade.snapshot(), config))
         }
         method == "POST" && path == "/v1/config" -> {
-            val config = configRepository.update { current -> applyParams(current, params) }
-            engine.start()
-            engine.pushRuntimeConfigs()
+            val config = runtimeFacade.updateConfig { current -> applyParams(current, params) }
             ApiResponse(200, configJson(config))
         }
         else -> ApiResponse(404, jsonError("not found"))
@@ -206,7 +197,7 @@ class AutomationControlServer(
         }
     }
 
-    private fun statusJson(status: HeadlessAutomationStatus, config: HeadlessAutomationConfig): String = """
+    private fun statusJson(status: RuntimeUiAutomationStatus, config: HeadlessAutomationConfig): String = """
         {"running":${status.running},"enabled":${status.enabled},"configRevision":${config.configRevision},"mapTapWalk":${config.mapTapWalkEnabled},"autoWalkToFort":${config.autoWalkToFort},"autoEncounter":${config.autoEncounter},"autoCatch":${config.autoCatch},"catchAll":${config.catchAll},"autoExcellent":${config.catchThrowQuality == dev.pogoroot.automation.core.automation.ThrowQualityTarget.EXCELLENT},"throwQuality":"${config.catchThrowQuality.name}","curve":"${config.catchCurvePreference.name}","arPlus":${config.catchEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoSnapshot":${config.autoSnapshotDuringEncounter},"snapshotArPlus":${config.snapshotEncounterMode == dev.pogoroot.automation.core.automation.EncounterMode.AR_PLUS},"autoCloseCatchPreview":${config.autoCloseCatchPreview},"autoSpin":${config.autoSpin},"spinSettleDelayMs":${config.spinSettleDelayMs},"catchSettleDelayMs":${config.catchSettleDelayMs},"autoDiscard":${config.autoDiscard},"autoTransfer":${config.autoTransfer},"berry":"${config.berryMode.name}","toasts":${config.showActionToasts},"runtimeSessionId":${status.runtimeSessionId.jsonStringOrNull()},"runtimeControlState":"${status.runtimeControlState}","runtimeModules":${status.runtimeModules.toJsonObject()},"runtimeStrongIdentityVerified":${status.runtimeStrongIdentityVerified},"runtimeCapabilities":${status.runtimeCapabilities.toJsonArray()},"runtimeMutationPermissionGranted":${status.runtimeMutationPermissionGranted},"runtimeLifecycle":${status.runtimeLifecycle.jsonStringOrNull()},"runtimeSuspended":${status.runtimeSuspended},"observationSeq":${status.observationSeq ?: "null"},"lastAction":${status.lastAction.jsonStringOrNull()},"lastError":${status.lastError.jsonStringOrNull()},"port":$port}
     """.trimIndent()
 

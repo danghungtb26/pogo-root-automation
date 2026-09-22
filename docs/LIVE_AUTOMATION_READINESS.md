@@ -64,7 +64,7 @@ UseItemOnPokemon(Holoholo.Rpc.Item, System.UInt64)
 ```
 
 The broker then published a stronger `RuntimeReady` update with
-`READ_LIFECYCLE`, `ENCOUNTER`, `OPEN_ENCOUNTER`, and `USE_BERRY`. This proves
+`ENCOUNTER`, `OPEN_ENCOUNTER`, and `USE_BERRY`. This proves
 binding identity, owner resolution, encounter field signatures, the dynamic
 tappable contract, and the item method signature; it does not yet prove a live
 berry Promise outcome or a live catch outcome.
@@ -97,7 +97,7 @@ For the current device after the diagnostic, the observed fields are:
 
 ```json
 {
-  "runtimeCapabilities": ["ENCOUNTER", "OPEN_ENCOUNTER", "READ_LIFECYCLE", "USE_BERRY"],
+  "runtimeCapabilities": ["ENCOUNTER", "OPEN_ENCOUNTER", "USE_BERRY"],
   "strongIdentityVerified": true,
   "runtimeMutationPermissionGranted": false,
   "runtimeLifecycle": "OVERWORLD"

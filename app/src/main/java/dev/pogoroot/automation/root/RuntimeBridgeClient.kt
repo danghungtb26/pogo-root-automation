@@ -11,7 +11,6 @@ import dev.pogoroot.automation.bridge.BridgeMessageType
 import dev.pogoroot.automation.bridge.BridgePayloadCodec
 import dev.pogoroot.automation.bridge.BridgeProtocol
 import dev.pogoroot.automation.bridge.CommandPhase
-import dev.pogoroot.automation.bridge.RuntimeBridge
 import dev.pogoroot.automation.bridge.RuntimeControlAction
 import dev.pogoroot.automation.bridge.RuntimeControlPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeControlRequest
@@ -21,6 +20,9 @@ import dev.pogoroot.automation.bridge.RuntimeCatchSpinConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeDiscardConfig
 import dev.pogoroot.automation.bridge.RuntimeDiscardConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeDiscardConfigRequest
+import dev.pogoroot.automation.bridge.RuntimeDesiredState
+import dev.pogoroot.automation.bridge.RuntimeDesiredStatePayloadCodec
+import dev.pogoroot.automation.bridge.RuntimeDesiredStateRequest
 import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigRequest
@@ -40,19 +42,12 @@ data class RuntimeModuleLoadStatus(
     val message: String?,
 )
 
-/**
- * Persistent controller-side Unix-domain-socket client. The root companion is
- * the broker/peer; the app never attaches to the Pokémon GO process itself.
- *
- * Connecting is deliberately side-effect free. START only prepares the native
- * runtime host. Native activates feature modules from revisioned config.
- */
 class RuntimeBridgeClient(
     private val socketName: String = DEFAULT_SOCKET_NAME,
     private val connectTimeoutMs: Long = 3_000L,
     private val rootShell: RootShell = ProcessRootShell(),
     private val onModuleLoadStatus: (RuntimeModuleLoadStatus) -> Unit = {},
-) : RuntimeBridge, RuntimeControlBridge {
+) : RuntimeControlBridge {
     private val outgoingSeq = AtomicLong(0L)
     private val events = ConcurrentLinkedQueue<BridgeEvent>()
     private val controlResults = ConcurrentLinkedQueue<BridgeEvent.AutomationCommandResult>()
@@ -64,6 +59,7 @@ class RuntimeBridgeClient(
     @Volatile private var readerError: Throwable? = null
     @Volatile private var readerExecutor: ExecutorService? = null
     @Volatile private var runtimeReadyListener: ((BridgeEvent.RuntimeReady) -> Unit)? = null
+    @Volatile private var runtimeEventListener: ((BridgeEvent) -> Unit)? = null
 
     override val connected: Boolean
         get() = socket?.isConnected == true && readerError == null
@@ -71,9 +67,12 @@ class RuntimeBridgeClient(
     override fun currentRuntimeReady(): BridgeEvent.RuntimeReady? =
         runtimeReady?.takeIf { connected }
 
-    /** Invoked on the bridge reader thread whenever a fresh [BridgeEvent.RuntimeReady] arrives. */
     fun setRuntimeReadyListener(listener: ((BridgeEvent.RuntimeReady) -> Unit)?) {
         runtimeReadyListener = listener
+    }
+
+    fun setRuntimeEventListener(listener: ((BridgeEvent) -> Unit)?) {
+        runtimeEventListener = listener
     }
 
     override fun connect(): Result<BridgeEvent.RuntimeReady> {
@@ -115,35 +114,51 @@ class RuntimeBridgeClient(
         }
     }
 
-    override fun receiveEvents(): Result<List<BridgeEvent>> = runCatching {
+    fun receiveEvents(): Result<List<BridgeEvent>> = runCatching {
         readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
         buildList {
             while (true) add(events.poll() ?: break)
         }
     }
 
-    override fun send(command: BridgeEvent.AutomationCommand): Result<Unit> = runCatching {
-        sendPayload(
-            messageType = BridgeMessageType.COMMAND,
-            payload = BridgePayloadCodec.encode(command).getOrThrow(),
-        )
-    }
-
-    /** Start the conservative native host. No feature module is enabled here. */
     override fun startRuntime(): Result<Unit> {
         invalidateManagedReadiness()
         return requestRuntimeControl(RuntimeControlAction.START).map { Unit }
     }
 
-    /** Disable all feature modules and leave the Zygisk process attachment idle. */
     override fun stopRuntime(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.STOP).map { Unit }
 
-    /** Read-only runtime readiness/binding check; it does not enable modules. */
     override fun requestRuntimeDiagnostic(): Result<Unit> =
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
 
-    /** Apply the complete, revisioned catch_spin config to the native session. */
+    fun submitDesiredState(state: RuntimeDesiredState): Result<DesiredStateReceipt> = runCatching {
+        val ready = currentRuntimeReady() ?: connect().getOrThrow()
+        val requestId = "runtime-desired-state-${state.configRevision}-${System.nanoTime()}"
+        val request = RuntimeDesiredStateRequest(
+            runtimeSessionId = ready.runtimeSessionId,
+            requestId = requestId,
+            state = state,
+            expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
+            pid = ready.pid,
+            processName = ready.processName,
+            packageName = ready.packageName,
+            buildFingerprint = ready.buildFingerprint,
+        )
+        val result = awaitAcceptedResult(requestId) {
+            sendPayload(
+                messageType = BridgeMessageType.COMMAND,
+                payload = RuntimeDesiredStatePayloadCodec.encode(request).getOrThrow(),
+            )
+        }.getOrThrow()
+        DesiredStateReceipt(
+            runtimeSessionId = ready.runtimeSessionId,
+            requestId = requestId,
+            phase = result.phase,
+            message = result.message,
+        )
+    }
+
     override fun setCatchSpinConfig(config: RuntimeCatchSpinConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-catch-spin-config-${config.configRevision}-${System.nanoTime()}"
@@ -170,7 +185,6 @@ class RuntimeBridgeClient(
         )
     }
 
-    /** Apply the complete, revisioned transfer keep policy to native. */
     override fun setTransferConfig(config: RuntimeTransferConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-transfer-config-${config.configRevision}-${System.nanoTime()}"
@@ -197,7 +211,6 @@ class RuntimeBridgeClient(
         )
     }
 
-    /** Apply the complete, revisioned auto-discard policy to native. */
     override fun setDiscardConfig(config: RuntimeDiscardConfig): Result<Unit> = runCatching {
         val ready = currentRuntimeReady() ?: connect().getOrThrow()
         val requestId = "runtime-discard-config-${config.configRevision}-${System.nanoTime()}"
@@ -225,10 +238,6 @@ class RuntimeBridgeClient(
         )
     }
 
-    /**
-     * Drop capability state from a previous START/STOP cycle. The native host
-     * must publish a fresh capability update after the next explicit diagnostic.
-     */
     fun invalidateManagedReadiness() {
         runtimeReady = runtimeReady?.copy(
             strongIdentityVerified = false,
@@ -253,7 +262,6 @@ class RuntimeBridgeClient(
         pendingControlIds.clear()
     }
 
-    /** Send a runtime lifecycle control action (START/STOP/DIAGNOSTIC). */
     private fun requestRuntimeControl(
         action: RuntimeControlAction,
         requestIdSuffix: String? = null,
@@ -308,6 +316,31 @@ class RuntimeBridgeClient(
                 Thread.sleep(10L)
             }
             error("runtime control timeout: $requestId")
+        } finally {
+            pendingControlIds.remove(requestId)
+        }
+    }
+
+    private fun awaitAcceptedResult(
+        requestId: String,
+        sendRequest: () -> Unit,
+    ): Result<BridgeEvent.AutomationCommandResult> = runCatching {
+        pendingControlIds.add(requestId)
+        try {
+            sendRequest()
+            val deadline = System.nanoTime() + CONTROL_TIMEOUT_NS
+            while (System.nanoTime() < deadline) {
+                val result = controlResults.findAndRemove { it.commandId == requestId }
+                if (result != null) {
+                    check(result.phase == CommandPhase.ACCEPTED) {
+                        result.errorCode ?: result.message ?: result.phase.name
+                    }
+                    return@runCatching result
+                }
+                readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
+                Thread.sleep(10L)
+            }
+            error("runtime desired-state receipt timeout: $requestId")
         } finally {
             pendingControlIds.remove(requestId)
         }
@@ -386,6 +419,8 @@ class RuntimeBridgeClient(
 
                     else -> events.add(event)
                 }
+                runCatching { runtimeEventListener?.invoke(event) }
+                    .onFailure { Log.w(LOG_TAG, "runtime event listener failed", it) }
             }
         } catch (error: Throwable) {
             if (socket === current) {

@@ -20,7 +20,8 @@ This is deliberately a polling bridge for M1. It has two useful properties:
 1. the injected library does not need to stay resident merely to report lifecycle;
 2. a stale status file cannot report `connected`, because the root status script verifies `/proc/<pid>/cmdline` and process liveness.
 
-M2 may replace or augment this transport when high-frequency nearby snapshots are required.
+M2 is now augmented by the persistent structured bridge below. The root status
+file remains diagnostics only and is not a gameplay/config queue.
 
 ## Root state
 
@@ -57,26 +58,24 @@ There is no explicit process-death callback from this M1 stub. A dead/reused PID
 
 ## Structured bridge contract
 
-The controller-side structured path now uses a persistent Unix-domain-socket
-contract with binary framing (`length`, protocol version, message type, and
-sequence). Typed messages include `RuntimeReady`, `ObservationEvent`,
-`AutomationCommand`, `AutomationCommandResult`, `BindingLost`, and
-`RuntimeError`. Raw observation payloads remain opaque to the bridge and are
-decoded by `game-adapter:pogo`.
+The live controller path uses a persistent Unix-domain-socket contract with
+binary framing (`length`, protocol version 3, message type and sequence).
+Typed messages include `RuntimeReady`, `RuntimeUiStatus`, desired-state
+requests, automation results/events, navigation, map target, diagnostics,
+`BindingLost` and `RuntimeError`. The UI router consumes typed DTOs; it does
+not decode POGO protobuf or construct a game adapter.
 
-`HeadlessAutomationService` always runs the structured controller. The native
-probe first publishes a conservative probe-only `RuntimeReady`. After the
-explicit post-init diagnostic resolves client-owned services, the companion
-can publish a stronger `RuntimeReady` update. On the verified Air 1 build, the
-  current native binding advertises `READ_LIFECYCLE`, `ENCOUNTER`,
-  `OPEN_ENCOUNTER`, and `USE_BERRY`; mutation still requires the
-  `strongIdentityVerified` flag, the exact allowlist entry, and the action
-  capability. Unsupported actions remain rejected and there is no alternate
-  screen/input automation path.
+`RuntimeUiAutomationFacade` persists user settings and sends one full desired
+snapshot with revision/expiry. Native owns readiness, build/capability guards,
+config reconciliation and gameplay. `RuntimeUiStatus` separates desired,
+applied and ready state. On reconnect the client resends the latest desired
+snapshot; the broker caches only the latest UI status and never replays a
+gameplay command. Unsupported actions remain rejected and there is no alternate
+screen/input automation path.
 
 ## Explicit post-init diagnostic
 
-For build-specific binding work, the controller exposes a read-only diagnostic
+For build-specific binding work, the controller exposes an explicit diagnostic
 request:
 
 ```bash
@@ -84,43 +83,18 @@ ANDROID_SERIAL=127.0.0.1:5565 bash scripts/headless-control.sh diagnostic
 ```
 
 Call it only after Pokémon GO has finished loading into a stable game screen.
-The request travels through the existing authenticated bridge as a reserved
-`Alert` marker; the injected side then inspects managed runtime class/method
-signatures and resolves the client-owned encounter/item services through
-Zenject. It publishes `ENCOUNTER`/`READ_LIFECYCLE` only when the structured
-encounter fields are present, and publishes `USE_BERRY` only when the pinned
-`libil2cpp` BuildID and exact
-`ItemBagImpl.UseItemOnPokemon(Holoholo.Rpc.Item, UInt64)` signature/owner
-checks pass. Encounter owners are refreshed periodically after the diagnostic
-so short-lived encounter objects can be observed after the operator enters an
-encounter. This explicit timing gate exists because managed IL2CPP calls
-from the process-start probe previously crashed the exact BlueStacks Air 1
-runtime during `il2cpp_init`.
+The request travels through the existing authenticated bridge. Native performs
+build-specific discovery only behind its lifecycle/main-thread guards and
+publishes capabilities/status only after the corresponding checks pass. Missing
+device evidence keeps the capability disabled; this document does not claim a
+live Air 1 result when no Air 1 target is available.
 
-## Current action binding
+## Action and location boundary
 
-The implemented action path is deliberately narrow:
-
-```text
-AutomationCommand(UseBerry)
-  -> bridge/session/process/build/lifecycle/expiry checks
-  -> pinned ItemBagImpl instance from DiContainer.TryResolve(IItemBag)
-  -> Unity main-thread post
-  -> ItemBagImpl.UseItemOnPokemon(Item, encounterId)
-  -> INDETERMINATE until the returned Promise has an observed outcome
-```
-
-Berry wire values map to the exact item IDs `701`, `703`, `705`, `706`, and
-`708` for Razz, Nanab, Pinap, Golden Razz, and Silver Pinap. A duplicate
-command ID, malformed encounter ID, stale command, wrong lifecycle, missing
-owner, exception, or null Promise fails closed. The catch binding currently
-resolves `PokeballService.Throw(GameObject, Vector3)` and validates the active
-`EncounterPokemon`, selected `Pokeball`, and target position, but remains behind
-a disabled capability gate until one live throw and its result transition are
-observed. For `OPEN_ENCOUNTER`, the target resolver now tries the exact
-`MapEntityCell.GetMapPokemon(UInt64)` and `MapEntityCell.GetMapTappable(UInt64)`
-methods before the verified `WildMapPokemon.egwu` field path. The new resolver
-is built for Air 1 but still needs an on-device action run after the controller
-root permission is restored. Spin, discard, transfer, snapshot, and input/map
-actions remain unavailable until their own bindings and outcome observations
-are verified.
+Gameplay action selection/execution remains native and must pass identity,
+expiry, lifecycle, build and capability guards. Kotlin does not turn a desired
+receipt, local arrival or UI event into a gameplay action. Native-issued map
+target/navigation is handed to Kotlin only as a capability/freshness/lease
+checked DTO; manual joystick, teleport and walk remain Kotlin-owned location
+operations. Spin, discard, transfer and other bindings stay disabled unless
+their exact binding and outcome evidence is advertised by native.

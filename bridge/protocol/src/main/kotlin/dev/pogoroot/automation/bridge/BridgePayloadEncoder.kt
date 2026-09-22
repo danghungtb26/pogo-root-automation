@@ -7,13 +7,25 @@ import java.io.DataOutputStream
 internal object BridgePayloadEncoder {
     private val codec = BridgePayloadCodecSupport
 
-    fun encode(event: BridgeEvent): Result<ByteArray> = runCatching {
+    fun encode(event: BridgeEvent): Result<ByteArray> {
+        if (event is BridgeEvent.RuntimeUiStatus) {
+            return runCatching {
+                require(event.protocolVersion == BridgeProtocol.VERSION) {
+                    "bridge protocol mismatch"
+                }
+                RuntimeUiStatusPayloadCodec.encode(event.status).getOrThrow()
+            }
+        }
+        return runCatching {
         require(event.protocolVersion == BridgeProtocol.VERSION) { "bridge protocol mismatch" }
         ByteArrayOutputStream().use { bytes ->
             DataOutputStream(bytes).use { output ->
                 output.writeInt(codec.PAYLOAD_VERSION)
                 when (event) {
-                    is BridgeEvent.RuntimeStatus -> writeRuntimeStatus(output, event)
+                    is BridgeEvent.RuntimeStatus -> error(
+                        "legacy runtime status is not encodable under bridge protocol 3"
+                    )
+                    is BridgeEvent.RuntimeUiStatus -> error("runtime UI status is encoded above")
                     is BridgeEvent.RuntimeReady -> writeRuntimeReady(output, event)
                     is BridgeEvent.ObservationEvent -> writeObservation(output, event)
                     is BridgeEvent.AutomationCommand -> writeCommand(output, event)
@@ -29,17 +41,7 @@ internal object BridgePayloadEncoder {
                 }
             }
         }
-    }
-
-    private fun writeRuntimeStatus(
-        output: DataOutputStream,
-        value: BridgeEvent.RuntimeStatus,
-    ) {
-        codec.writeString(output, value.processName)
-        codec.writeNullableString(output, value.gameVersion)
-        output.writeInt(codec.lifecycleWireValue(value.lifecycleState))
-        codec.writeNullableString(output, value.runtimeSessionId)
-        codec.writeNullableLong(output, value.messageSeq)
+        }
     }
 
     private fun writeRuntimeReady(

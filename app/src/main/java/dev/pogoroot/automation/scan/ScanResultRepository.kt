@@ -1,9 +1,6 @@
 package dev.pogoroot.automation.scan
 
-import dev.pogoroot.automation.core.model.EncounterSnapshot
 import dev.pogoroot.automation.core.scan.ScanMatchType
-import dev.pogoroot.automation.core.scan.ScanMatcher
-import dev.pogoroot.automation.core.scan.ScanMode
 import dev.pogoroot.automation.core.scan.ScanResultSummary
 
 /**
@@ -23,24 +20,9 @@ class ScanResultRepository {
         private val shinyResults = ArrayList<ScanResultSummary>(MAX_RESULTS)
     }
 
-    private val matcher = ScanMatcher()
-
     fun read(matchType: ScanMatchType): List<ScanResultSummary> {
         synchronized(lock) {
             return listFor(matchType).toList()
-        }
-    }
-
-    fun recordEncounter(encounter: EncounterSnapshot?) {
-        if (encounter == null) return
-        matcher.match(encounter, ScanMode.BOTH).types.forEach { matchType ->
-            record(
-                ScanResultSummary.fromEncounter(
-                    encounter,
-                    matchType,
-                    encounter.encounterId,
-                ),
-            )
         }
     }
 

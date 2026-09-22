@@ -36,6 +36,7 @@ bool send_runtime_rejected(
 extern std::atomic<bool> g_runtime_active;
 
 RuntimeCatchSpinConfig runtime_catch_spin_config_snapshot() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     std::lock_guard<std::mutex> lock(g_runtime_catch_spin_config_mutex);
     return g_runtime_catch_spin_config;
 }
@@ -69,6 +70,7 @@ bool runtime_catch_spin_config_allows_action(
 }
 
 void reset_runtime_catch_spin_config() {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     {
         std::lock_guard<std::mutex> lock(g_runtime_catch_spin_config_mutex);
         g_runtime_catch_spin_config = RuntimeCatchSpinConfig{};
@@ -80,6 +82,7 @@ bool apply_runtime_catch_spin_config(
     ProbeContext &context,
     const std::vector<uint8_t> &command
 ) {
+    std::lock_guard<std::recursive_mutex> applied_lock(g_runtime_applied_config_mutex);
     pogo_runtime_catch_spin_config::Request request;
     if (!pogo_runtime_catch_spin_config::parse(command, &request)) return false;
 

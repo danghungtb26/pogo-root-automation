@@ -15,6 +15,9 @@ bool send_runtime_capability_update(
     }
     if (binding.forts_read_verified) capabilities.emplace_back("READ_FORTS");
     if (binding.inventory_read_verified) capabilities.emplace_back("READ_INVENTORY");
+    if (binding.map_pokemon_tap_event_verified) {
+        capabilities.emplace_back("READ_MAP_TARGET");
+    }
     if (kOpenEncounterExecutionEnabled && binding.dynamic_tappables_service != nullptr &&
         binding.dynamic_tappables_tap != nullptr) {
         capabilities.emplace_back("OPEN_ENCOUNTER");

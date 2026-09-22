@@ -8,6 +8,7 @@ constexpr uint32_t kRuntimeCoreControlActions[] = {
     1U,  // START      (pogo_runtime_control::Action::kStart)
     2U,  // STOP       (pogo_runtime_control::Action::kStop)
     3U,  // DIAGNOSTIC (pogo_runtime_control::Action::kDiagnostic)
+    9U,  // DESIRED_STATE_SET (pogo_runtime_desired_state::kDesiredStateSetAction)
 };
 
 class RuntimeCoreModule final : public RuntimeFeatureModuleBase {
@@ -29,7 +30,7 @@ public:
     bool handle_control_action(
         ProbeContext &context,
         uint32_t control_action,
-        const std::vector<uint8_t> & /*command*/,
+        const std::vector<uint8_t> &command,
         const char *request_id,
         uint64_t /*cycle_id*/
     ) override {
@@ -43,6 +44,8 @@ public:
                 return stop_runtime(context, request_id);
             case 3U:  // DIAGNOSTIC
                 return run_runtime_control_diagnostic(context, request_id);
+            case 9U:  // DESIRED_STATE_SET
+                return handle_runtime_desired_state(context, command);
             default:
                 return false;
         }

@@ -63,6 +63,7 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
             binding,
             context.map_live_verified.load(std::memory_order_acquire)
         );
+        (void)send_runtime_ui_status(context);
         return send_runtime_control_completed(
             context.fd,
             request_id,
@@ -87,12 +88,14 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
     reset_runtime_discard_config();
+    invalidate_runtime_desired_apply();
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
         "runtime host ready; managed binding remains deferred observer=%d",
         context.observation_running.load() ? 1 : 0
     );
+    (void)send_runtime_ui_status(context);
     return send_runtime_control_completed(
         context.fd,
         request_id,
@@ -111,6 +114,8 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
     reset_runtime_discard_config();
+    invalidate_runtime_desired_apply();
+    (void)send_runtime_ui_status(context);
     return send_runtime_control_completed(
         context.fd,
         request_id,
@@ -155,6 +160,7 @@ bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_i
         context.map_live_verified.load(std::memory_order_acquire)
     );
     pogo_runtime_module::sync_auto_enabled_modules(context);
+    (void)send_runtime_ui_status(context);
     return send_runtime_control_completed(
         context.fd,
         request_id,
@@ -290,6 +296,18 @@ void runtime_command_channel_loop(ProbeContext &context) {
         pogo_runtime_module::Request module_control;
         if (pogo_runtime_module::parse(command, &module_control)) {
             if (!handle_runtime_module_control(context, module_control)) break;
+            continue;
+        }
+
+        pogo_runtime_desired_state::Request desired_state;
+        if (pogo_runtime_desired_state::parse(command, &desired_state)) {
+            if (!pogo_runtime_module::dispatch_control_action(
+                    context,
+                    pogo_runtime_desired_state::kDesiredStateSetAction,
+                    command,
+                    desired_state.request_id.c_str(),
+                    0U
+                )) break;
             continue;
         }
 

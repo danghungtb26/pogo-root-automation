@@ -1,78 +1,75 @@
 # PoGo Root Automation — Architecture Summary
 
-> Tài liệu được cập nhật theo structured-only runtime, 2026-09-08.
+> Tóm tắt source hiện tại sau refactor Kotlin UI-only, 2026-09-22. Chi tiết
+> boundary nằm tại [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ## 1. Project đang làm gì?
 
-Đây là Android controller cho Pokémon GO trên thiết bị/emulator đã root. State
-game đi qua runtime bridge, còn quyết định automation nằm trong core và action
-được gửi lại qua companion runtime. Khi native binding chưa sẵn sàng, pipeline
-chỉ đọc và fail closed.
+Đây là Android controller cho Pokémon GO trên thiết bị/emulator đã root. Kotlin
+giữ UI, persistence, HTTP facade và fake-location; native giữ readiness,
+game-state interpretation, module policy và gameplay. Khi binding chưa sẵn sàng,
+native phát trạng thái fail-closed thay vì nhờ app suy đoán.
 
 Các khả năng chính:
 
 - Foreground service và HTTP control plane trên `127.0.0.1:8765`.
-- Structured auto-encounter, auto-catch, auto-spin, berry, discard và transfer
-  policy qua `AutomationRunner`.
-- Floating joystick độc lập cho mock location.
+- Desired-state sync có revision qua bridge; status native tách received,
+  applied và ready.
+- Floating joystick, teleport và walk-to-location qua Android mock location.
 - Magisk/Zygisk process lifecycle, runtime probe và persistent bridge.
-- Stable domain model, planner và version-specific game adapters.
+- Các module `game-adapter/*` vẫn được giữ để compile/test độc lập, nhưng không
+  là dependency của APK controller.
 
 Project không triển khai server bot trực tiếp, Play Integrity bypass, root
 hiding hay anti-detection.
 
-## 2. Structured runtime flow
+## 2. Runtime flow
 
 ```text
 Host scripts / operator
   -> ADB forward -> local HTTP API
   -> HeadlessAutomationService
-  -> HeadlessAutomationEngine
-  -> RuntimeBridgeClient / RuntimeSessionManager
-  -> BridgePogoRuntimeSource / PogoGameAdapter
-  -> AutomationCoordinator / AutomationRunner
-  -> companion command channel -> Pokémon GO runtime
+  -> RuntimeUiAutomationFacade
+  -> RuntimeUiClient / RuntimeBridgeClient
+  -> broker -> native desired-state reconciler
+  -> native feature modules -> Pokémon GO runtime
 ```
 
-Mỗi observation được gắn với runtime session và sequence. Runner chỉ submit tối
-đa một mutation cho observation, chờ outcome, rồi yêu cầu observation mới trước
-khi replan. Identity, freshness, lifecycle, capability và allowlist đều được
-kiểm tra ở boundary.
+Native phát `RuntimeUiStatus`, automation event, map target, navigation,
+diagnostic và command result. `RuntimeUiEventRouter` chỉ kiểm tra envelope,
+route dữ liệu cho UI/location và giữ state hiển thị; không dựng game snapshot,
+không chọn gameplay target và không gửi mutation mới.
 
 ## 3. Android app runtime
 
 - `MainActivity` khởi động service và hiển thị trạng thái cấu hình.
 - `AutomationBootReceiver` khởi động lại service sau boot.
-- `HeadlessAutomationService` tạo repository, bridge client, structured
-  controller, engine và loopback API.
+- `HeadlessAutomationService` tạo repository, `RuntimeUiAutomationFacade`,
+  location wiring và loopback API.
 - `JoystickOverlayService` là service độc lập cho location control.
 
-Config lưu trong SharedPreferences namespace `headless_automation`. Các policy
-chính là `autoEncounter`, `autoCatch`, `autoCloseCatchPreview`, `autoSpin`, berry, discard/transfer,
-`spinSettleDelayMs`/`catchSettleDelayMs` và chu kỳ polling. Preference cũ `encounter_sweep` được migrate một lần sang
-`auto_encounter`; preference lựa chọn runtime cũ và các delay thao tác cũ bị
-loại bỏ, không thể kích hoạt behavior đã xóa.
+`AutomationConfigRepository` giữ config trong SharedPreferences namespace
+`headless_automation`. `RuntimeDesiredStateMapper` chỉ serialize các lựa chọn
+được native contract hỗ trợ; các preference UI chưa có native consumer vẫn được
+giữ persist/UI compatibility và không tự biến thành capability.
 
-## 4. Engine và status contract
+## 4. Desired state và status
 
-`HeadlessAutomationEngine` chỉ gọi `StructuredAutomationController`. Runtime
-chưa ready, mất binding, thiếu capability hoặc chưa được allowlist thì không có
-mutation fallback; status báo lỗi/read-only.
+`RuntimeUiAutomationFacade` poll nhẹ để gửi revision mới nhất và nhận event.
+Nó không gửi START/STOP loop, không chờ managed readiness và không đọc raw
+PoGo payload. Native nhận full snapshot, kiểm tra session/identity/expiry/build,
+reconcile atomically theo revision, rồi phát:
 
-Status/API dùng các field runtime canonical:
+- `RuntimeDesiredState` — intent cấu hình của người dùng;
+- `RuntimeUiStatus` — lifecycle, capability, desired/applied revision và trạng
+  thái từng module;
+- `AutomationCommandResult`/automation event — kết quả xử lý native, không phải
+  receipt gửi config;
+- map target/navigation/throw diagnostic — DTO đã được validate cho UI/location.
 
-- `runtimeSessionId`
-- `runtimeStrongIdentityVerified`
-- `runtimeCapabilities`
-- `runtimeMutationPermissionGranted`
-- `runtimeLifecycle`
-- `observationSeq`
-- `runtimeSuspended`
-- `lastAction`
-- `lastError`
-
-Không có state hiển thị, kích thước ảnh, frame counter hay sweep counter trong
-engine/API.
+`RuntimeUiClient` replay desired snapshot mới nhất sau session reconnect. Broker
+chỉ cache status UI mới nhất để controller mới nhận; không replay gameplay
+command hay pending mutation.
 
 ## 5. Local control API
 
@@ -81,13 +78,14 @@ Server chỉ bind `127.0.0.1`; host helper tạo ADB port forward.
 | Method | Endpoint | Tác dụng |
 |---|---|---|
 | `GET` | `/health`, `/v1/health` | Health check |
-| `GET` | `/v1/status` | Structured runtime và policy status |
-| `POST` | `/v1/start?...` | Bật automation và áp dụng query config |
-| `POST` | `/v1/stop` | Tắt automation, giữ service/API sống |
-| `POST` | `/v1/config?...` | Cập nhật config |
+| `GET` | `/v1/status` | Desired config và native status |
+| `POST` | `/v1/start?...` | Cập nhật desired enabled/config qua facade |
+| `POST` | `/v1/stop` | Ghi desired disabled, không dispatch gameplay |
+| `POST` | `/v1/config?...` | Cập nhật config/revision |
+| `POST` | `/v1/runtime/diagnostic` | Yêu cầu diagnostic explicit qua native |
 
-Không có direct manual catch/spin route. Manual action trong tương lai phải
-nhận structured identity (`encounterId`/`fortId`) và đi qua `AutomationRunner`.
+Không có direct manual catch/spin route. Native là owner của gameplay action;
+Kotlin chỉ hiển thị outcome/event và thực hiện movement được phép.
 
 ## 6. Built-in joystick và location control
 
@@ -95,88 +93,67 @@ nhận structured identity (`encounterId`/`fortId`) và đi qua `AutomationRunne
 flowchart LR
     User["User kéo joystick / teleport"] --> Overlay["JoystickOverlayService"]
     Overlay --> Controller["JoystickLocationController"]
-    Controller --> Geo["GeoMath"]
+    Controller --> Geo["GeoMath / WalkPlanner"]
     Geo --> Provider["RootMockLocationProvider"]
     Provider --> Android["Android test providers"]
     Android --> Game["Pokémon GO location input"]
 ```
 
-Joystick là location control độc lập với structured automation. It uses root
-app-op, GPS/network test providers, scheduled updates, speed presets và
-teleport; source không chứa mock-location hiding hoặc anti-detection logic.
+Location là ngoại lệ ownership rõ ràng: Kotlin validate tọa độ, tính bước,
+arrival/cancel và cleanup provider. Native chọn fort/map target dựa trên game
+state; Kotlin chỉ nhận navigation/map-target có capability, session và lease
+hợp lệ. Local arrival không cấp quyền catch/spin.
 
 ## 7. Zygisk/runtime bridge
 
 Zygisk nhận diện process mục tiêu, companion ghi lifecycle/status và broker giữ
-channel hai chiều. Controller dùng `RuntimeBridgeClient` để nhận:
+channel hai chiều. Controller dùng `RuntimeUiClient`/`RuntimeBridgeClient` để
+nhận `RuntimeReady`, `RuntimeUiStatus`, automation event, map/navigation,
+diagnostic, result, `BindingLost` và `RuntimeError`.
 
-- `RuntimeReady`
-- `ObservationEvent`
-- `AutomationCommandResult`
-- `BindingLost`
-- `RuntimeError`
+Mutation yêu cầu runtime readiness, exact build/identity, capability và guard
+tương ứng ở native. Protocol version hiện tại là 3; session, sequence,
+freshness, expiry, peer UID và message-size limits vẫn được kiểm tra ở boundary.
+`RuntimeMainThreadBridge.java` chạy trong process game và chỉ là helper schedule
+Unity main thread, không phải IPC trực tiếp giữa APK và PoGo.
 
-Probe hiện chủ yếu read-only. Mutation yêu cầu đồng thời runtime readiness,
-`strongIdentityVerified`, fingerprint exact trong allowlist và capability tương
-ứng. `RuntimeStatusRepository` vẫn dùng `RootShell` để đọc diagnostics/build
-identity; `RuntimeBridgeClient` cũng dùng `RootShell` để đăng ký controller UID.
+## 8. Adapter và core boundary
 
-## 8. Structured game-state architecture
-
-```mermaid
-flowchart LR
-    Runtime["Build-specific runtime"] --> Proto["PogoProtoDecoder"]
-    Proto --> Raw["Raw nearby / encounter / fort / inventory / storage"]
-    Raw --> Mapper["Pogo mappers"]
-    Mapper --> Adapter["PogoGameAdapter"]
-    Adapter --> Snapshot["AutomationSnapshot"]
-    Snapshot --> Core["AutomationCoordinator"]
-    Core --> Runner["AutomationRunner"]
-    Runner --> Bridge["Bridge-backed action executor"]
-    Bridge --> Runtime
+```text
+native game state/bindings
+  -> native status/event/navigation codecs
+  -> bridge/protocol
+  -> RuntimeUiEventRouter
+  -> UI state / location controller
 ```
 
-Core định nghĩa lifecycle, nearby/encounter/fort/inventory/storage snapshots và
-actions `MoveTo`, `OpenEncounter`, `Catch`, `Spin`, `UseBerry`, discard,
-transfer và alert. `autoEncounter` tạo `OpenEncounter` từ nearby structured state;
-`autoCatch` tạo `Catch` trong encounter; berry là action riêng trước catch.
-Khi `autoCloseCatchPreview` bật, `Catch` chỉ mang close-preview intent; runtime
-phải xác nhận `CAUGHT` và có capability `CATCH_AND_CLOSE_PREVIEW` trước khi
-đóng preview. Probe hiện tại không có capability này nên không có fallback UI.
+`game-adapter/api`, `game-adapter/pogo` và `game-adapter/fake` vẫn là subsystem
+độc lập cho adapter consumers/tests. APK UI-only không import POGO protobuf,
+raw observation decoder hoặc `GameCapability`. Core giữ action contract, geo
+math và các model/utility còn consumer; các planner/runner gameplay cũ đã được
+loại khỏi đường runtime live.
 
 ## 9. Module map
 
 | Khu vực | File chính |
 |---|---|
-| Android entry/service | `app/src/main/java/dev/pogoroot/automation/MainActivity.kt`, `headless/HeadlessAutomationService.kt` |
-| Structured loop | `app/src/main/java/dev/pogoroot/automation/headless/HeadlessAutomationEngine.kt` |
-| Config/API | `headless/AutomationConfig.kt`, `headless/AutomationControlServer.kt` |
+| Android entry/service | `app/src/main/java/dev/pogoroot/automation/MainActivity.kt`, `service/HeadlessAutomationService.kt` |
+| UI runtime facade | `service/RuntimeUiAutomationFacade.kt`, `runtime/RuntimeUiStateStore.kt` |
+| Status/event bridge | `root/RuntimeUiClient.kt`, `runtime/observation/RuntimeUiEventRouter.kt` |
+| Config/API | `config/AutomationConfig.kt`, `config/RuntimeDesiredStateMapper.kt`, `service/AutomationControlServer.kt` |
 | Joystick/location | `location/*`, `overlay/*` |
-| Root bridge/status | `root/RootShell.kt`, `root/RuntimeBridgeClient.kt`, `root/RuntimeStatusRepository.kt` |
-| Zygisk native | `zygisk/jni/main.cpp` |
-| Core model/planner | `core/src/main/kotlin/dev/pogoroot/automation/core/*` |
-| Adapter contracts | `game-adapter/api/...` |
-| POGO decoder/mappers | `game-adapter/pogo/...` |
+| Native bridge | `zygisk/jni/main.cpp`, `zygisk/jni/shared/bridge_kotlin/*` |
 | Bridge contracts | `bridge/protocol/...` |
+| Adapter contracts/impl | `game-adapter/*` (không nằm trong APK dependency graph) |
 | Host/device scripts | `scripts/*.sh` |
 
-## 10. Verification
+## 10. Verification and limits
 
-- JVM tests cover core planners, bridge sequencing, adapter mapping and action
-  safety.
-- Android compile verifies the structured-only app boundary.
-- Native tests verify the runtime command protocol.
-- Native readiness/navigation/telemetry tests verify the runtime-owned execution
-  boundary. The retired split-mode source guard has been removed.
-- Device smoke should verify runtime attach/readiness and safe rejection while
-  observations/capabilities are unavailable.
-
-## 11. Known gaps
-
-1. Implement validated live observation hooks in the runtime.
-2. Pin production adapter selection to verified build identity.
-3. Implement version-scoped client-owned invokers and outcome hooks.
-4. Run structured read-only device smoke before enabling mutation allowlists.
-
-The exact current device evidence and the action-by-action readiness gate are
-tracked in [`LIVE_AUTOMATION_READINESS.md`](LIVE_AUTOMATION_READINESS.md).
+- Full Gradle `test assembleDebug`, focused Kotlin tests và sáu native host
+  checks đã đạt; test source không thay đổi.
+- Multi-ABI Magisk package đã build/package cho `arm64-v8a` và `x86_64`.
+- Device T-022 chưa chạy vì máy hiện tại không có BlueStacks Air 1; bằng chứng
+  và expected/observed matrix nằm ở
+  [`kotlin-ui-only-boundary/verification.md`](issues/2026-09-22/kotlin-ui-only-boundary/verification.md).
+- Live binding/action coverage vẫn phụ thuộc exact build và capability guards;
+  không bật capability hoặc dùng screenshot/input fallback khi thiếu evidence.

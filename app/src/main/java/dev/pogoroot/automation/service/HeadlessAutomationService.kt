@@ -10,77 +10,42 @@ import android.content.Intent
 import android.os.IBinder
 import android.util.Log
 import dev.pogoroot.automation.MainActivity
-import dev.pogoroot.automation.root.RuntimeBridgeClient
-import dev.pogoroot.automation.root.RuntimeModuleLoadStatus
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.data.MapTargetRepository
-import dev.pogoroot.automation.engine.AutomationRunState
-import dev.pogoroot.automation.engine.CatchSpinArmState
-import dev.pogoroot.automation.engine.HeadlessAutomationEngine
-import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
-import dev.pogoroot.automation.events.AutomationEventType
 import dev.pogoroot.automation.events.ToastAutomationEventSink
-import dev.pogoroot.automation.runtime.RuntimeLifecycleCoordinator
-import dev.pogoroot.automation.runtime.observation.RuntimeObservationRouter
 import dev.pogoroot.automation.location.NativeNavigationReceiver
 import dev.pogoroot.automation.location.AutoFortNavigationBus
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
-    private lateinit var engine: HeadlessAutomationEngine
     private lateinit var apiServer: AutomationControlServer
     private lateinit var eventSink: AutomationEventSink
-    private var runtimeBridge: RuntimeBridgeClient? = null
-    private lateinit var runtimeCoordinator: RuntimeLifecycleCoordinator
-    private lateinit var observationRouter: RuntimeObservationRouter
+    private lateinit var runtimeFacade: RuntimeUiAutomationFacade
     private lateinit var navigationReceiver: NativeNavigationReceiver
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
     private var joystickAutoStartPoll: ScheduledFuture<*>? = null
-    private val pendingModuleLoadStatuses = mutableListOf<RuntimeModuleLoadStatus>()
 
     override fun onCreate() {
         super.onCreate()
         configRepository = AutomationConfigRepository(this)
-        val restoredConfig = configRepository.read()
-        AutomationRunState.setActive(restoredConfig.enabled)
-        CatchSpinArmState.setArmed(restoredConfig.catchSpinArmed)
         eventSink = ToastAutomationEventSink(this, configRepository)
         mapTargetRepository = MapTargetRepository(this)
-        runtimeBridge = RuntimeBridgeClient(
-            onModuleLoadStatus = ::publishRuntimeModuleLoadStatus,
-        )
-        runtimeCoordinator = RuntimeLifecycleCoordinator(
-            bridge = runtimeBridge!!,
-        )
-        runtimeCoordinator.setOnManagedConfigsAppliedListener(::flushPendingModuleLoadStatuses)
         navigationReceiver = NativeNavigationReceiver(eventSink, AutoFortNavigationBus::publish)
-        observationRouter = RuntimeObservationRouter(
-            bridge = runtimeBridge!!,
-            eventSink = eventSink,
-            onMapTarget = { target ->
-                if (configRepository.read().mapTapWalkEnabled) {
-                    mapTargetRepository.publish(target)
-                }
-            },
-            onNavigation = navigationReceiver::receive,
-            onNavigationReset = { navigationReceiver.reset() },
-        )
-        engine = HeadlessAutomationEngine(
+        runtimeFacade = RuntimeUiAutomationFacade(
             configRepository = configRepository,
-            runtimeCoordinator = runtimeCoordinator,
-            observationRouter = observationRouter,
             eventSink = eventSink,
+            mapTargetRepository = mapTargetRepository,
+            navigationReceiver = navigationReceiver,
         )
         apiServer = AutomationControlServer(
             configRepository = configRepository,
-            engine = engine,
-            runtimeDiagnostic = { runtimeCoordinator.runDiagnostic(configRepository.read()) },
+            runtimeFacade = runtimeFacade,
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
@@ -89,7 +54,7 @@ class HeadlessAutomationService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification())
         apiServer.start()
-        engine.start()
+        runtimeFacade.start()
         joystickAutoStartPoll = joystickAutoStartExecutor.scheduleWithFixedDelay(
             ::syncJoystickAutoStart,
             0L,
@@ -102,7 +67,7 @@ class HeadlessAutomationService : Service() {
         when (intent?.action) {
             ACTION_ENABLE -> {
                 Log.i(LOG_TAG, "automation master enable requested from overlay")
-                configRepository.update { current ->
+                runtimeFacade.enable { current ->
                     current.copy(
                         autoCatch = intent.booleanExtraOrNull(EXTRA_AUTO_CATCH) ?: current.autoCatch,
                         autoSpin = intent.booleanExtraOrNull(EXTRA_AUTO_SPIN) ?: current.autoSpin,
@@ -110,22 +75,20 @@ class HeadlessAutomationService : Service() {
                             ?: current.autoEncounter,
                     )
                 }
-                engine.activate()
             }
 
             ACTION_DISABLE -> {
                 Log.i(LOG_TAG, "automation master disable requested from overlay")
-                // The worker remains alive. Its next loop sends STOP_RUNTIME and
-                // leaves the injected process in ATTACHED_IDLE for fast restart.
-                engine.deactivate()
+                // The service remains alive; native reconciles disabled desired state.
+                runtimeFacade.disable()
             }
 
             ACTION_SYNC_RUNTIME_CONFIG -> {
-                engine.pushRuntimeConfigs()
+                runtimeFacade.submitCurrentDesiredStateAsync()
             }
 
             ACTION_STOP_SERVICE -> {
-                engine.deactivate()
+                runtimeFacade.disable()
                 stopSelf()
             }
         }
@@ -135,7 +98,6 @@ class HeadlessAutomationService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        AutomationRunState.setActive(false)
         joystickAutoStartPoll?.cancel(true)
         joystickAutoStartExecutor.shutdownNow()
         if (::joystickAutoStartCoordinator.isInitialized) {
@@ -145,57 +107,8 @@ class HeadlessAutomationService : Service() {
         if (::navigationReceiver.isInitialized) {
             navigationReceiver.reset()
         }
-        engine.shutdown()
+        runtimeFacade.shutdown()
         super.onDestroy()
-    }
-
-    private fun publishRuntimeModuleLoadStatus(status: RuntimeModuleLoadStatus) {
-        if (!runtimeCoordinator.configsAppliedToNative) {
-            synchronized(pendingModuleLoadStatuses) {
-                pendingModuleLoadStatuses.add(status)
-            }
-            val moduleName = status.module.name
-            if (status.loaded) {
-                Log.i(LOG_TAG, "$moduleName module registered; toast deferred until config sync")
-            } else {
-                val detail = status.errorCode ?: status.message ?: "unknown error"
-                Log.w(LOG_TAG, "$moduleName module registration failed (toast deferred): $detail")
-            }
-            return
-        }
-        emitModuleLoadStatus(status)
-    }
-
-    private fun flushPendingModuleLoadStatuses() {
-        val pending = synchronized(pendingModuleLoadStatuses) {
-            pendingModuleLoadStatuses.toList().also { pendingModuleLoadStatuses.clear() }
-        }
-        pending.forEach(::emitModuleLoadStatus)
-    }
-
-    private fun emitModuleLoadStatus(status: RuntimeModuleLoadStatus) {
-        val moduleName = status.module.name
-        if (status.loaded) {
-            Log.i(LOG_TAG, "$moduleName module loaded")
-            eventSink.publish(
-                AutomationEvent(
-                    type = AutomationEventType.MODULE_LOADED,
-                    message = "$moduleName module loaded",
-                ),
-            )
-            return
-        }
-
-        val detail = status.errorCode
-            ?: status.message
-            ?: "unknown error"
-        Log.w(LOG_TAG, "$moduleName module load failed: $detail")
-        eventSink.publish(
-            AutomationEvent(
-                type = AutomationEventType.MODULE_LOAD_FAILED,
-                message = "$moduleName module load failed: $detail",
-            ),
-        )
     }
 
     private fun syncJoystickAutoStart() {
@@ -276,7 +189,6 @@ class HeadlessAutomationService : Service() {
             autoSpin: Boolean = true,
             autoEncounter: Boolean = false,
         ) {
-            AutomationRunState.setActive(true)
             context.startForegroundService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_ENABLE)
@@ -287,7 +199,6 @@ class HeadlessAutomationService : Service() {
         }
 
         fun disable(context: Context) {
-            AutomationRunState.setActive(false)
             context.startService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_DISABLE),

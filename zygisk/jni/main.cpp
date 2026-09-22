@@ -9,11 +9,15 @@
 #include "modules/catch_spin/fort_refresh_schedule.h"
 #include "shared/bridge_kotlin/runtime_discard_config_protocol.h"
 #include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
+#include "shared/bridge_kotlin/runtime_desired_state_protocol.h"
+#include "shared/bridge_kotlin/runtime_ui_status_protocol.h"
 #include "shared/core/runtime_native_prelude.inc"
+#include "shared/core/runtime_native_declarations.inc"
 #include "shared/runtime/inventory/runtime_inventory_common.inc"
 #include "shared/bridge_kotlin/runtime_feature_module_protocol.h"
 #include "shared/core/runtime_native_common.inc"
 #include "shared/bridge_kotlin/runtime_bridge_protocol.inc"
+#include "shared/bridge_kotlin/runtime_bridge_observation_protocol.inc"
 #include "shared/bridge_kotlin/runtime_catch_spin_bridge.inc"
 #include "shared/bridge_kotlin/runtime_automation_event_bridge.inc"
 #include "shared/bridge_kotlin/runtime_navigation_bridge.inc"
@@ -63,6 +67,10 @@
 #include "modules/catch_spin/fort_cooldown.inc"
 #include "modules/catch_spin/encounter_actions.inc"
 #include "shared/runtime/module/runtime_action_common.inc"
+// Serializes the three applied-config mirrors as one native revision. Feature
+// observers take this lock through their snapshot helpers, so reconcile never
+// publishes a partially applied desired snapshot.
+std::recursive_mutex g_runtime_applied_config_mutex;
 #include "modules/catch_spin/spin_item_bubbles.inc"
 #include "modules/catch_spin/spin_interaction_cleanup.inc"
 #include "modules/catch_spin/spin_promise_observer.inc"
@@ -106,7 +114,10 @@ bool activate_runtime(ProbeContext &context, const char *request_id);
 bool stop_runtime(ProbeContext &context, const char *request_id);
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id);
 #include "shared/runtime/control/runtime_map_readiness.inc"
+#include "shared/runtime/control/runtime_desired_state.inc"
 #include "shared/runtime/module/runtime_feature_modules.inc"
+#include "shared/runtime/control/runtime_desired_state_reconcile.inc"
+#include "shared/bridge_kotlin/runtime_ui_status_bridge.inc"
 #include "shared/runtime/control/runtime_control.inc"
 }  // namespace
 

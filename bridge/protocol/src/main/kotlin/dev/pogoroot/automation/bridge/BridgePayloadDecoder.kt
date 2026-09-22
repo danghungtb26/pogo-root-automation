@@ -11,7 +11,13 @@ import java.io.DataInputStream
 internal object BridgePayloadDecoder {
     private val codec = BridgePayloadCodecSupport
 
-    fun decode(type: BridgeMessageType, payload: ByteArray): Result<BridgeEvent> = runCatching {
+    fun decode(type: BridgeMessageType, payload: ByteArray): Result<BridgeEvent> {
+        if (type == BridgeMessageType.RUNTIME_STATUS) {
+            return RuntimeUiStatusPayloadCodec.decode(payload).map {
+                BridgeEvent.RuntimeUiStatus(status = it)
+            }
+        }
+        return runCatching {
         require(payload.size <= BridgeProtocol.HARD_MESSAGE_BYTES) {
             "payload exceeds hard limit"
         }
@@ -32,6 +38,7 @@ internal object BridgePayloadDecoder {
             }
             require(input.available() == 0) { "trailing bytes in bridge payload" }
             event
+        }
         }
     }
 

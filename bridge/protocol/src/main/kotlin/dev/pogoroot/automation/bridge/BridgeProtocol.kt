@@ -14,7 +14,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object BridgeProtocol {
-    const val VERSION = 2
+    const val VERSION = 3
     const val OBSERVATION_PAYLOAD_VERSION = 1
     const val RUNTIME_ENCOUNTER_PAYLOAD_VERSION = 2
     const val RUNTIME_NEARBY_PAYLOAD_VERSION = 2
@@ -100,6 +100,14 @@ sealed interface BridgeEvent {
         override val runtimeSessionId: String? = null,
         override val messageSeq: Long? = null,
     ) : BridgeEvent
+
+    data class RuntimeUiStatus(
+        override val protocolVersion: Int = BridgeProtocol.VERSION,
+        val status: dev.pogoroot.automation.bridge.RuntimeUiStatus,
+    ) : BridgeEvent {
+        override val runtimeSessionId: String
+            get() = status.runtimeSessionId
+    }
 
     data class RuntimeReady(
         override val protocolVersion: Int = BridgeProtocol.VERSION,
@@ -375,6 +383,7 @@ interface RuntimeBridge {
 
 fun BridgeEvent.messageType(): BridgeMessageType = when (this) {
     is BridgeEvent.RuntimeStatus -> BridgeMessageType.RUNTIME_STATUS
+    is BridgeEvent.RuntimeUiStatus -> BridgeMessageType.RUNTIME_STATUS
     is BridgeEvent.RuntimeReady -> BridgeMessageType.RUNTIME_READY
     is BridgeEvent.ObservationEvent -> BridgeMessageType.OBSERVATION
     is BridgeEvent.AutomationCommand -> BridgeMessageType.COMMAND

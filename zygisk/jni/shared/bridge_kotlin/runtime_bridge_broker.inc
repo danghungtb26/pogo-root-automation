@@ -1,6 +1,19 @@
 bool handle_controller(int fd, BrokerContext &context) {
     if (!authorized_controller(fd)) return true;
     if (!send_runtime_ready(fd, context)) return true;
+    if (!context.latest_runtime_ui_status.empty()) {
+        std::vector<uint8_t> status_payload;
+        if (!rewrite_runtime_ui_status_session(
+                context.latest_runtime_ui_status,
+                context.runtime_session_id,
+                &status_payload
+            ) || !send_bridge_frame(
+                fd,
+                10U,
+                context.next_message_seq++,
+                status_payload
+            )) return true;
+    }
 
     while (kill(context.pid, 0) == 0) {
         if (!broker_is_current(context.runtime_session_id)) return false;
@@ -15,15 +28,17 @@ bool handle_controller(int fd, BrokerContext &context) {
         if ((descriptors[1].revents & POLLIN) != 0) {
             CompanionMessageType message_type{};
             RuntimeEvent runtime_event{};
-            std::vector<uint8_t> runtime_result;
-            std::vector<uint8_t> runtime_capabilities;
-            std::vector<uint8_t> runtime_observation;
+                std::vector<uint8_t> runtime_result;
+                std::vector<uint8_t> runtime_capabilities;
+                std::vector<uint8_t> runtime_ui_status;
+                std::vector<uint8_t> runtime_observation;
             if (!read_companion_message(
                     context.runtime_fd,
                     &message_type,
                     &runtime_event,
                     &runtime_result,
                     &runtime_capabilities,
+                    &runtime_ui_status,
                     &runtime_observation
                 )) {
                 return false;
@@ -82,7 +97,22 @@ bool handle_controller(int fd, BrokerContext &context) {
                         fingerprint.c_str(),
                         capabilities,
                         strong_identity
+                )) return false;
+            }
+            if (message_type == CompanionMessageType::kRuntimeUiStatus) {
+                if (runtime_ui_status.empty() ||
+                    runtime_ui_status.size() > kBridgeHardMessageBytes) return false;
+                // One bounded snapshot is retained. Reconnect replays this
+                // latest status only; command/result traffic is never queued.
+                context.latest_runtime_ui_status = runtime_ui_status;
+                std::vector<uint8_t> status_payload;
+                if (!rewrite_runtime_ui_status_session(
+                        runtime_ui_status,
+                        context.runtime_session_id,
+                        &status_payload
                     )) return false;
+                const uint64_t message_seq = context.next_message_seq++;
+                if (!send_bridge_frame(fd, 10U, message_seq, status_payload)) return false;
             }
             if (message_type == CompanionMessageType::kRuntimeObservation) {
                 uint32_t observation_type = 0U;
