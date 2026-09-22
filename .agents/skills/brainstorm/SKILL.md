@@ -1,179 +1,163 @@
 ---
 name: brainstorm
-description: "Structured deep-thinking and problem analysis before proposing solutions. Use when: (1) user wants to think through a bug before fixing, (2) planning a new feature and needs to analyze requirements/edge cases/risks/alternatives, (3) considering a refactor and needs to evaluate scope/risk/approach, (4) designing architecture and needs to compare options, (5) diagnosing a performance problem, (6) assessing security concerns, (7) analyzing a UX problem. Trigger on: 'brainstorm', 'think through', 'analyze', 'phân tích', 'suy nghĩ', 'plan', 'deep dive', 'before we implement', 'what could go wrong', 'help me think about', 'let's think through'. Always trigger this skill when the user wants structured thinking before jumping to a solution — even if they don't use the word 'brainstorm'."
+description: "Phân tích tính năng, lỗi và hướng xử lý trong pogo-root-automation trước khi triển khai, đặc biệt các tính năng Pokémon GO cần tra reverse để xác định function/method, tham số và hành vi. Dùng khi người dùng yêu cầu brainstorm, phân tích, suy nghĩ hoặc đánh giá phương án; ghi kết quả từng bước trước khi phân tích bước tiếp theo."
 ---
 
 # Brainstorm
 
-## Purpose
+Phân tích yêu cầu thành hành vi cụ thể, bằng chứng trong source và hướng xử lý có thể kiểm chứng. Với Pokémon GO, lấy thông tin game từ `reverse/`, giữ rõ ranh giới giữa binding theo phiên bản và logic automation ổn định.
 
-Guide deep, structured thinking before proposing a solution. The goal is to surface the right questions — not just the obvious ones — to uncover hidden assumptions, risks, and alternatives that would be missed by jumping straight to implementation.
+## Ngôn ngữ và phạm vi
 
-Thinking deeply upfront is cheap. Discovering a wrong assumption mid-implementation is expensive.
+- Viết nội dung, tiêu đề, cập nhật tiến độ và tài liệu bằng tiếng Việt, trừ khi người dùng yêu cầu ngôn ngữ khác.
+- Giữ nguyên code, đường dẫn, identifier, signature, tên tham số và lệnh.
+- Yêu cầu phân tích chỉ bao gồm đọc, phân tích và ghi tài liệu. Nếu người dùng đã yêu cầu cả triển khai, hoàn thành phần phân tích rồi tiếp tục trong phạm vi đã được giao.
 
----
+## Quy tắc bắt buộc: ghi từng bước rồi mới phân tích tiếp
 
-## Output Language (MANDATORY)
+Thực hiện tuần tự từng bước trong quy trình bên dưới:
 
-**Write every output in Vietnamese by default** — the terminal reply, the saved brainstorm document, all prose, answers, synthesis, and section headings. This is the default whenever the user has not explicitly asked for another language.
+1. Chỉ đọc và phân tích những gì cần cho bước hiện tại.
+2. Ghi ngay kết quả bước đó vào `brainstorm.md`: phát hiện, bằng chứng, kết luận ngắn và điểm chưa rõ.
+3. Gửi cập nhật ngắn cho người dùng về kết quả vừa ghi và mục đích bước tiếp theo.
+4. Sau khi lưu và thông báo xong mới bắt đầu đọc hoặc phân tích bước tiếp theo.
 
-- Switch language **only** when the user explicitly requests it (e.g. "viết bằng tiếng Anh", "answer in English", "日本語で").
-- **Keep verbatim** and do **not** translate: code, file paths, identifiers, CLI commands, spec IDs (`CR-003`, `R-08`, `VR-002`), and exact spec labels quoted from the source (e.g. Japanese POS labels like `内税品`, `合 計`). Precision beats translation.
+Không phân tích hết rồi mới xuất toàn bộ các bước một lần. Không gộp các bước phụ thuộc nhau vào cùng một lượt đọc công cụ. Trong cùng một bước có thể gom các lượt tìm kiếm độc lập. Nếu bước dài, lưu từng phần có kết quả hữu ích và báo tiến độ trước khi tiếp tục.
 
----
+Output là kết quả phân tích có dẫn chứng và lý do ngắn gọn, không phải bản ghi suy nghĩ nội bộ. Tự chuyển bước, không yêu cầu người dùng duyệt từng bước. Khi thiếu dữ liệu, ghi rõ giới hạn và tiếp tục phần độc lập; không biến giả định thành kết luận.
 
-## Workflow
+## Quy tắc đọc source Pokémon GO
 
-### Step 1 — Identify Problem Type
+- Khi cần đọc source để xác định class, function/method, param, field, RVA hoặc hành vi của Pokémon GO, **bắt buộc đọc trong `reverse/` trước**.
+- Theo `AGENTS.md`, bộ reverse hiện tại nằm ở `reverse/pogo-0.427.0/classes/`, ứng với Pokémon GO `0.427.0`, version code `2026082702`, `arm64-v8a`. Đối chiếu metadata thực tế; không mặc định kết quả đúng cho phiên bản hay ABI khác.
+- Tìm bằng `rg` trong các class extract đã tuyển chọn trước. Chỉ tra dump đầy đủ dạng nén trong cùng thư mục khi extract chưa đủ. Không giải nén toàn bộ thành file text vượt giới hạn 500 dòng của dự án.
+- Không lấy code trong `app/`, `core/`, `game-adapter/` hoặc `zygisk/` làm bằng chứng thay thế cho implementation của game. Chỉ đọc các phần đó khi cần đối chiếu điểm tích hợp, sau lượt tra reverse; ghi rõ đâu là game, đâu là framework.
+- Nếu reverse thiếu hoặc không khớp build, ghi chính xác dữ liệu thiếu và phần kết luận bị chặn. Khi cần tái tạo, dùng entry point `./scripts/reverse-pogo-apk.sh` theo `AGENTS.md`; không sửa APK đầu vào.
+- Không bắt đầu bằng dò tên trên live process. Sau lượt reverse, chỉ dùng runtime để xác minh instance, owner, lifetime, ABI/layout và postcondition khi cần. Khảo sát mặc định chỉ đọc và dùng script hiện có theo `AGENTS.md`.
+- Dump chỉ có signature, metadata hoặc method body rỗng **không chứng minh implementation hay call graph**. Phân biệt `Đã xác nhận`, `Suy luận` và `Chưa xác minh` cho từng nhận định; nêu bằng chứng cần bổ sung. Không suy ra chắc chắn hành vi chỉ từ tên method.
 
-Determine the type from context. If unclear, ask which problem type it is: bug / feature / refactor / architecture / performance / security / ux / design-api.
+## Quy trình
 
-| Type | When to use |
-|------|-------------|
-| **bug** | Unexpected behavior, crash, wrong output, regression |
-| **feature** | New screen, new component, new behavior, new logic |
-| **refactor** | Restructure code without changing external behavior |
-| **architecture** | System design, data flow, module boundaries, tech decisions |
-| **performance** | Slow UI, expensive queries, memory issues, startup time |
-| **security** | Vulnerability, data exposure, auth/authz issue |
-| **ux** | Confusing flow, accessibility gap, usability problem |
-| **design-api** | Design backend/middleware API(s) for a screen or feature — read `remote/NANDEMO000/001`, `docs/design/remote-db-mapping.md`, and app code to derive endpoints with input/output, Oracle query, and flow |
+### Bước 1 — Chốt yêu cầu và tạo tài liệu
 
-### Step 2 — Load Question Template
+- Ghi tính năng/lỗi cần phân tích, hành vi hiện tại và mong muốn, trigger, phạm vi và điều kiện hoàn tất ban đầu.
+- Xác định loại: `feature`, `bug`, `refactor`, `architecture`, `performance`, `security`, `ux` hoặc `design-api`.
+- Đọc template khớp loại trong bảng tham chiếu bên dưới. Dùng câu hỏi làm checklist cho từng bước tương ứng; chưa phân tích nội dung của bước sau. Câu không áp dụng ghi lý do ngắn.
+- Tìm issue cùng chủ đề trong `docs/issues/*/` và dùng lại thư mục đã có. Nếu chưa có, tạo `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`; ngày là ngày phân tích đầu tiên, slug ngắn và ổn định.
+- Ghi tiêu đề, loại, ngày, yêu cầu và kết quả bước 1 ngay. Các bước chưa làm chỉ ghi `Chưa phân tích`, không điền sẵn kết luận.
 
-Load `references/{type}.md`. This file contains the structured question template for the identified type.
+**Output bước 1:** phạm vi, yêu cầu đã biết, giả định và câu hỏi còn thiếu. Lưu file và thông báo trước bước 2.
 
-### Step 3 — Answer Every Question
+### Bước 2 — Thu thập bằng chứng từ reverse
 
-Work through each question in the template:
-- Answer based on available context (code, description, design)
-- If an answer is unknown, state *what information would resolve it* — don't skip
-- State assumptions explicitly where data is lacking
-- Flag risks and uncertainties as they appear
+- Xác định package/version/version code/ABI/build mà bằng chứng áp dụng; giá trị thiếu ghi `Chưa xác minh`.
+- Tra các class, interface, model, enum và method liên quan trong reverse theo quy tắc trên.
+- Ghi đường dẫn và số dòng cho từng bằng chứng. Với dump nén, ghi đường dẫn archive, symbol và số dòng của nội dung giải nén được trích đọc.
+- Lập danh sách symbol liên quan cùng vai trò sơ bộ, nguồn và giới hạn dữ liệu. Chưa thấy symbol thì ghi từ khóa/phạm vi đã tìm; không tự đặt tên game method cho đủ output.
 
-Do not skip questions silently. If a question is genuinely irrelevant for this specific case, write one sentence explaining why, then move on.
+**Output bước 2:** bảng nguồn reverse, symbol tìm được, phạm vi phiên bản và dữ liệu còn thiếu. Lưu và thông báo trước bước 3.
 
-### Step 3b — Extract Acceptance Criteria from spec (MANDATORY)
+### Bước 3 — Mô tả function/method và param
 
-**Always** produce an **Acceptance Criteria** section — every brainstorm output must contain it, no exceptions.
+Với mỗi function/method trực tiếp liên quan đến tính năng hoặc hướng xử lý, ghi đầy đủ:
 
-1. **Find the spec source** for the screen/feature/bug. Search in this order:
-   - `docs/newspec/**` (screen specs — calc rules `CR-xxx`, row rules `R-xx`, validation `VR-xxx`, edge cases `EC-xxx`, layout ASCII)
-   - `docs/specs/{id}-{name}/fe.md` (frontend spec)
-   - the ticket / requirement text the user provided
-2. **Extract the concrete, verifiable rules** that the fix/feature must satisfy — prefer a table with a stable **ID** (e.g. `CR-003`, `R-08`, `VR-002`), the rule name, the exact formula / expected value, and a short acceptance note. Quote the exact spec wording/labels (Japanese POS labels, formulas) — do not paraphrase away the precision.
-3. **Tie each reported bug / requirement to its acceptance ID** so the fix is provably "done when X".
-4. If **no spec exists**, say so explicitly and write the acceptance criteria you infer from the requirement (mark them `inferred — needs BA confirm`). Never leave the section empty.
+- Namespace/class/owner, tên chính xác, overload, static hay instance và signature nguyên văn từ source nếu có.
+- Tất cả param theo đúng thứ tự: tên, kiểu, modifier như `ref`/`out`, ý nghĩa, nguồn giá trị, đơn vị, giá trị mặc định và ràng buộc/nullability nếu xác định được. Không có param thì ghi rõ; chi tiết chưa biết ghi `Chưa xác minh`.
+- Kiểu trả về và ý nghĩa kết quả; phân biệt trả về trực tiếp với callback/task/event báo hoàn tất.
+- Hành vi: điều kiện trước khi gọi, dữ liệu đọc/ghi, thay đổi state, side effect, nhánh lỗi và điều kiện hoàn tất. Mỗi mô tả phải chỉ rõ điều nào đã xác nhận, suy luận hoặc chưa xác minh.
+- Caller/callee, dependency owner, thread và object lifetime nếu có bằng chứng; không bịa quan hệ gọi từ danh sách signature.
+- RVA/offset khi nguồn cung cấp và cần cho binding; luôn gắn với build/ABI. Không trộn param C# với receiver hoặc param ngầm của native ABI chưa được xác minh.
+- Nguồn `path:line` hỗ trợ signature và nguồn hỗ trợ hành vi; hai loại bằng chứng có thể khác nhau.
 
-This section is what makes "done" objective. It anchors the Synthesis and the verification step.
+Dùng mẫu ngắn cho từng symbol:
 
-### Step 4 — Synthesize
+```markdown
+### {Namespace.Class.Method} — {trạng thái bằng chứng}
+- Nguồn: {path:line}; build/ABI: {giá trị hoặc Chưa xác minh}
+- Signature: `{signature chính xác hoặc Chưa tìm thấy}`
+- Vai trò và hành vi: {giải thích có dẫn chứng}
 
-After answering all questions, write a synthesis:
-- **Key insight** — the most important finding from the analysis
-- **Recommended approach** — what to do and why (not how to code it)
-- **Risks to watch** — top 2–3 risks to keep in mind during implementation
-- **Open questions** — what still needs answering before you can commit to an approach
+| Param | Kiểu / modifier | Ý nghĩa / nguồn giá trị | Đơn vị / ràng buộc | Bằng chứng |
+|---|---|---|---|---|
+| ... | ... | ... | ... | ... |
 
-### Step 5 — Save to File (MANDATORY)
-
-**Always** write the brainstorm document to the issue folder before replying — no exceptions, even if the user did not ask.
-
-**Issue folder convention (SHARED with plan-writer & reviewer):**
-
-```
-docs/issues/{YYYY-MM-DD}/{issue-title}/
-├── brainstorm.md            ← this skill
-├── checklists/**.md         ← plan-writer
-└── reviews/{hh-mm-ss}.md    ← reviewer
-```
-
-- `{YYYY-MM-DD}` — the date the issue is **first** analyzed. Brainstorm is the step that **creates** this folder, so it stamps the date.
-- `{issue-title}` — a short kebab-case slug derived from the problem title (e.g. `customer-display-wrong-mmt`). Keep it **stable and meaningful**: plan-writer and reviewer reuse this exact slug so all three outputs land in one folder.
-- **Before creating**, check whether an issue folder for this `{issue-title}` already exists under `docs/issues/*/` (from a prior day/session). If it does, **reuse that folder** (do not create a second dated folder for the same issue).
-
-**Brainstorm file path:** `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`
-
-The document structure:
-
-```
-# Brainstorm: {problem title}
-
-**Type:** {type}
-**Date:** {YYYY-MM-DD}
-
----
-
-## Analysis
-
-### {Question 1}
-{Answer}
-
-### {Question 2}
-{Answer}
-
-...
-
----
-
-## Acceptance Criteria (from spec)
-
-> Source: {docs/newspec/... | docs/specs/{id}/fe.md | ticket} — or "no spec found → inferred".
-
-| ID | Rule / Requirement | Formula / Expected | Acceptance note |
-|----|--------------------|--------------------|-----------------|
-| {CR-003 / R-08 / VR-002 / AC-1} | {name} | {formula or expected value} | {ties to which bug/requirement; edge cases} |
-
-- {each reported bug / requirement → its acceptance ID, "done when …"}
-
----
-
-## Synthesis
-
-### Key Insight
-{...}
-
-### Recommended Approach
-{...}
-
-### Risks to Watch
-- ...
-
-### Open Questions
-- ...
+- Kết quả / tín hiệu hoàn tất: ...
+- Điều kiện gọi / state / side effect / lỗi: ...
+- Caller/callee / owner / thread / lifetime: ...
+- Điểm chưa xác minh và cách xác minh: ...
 ```
 
-### Step 6 — Reply with File Link
+**Output bước 3:** danh mục function/method và param kèm giải thích hành vi. Nếu không tìm thấy, vẫn giữ mục này và ghi thiếu gì, ảnh hưởng gì. Lưu và thông báo trước bước 4.
 
-After saving, reply to the user with:
-1. The file path as a clickable reference: `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`
-2. A concise summary of the **Key Insight** and **Recommended Approach** (3–5 sentences max)
-3. Notify the user that the brainstorm file has been saved/updated, pointing to `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`.
+### Bước 4 — Ghép luồng hành vi và điểm tích hợp
 
-**Do NOT** dump the full brainstorm content inline in the terminal reply. The file is the source of truth — the terminal reply is only a short summary + file pointer.
+- Mô tả theo thứ tự: trigger → kiểm tra điều kiện → function/method với nguồn param → thay đổi state → callback/response/event → postcondition quan sát được.
+- Dùng tên method chính xác từ bước 3. Đánh dấu cạnh gọi nào chưa được xác minh; không trình bày luồng suy luận như call graph đã biết.
+- Nêu các nhánh liên quan: thiếu dữ liệu, object hết lifetime, dữ liệu cũ, timeout, lỗi game/server, thao tác trùng hoặc cạnh tranh.
+- Khi cần, đọc source framework để đối chiếu luồng qua adapter/native binding, bridge, domain và app. Dẫn nguồn cho method framework được sử dụng; bổ sung signature/param/hành vi theo mẫu bước 3 và ghi rõ nguồn framework.
 
-### Step 6b — Update existing file (for follow-up questions)
+**Output bước 4:** luồng hành vi có bằng chứng, dependency và điểm tích hợp/rủi ro. Lưu và thông báo trước bước 5.
 
-When the user asks follow-up questions or provides new information during an active brainstorm session:
-1. Locate the existing brainstorm file for this topic — search `docs/issues/*/{issue-title}/brainstorm.md` and reuse it (do not create a new dated issue folder)
-2. Append the new findings as a new numbered section (e.g. `## Section 8 — ...`) at the end of the file
-3. Update any **Open Questions** that are now resolved (strike through with `~~question~~` + "→ Resolved in Section N")
-4. Save the file
-5. Reply with: file path + 2–3 sentence summary of what was added, then stop — do not reprint the whole document
+### Bước 5 — Đề xuất hướng xử lý
 
----
+- Đề xuất cách xử lý phù hợp với bằng chứng: tận dụng luồng có sẵn, bổ sung binding/contract, hoặc xác minh thêm trước khi triển khai. So sánh phương án khác khi có lựa chọn thực sự.
+- Với mỗi phần việc, chỉ rõ module, function/method liên quan, param lấy từ đâu, hành vi mong muốn và lý do chọn.
+- Tách rõ symbol hiện có với API mới đề xuất. API mới phải có signature dự kiến và được ghi `Đề xuất — chưa tồn tại`; không gắn nó với source/RVA của game.
+- Nêu guards còn cần và tiêu chí dừng: capability, runtime identity, freshness, lifetime và fail-closed. Để phần phụ thuộc build trong adapter/native binding, giữ domain ổn định.
+- Với map-tap walk, tuân thủ giới hạn `READ_MAP_TARGET` trong `AGENTS.md`; không đề xuất suy tọa độ từ screenshot hay fallback `input tap`/`input swipe`.
+- Không gọi thử method làm thay đổi trạng thái game chỉ để chứng minh giả thuyết khi chưa có binding/guards hợp lệ và phạm vi cho phép.
 
-## Question Templates — Quick Reference
+**Output bước 5:** hướng xử lý cụ thể, lý do, phần có thể làm ngay và phần cần xác minh. Lưu và thông báo trước bước 6.
 
-Full templates with guidance are in `references/{type}.md`.
+### Bước 6 — Tiêu chí chấp nhận và xác minh
 
-| Type | Core questions |
-|------|----------------|
-| **bug** | What happened vs expected? When/where? Root cause? What does the affected code depend on and what depends on it (dependency map)? Scope of impact? Fix risks? How to verify? |
-| **feature** | What problem does this solve? Who benefits? What are the core use cases? Edge cases? Alternatives considered? Technical constraints? Risks? |
-| **refactor** | Why now? What changes vs what stays? What depends on this code (dependency map)? Scope? Migration strategy? Risks? Expected improvement? |
-| **architecture** | Problem statement? Constraints? Quality attributes? Alternative approaches? Trade-offs of each? Integration points? Risks? |
-| **performance** | Where is the bottleneck (measured, not guessed)? What are the targets? Root cause? Solutions? Trade-offs? How to measure improvement? |
-| **security** | Threat model? What data is at risk? Attack surface? Existing defenses? Vulnerabilities? Mitigations? Compliance requirements? |
-| **ux** | Who are the users? What is the user goal? Current pain point? User flows affected? Accessibility? Edge cases for users? Consistency with design system? |
-| **design-api** | Which screens/features in scope? What data to read/write? Which Oracle tables (NANDEMO000/001) back it? Endpoint shape per need (/sync, /lookup, /transactions, /ops)? Full contract per endpoint (method, auth, params, request/response JSON, field→column mapping, errors, idempotency, cache)? Actual SQL with bind vars? Middleware pipeline for writes? App-side impact (models/api/repo/DAO/bloc)? Risks & open mappings? |
+- Luôn có mục `Tiêu chí chấp nhận`. Lấy yêu cầu người dùng, tài liệu tính năng liên quan trong `docs/` và ràng buộc dự án làm nguồn; không tìm spec của dự án khác.
+- Giữ ID yêu cầu có sẵn hoặc dùng `AC-01`, `AC-02`... Nếu phải suy ra, ghi `Đề xuất từ yêu cầu`; không tự tạo yêu cầu phê duyệt BA.
+- Mỗi tiêu chí nêu điều kiện đầu vào, hành vi mong muốn/postcondition, function/method liên quan và cách kiểm chứng.
+- Phân biệt kiểm tra logic/protocol bằng test với xác minh binding/lifecycle trên thiết bị. Đề xuất lệnh/script có sẵn theo `AGENTS.md`; không khẳng định đã chạy khi mới lập kế hoạch kiểm tra.
+- Chốt phát hiện chính, hướng xử lý được đề xuất, rủi ro và câu hỏi còn mở. Nếu thiếu reverse/runtime evidence, kết luận phải giữ giới hạn đó.
+
+**Output bước 6:** bảng tiêu chí, kế hoạch xác minh và kết luận. Lưu xong mới trả lời cuối.
+
+## Cấu trúc file kết quả
+
+```markdown
+# Brainstorm: {tên vấn đề}
+
+**Loại:** {type}
+**Ngày phân tích đầu tiên:** {YYYY-MM-DD}
+**Phạm vi game/build/ABI:** {giá trị hoặc Chưa xác minh}
+
+## Bước 1 — Yêu cầu và phạm vi
+## Bước 2 — Bằng chứng từ reverse
+## Bước 3 — Function/method, param và hành vi
+## Bước 4 — Luồng hành vi và điểm tích hợp
+## Bước 5 — Hướng xử lý
+## Bước 6 — Tiêu chí chấp nhận và xác minh
+
+| ID | Nguồn yêu cầu | Điều kiện đầu vào | Hành vi / postcondition | Method liên quan | Cách kiểm chứng |
+|---|---|---|---|---|---|
+
+### Kết luận và câu hỏi còn mở
+```
+
+Mỗi bước phải có kết quả, dẫn nguồn và điểm chưa rõ; mẫu là khung để điền dần theo tiến độ. Trả lời cuối bằng link tới file và tóm tắt ngắn phát hiện chính, hướng xử lý, giới hạn quan trọng. Không chép lại toàn bộ tài liệu.
+
+## Phân tích tiếp cùng chủ đề
+
+Dùng lại `brainstorm.md` hiện có, giữ nội dung người dùng đã viết. Thêm mục tiếp nối có số thứ tự và thực hiện lại các bước cần thiết, vẫn lưu/báo kết quả từng bước trước khi phân tích tiếp. Cập nhật câu hỏi đã giải quyết và đánh dấu kết luận cũ bị thay thế kèm nguồn mới; không để hai kết luận mâu thuẫn cùng mang trạng thái đã xác nhận.
+
+## Template bổ trợ
+
+Chỉ đọc template khớp loại yêu cầu; quy trình, nguồn reverse và quy tắc output ở trên áp dụng cho tất cả template. Template là bộ câu hỏi kiểm tra, không thay thế trình tự ghi từng bước.
+
+| Loại | Template |
+|---|---|
+| Tính năng Pokémon GO | [feature](references/feature.md) |
+| Lỗi | [bug](references/bug.md) |
+| Refactor | [refactor](references/refactor.md) |
+| Kiến trúc | [architecture](references/architecture.md) |
+| Hiệu năng | [performance](references/performance.md) |
+| Bảo mật | [security](references/security.md) |
+| Trải nghiệm người dùng | [ux](references/ux.md) |
+| Contract adapter/bridge | [design-api](references/design-api.md) |

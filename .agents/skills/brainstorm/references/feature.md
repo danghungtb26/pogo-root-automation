@@ -1,52 +1,42 @@
-# Feature Analysis — Question Template
+# Câu hỏi phân tích tính năng Pokémon GO
 
-Use these questions to think through a feature thoroughly before designing or implementing it. The goal is to uncover hidden complexity, conflicting requirements, and better alternatives before any code is written.
+Dùng cùng quy trình trong `../SKILL.md`. Trả lời ở bước tương ứng và lưu kết quả trước khi chuyển bước; không đợi trả lời hết bộ câu hỏi mới ghi tài liệu.
 
----
+## Bước 1 — Yêu cầu
 
-## Questions
+- Người dùng muốn hành vi gì? Trigger, dữ liệu đầu vào và kết quả quan sát được là gì?
+- Luồng hiện tại khác hành vi mong muốn ở đâu? Phần nào nằm trong phạm vi lần này?
 
-### 1. What problem does this feature solve?
-Describe the user pain or business need. If you can't articulate the problem clearly, the feature is not ready to be designed yet.
+## Bước 2 — Bằng chứng game
 
-### 2. Who benefits from this feature?
-- Which users or roles does this affect?
-- Is this for all users or a specific segment?
-- What does the user currently do without this feature?
+- Bộ reverse nào khớp phiên bản/build/ABI đang phân tích?
+- Class/interface/model/enum nào tham gia? Đã đọc extract nào trong `reverse/`?
+- Extract đã đủ chưa? Nếu chưa, phần nào trong dump nén cần tra thêm?
+- Bằng chứng là implementation, metadata/signature hay chỉ là suy luận?
 
-### 3. What are the core use cases?
-List the primary scenarios this feature must support. Distinguish "must have" from "nice to have."
+## Bước 3 — Function/method và param
 
-### 4. What are the edge cases?
-Think about:
-- Empty states (no data, first-time user)
-- Error states (network failure, validation errors, permission denied)
-- Boundary inputs (very long text, zero/negative/large numbers, special characters)
-- Concurrent actions (user acts twice quickly, data changes while user is on screen)
-- Offline behavior
+- Entry point và method trực tiếp liên quan có signature chính xác là gì?
+- Mỗi param có tên, kiểu, ý nghĩa, nguồn giá trị, đơn vị và ràng buộc nào? Phần nào chưa xác minh?
+- Method trả về gì, báo hoàn tất qua đâu và thay đổi state nào?
+- Điều kiện gọi, owner, lifetime, thread và nhánh lỗi được chứng minh bởi nguồn nào?
 
-### 5. What are the constraints?
-- **Technical:** Platform limitations, performance budget, existing architecture patterns
-- **Business:** Timeline, existing contracts, backward compatibility
-- **Design:** Consistency with design system, existing UX patterns
+## Bước 4 — Luồng hành vi
 
-### 6. What alternatives were considered?
-What other ways could this problem be solved? Why is the proposed approach better than the alternatives?
+- Trigger đi qua những method nào, truyền param gì và kết thúc tại postcondition nào?
+- Quan hệ caller/callee nào đã xác nhận, quan hệ nào mới là giả thuyết?
+- Mất kết nối, stale data, object bị hủy, đổi scene, timeout hoặc thao tác trùng ảnh hưởng ra sao?
+- Dữ liệu/command đi qua adapter, native binding, bridge, domain và app như thế nào? Chỉ đọc source framework sau lượt reverse khi cần trả lời phần tích hợp.
 
-### 7. How does this interact with existing features?
-- Does it share data with another feature?
-- Does it affect navigation or app state?
-- Could it break or change the behavior of anything that already exists?
+## Bước 5 — Hướng xử lý
 
-### 8. What are the dependencies?
-- Does this require a new API endpoint or changes to an existing one?
-- Does it depend on another feature being built first?
-- Are there third-party dependencies?
+- Có thể tận dụng method/luồng hiện có không? Binding hay contract nào còn thiếu?
+- Method nào dùng lại, API nào là đề xuất mới, param lấy từ đâu, hành vi dự kiến là gì?
+- Vì sao chọn phương án này? Có phương án khác đáng cân nhắc không?
+- Guards nào phải đạt trước khi bật capability? Điều kiện nào buộc fail-closed?
 
-### 9. What are the risks?
-- What could go wrong during implementation?
-- What assumptions are you making that might be wrong?
-- What happens if the feature is used in an unexpected way?
+## Bước 6 — Kiểm chứng
 
-### 10. What are the acceptance criteria?
-List the specific, verifiable conditions that must be true for this feature to be considered done. Think "given / when / then."
+- Tiêu chí Given/When/Then nào chứng minh yêu cầu đã đạt?
+- Điều gì kiểm tra được bằng test domain/protocol/adapter, điều gì cần runtime evidence?
+- Cần xác minh thêm gì để chuyển từ đề xuất sang triển khai? Không ghi kiểm tra chưa chạy là đã thành công.
