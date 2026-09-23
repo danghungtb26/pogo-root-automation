@@ -13,12 +13,18 @@ Phân tích yêu cầu thành hành vi cụ thể, bằng chứng trong source v
 - Giữ nguyên code, đường dẫn, identifier, signature, tên tham số và lệnh.
 - Yêu cầu phân tích chỉ bao gồm đọc, phân tích và ghi tài liệu. Nếu người dùng đã yêu cầu cả triển khai, hoàn thành phần phân tích rồi tiếp tục trong phạm vi đã được giao.
 
+## Quy tắc bắt buộc: mỗi lượt phân tích mới tạo file mới
+
+- Luôn tạo file mới cho mỗi yêu cầu phân tích mới, kể cả phân tích tiếp hoặc phân tích lại cùng chủ đề. Chỉ sửa hoặc bổ sung vào file cũ khi người dùng yêu cầu rõ ràng làm việc đó.
+- File phân tích cũ chỉ là tài liệu tham khảo: có thể đọc và dẫn link trong file mới, không tự ghi đè, nối thêm hay cập nhật kết luận trong file cũ.
+- Các bước của cùng một lượt phân tích ghi dần vào file đã chọn ở bước 1; không tạo file riêng cho từng bước.
+
 ## Quy tắc bắt buộc: ghi từng bước rồi mới phân tích tiếp
 
 Thực hiện tuần tự từng bước trong quy trình bên dưới:
 
 1. Chỉ đọc và phân tích những gì cần cho bước hiện tại.
-2. Ghi ngay kết quả bước đó vào `brainstorm.md`: phát hiện, bằng chứng, kết luận ngắn và điểm chưa rõ.
+2. Ghi ngay kết quả bước đó vào file phân tích đã chọn ở bước 1: phát hiện, bằng chứng, kết luận ngắn và điểm chưa rõ.
 3. Gửi cập nhật ngắn cho người dùng về kết quả vừa ghi và mục đích bước tiếp theo.
 4. Sau khi lưu và thông báo xong mới bắt đầu đọc hoặc phân tích bước tiếp theo.
 
@@ -43,7 +49,8 @@ Output là kết quả phân tích có dẫn chứng và lý do ngắn gọn, kh
 - Ghi tính năng/lỗi cần phân tích, hành vi hiện tại và mong muốn, trigger, phạm vi và điều kiện hoàn tất ban đầu.
 - Xác định loại: `feature`, `bug`, `refactor`, `architecture`, `performance`, `security`, `ux` hoặc `design-api`.
 - Đọc template khớp loại trong bảng tham chiếu bên dưới. Dùng câu hỏi làm checklist cho từng bước tương ứng; chưa phân tích nội dung của bước sau. Câu không áp dụng ghi lý do ngắn.
-- Tìm issue cùng chủ đề trong `docs/issues/*/` và dùng lại thư mục đã có. Nếu chưa có, tạo `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`; ngày là ngày phân tích đầu tiên, slug ngắn và ổn định.
+- Tìm issue cùng chủ đề trong `docs/issues/*/` để tham khảo. Mặc định tạo file mới tại `docs/issues/{YYYY-MM-DD}/{issue-title}/brainstorm.md`; ngày là ngày bắt đầu lượt phân tích mới, slug ngắn và ổn định. Nếu file đã tồn tại, chọn tên chưa tồn tại theo thứ tự `brainstorm-02.md`, `brainstorm-03.md`... trong cùng thư mục, không ghi đè file có sẵn.
+- Nếu người dùng yêu cầu rõ ràng sửa hoặc bổ sung vào file cũ, dùng đúng file được yêu cầu theo mục “Phân tích tiếp cùng chủ đề” bên dưới.
 - Ghi tiêu đề, loại, ngày, yêu cầu và kết quả bước 1 ngay. Các bước chưa làm chỉ ghi `Chưa phân tích`, không điền sẵn kết luận.
 
 **Output bước 1:** phạm vi, yêu cầu đã biết, giả định và câu hỏi còn thiếu. Lưu file và thông báo trước bước 2.
@@ -145,7 +152,9 @@ Mỗi bước phải có kết quả, dẫn nguồn và điểm chưa rõ; mẫu
 
 ## Phân tích tiếp cùng chủ đề
 
-Dùng lại `brainstorm.md` hiện có, giữ nội dung người dùng đã viết. Thêm mục tiếp nối có số thứ tự và thực hiện lại các bước cần thiết, vẫn lưu/báo kết quả từng bước trước khi phân tích tiếp. Cập nhật câu hỏi đã giải quyết và đánh dấu kết luận cũ bị thay thế kèm nguồn mới; không để hai kết luận mâu thuẫn cùng mang trạng thái đã xác nhận.
+Mặc định vẫn tạo file mới theo bước 1 và dẫn link tới phân tích trước nếu có liên quan. Yêu cầu “phân tích tiếp” hoặc nhắc tới file cũ không tự cho phép sửa file đó. Ghi câu hỏi đã giải quyết và kết luận thay thế trong file mới, kèm nguồn mới và tham chiếu tới kết luận cũ.
+
+Chỉ khi người dùng yêu cầu rõ ràng sửa hoặc bổ sung vào file cũ mới dùng lại file đó. Giữ nội dung người dùng đã viết ngoài phạm vi chỉnh sửa; thêm mục tiếp nối có số thứ tự hoặc sửa phần được yêu cầu, vẫn lưu/báo kết quả từng bước. Trong phạm vi được yêu cầu, cập nhật câu hỏi đã giải quyết và đánh dấu kết luận cũ bị thay thế kèm nguồn mới; không để hai kết luận mâu thuẫn cùng mang trạng thái đã xác nhận.
 
 ## Template bổ trợ
 

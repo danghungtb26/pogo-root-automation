@@ -41,4 +41,4 @@ Với mỗi API mới hoặc thay đổi, ghi:
 - Fake adapter/protocol test có thể xác minh gì? Binding/lifecycle cần bằng chứng runtime nào?
 - Những phần chưa có nguồn game phải được xác minh thế nào trước khi triển khai?
 
-Ghi kết quả trong file issue chung theo `SKILL.md`; không tạo tài liệu ở đường dẫn khác chỉ vì đang phân tích API.
+Ghi kết quả trong file phân tích đã chọn ở bước 1 theo `SKILL.md`, mặc định là file mới; không tách thêm tài liệu chỉ vì đang phân tích API.
