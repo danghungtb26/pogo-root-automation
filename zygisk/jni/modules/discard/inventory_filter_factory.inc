@@ -2,6 +2,7 @@
 // Its compiler-generated delegate cache is lazy: class initialization alone
 // never populates <>9__14_1. Bind the method without opening inventory UI.
 Il2CppGcHandle g_discard_owned_filter_handle = 0U;
+uint64_t g_discard_owned_filter_owner_generation = 0U;
 bool is_probable_managed_pointer(const void *value);
 
 void *create_discard_inventory_filter(

@@ -7,6 +7,9 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
         pending = g_runtime_discard;
     }
+    if (pending.awaiting_reconcile) {
+        return poll_runtime_discard_reconcile(context);
+    }
     if (!pending.active) return RuntimeDiscardPromisePollResult::kNoPending;
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
     if (pending.started_at_ns != 0U && now >= pending.started_at_ns &&
@@ -84,10 +87,10 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
     if (error_called) {
         finish_runtime_discard(
             context,
-            kCommandPhaseCompleted,
-            "discard_failed",
+            kCommandPhaseIndeterminate,
+            "discard_transport_unknown",
             "RecycleItem Promise completed with an error",
-            false
+            true
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
@@ -133,15 +136,30 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
             "RecycleItem completed with SUCCESS",
             false
         );
-    } else {
+    } else if (result == 2) {
         finish_runtime_discard(
             context,
             kCommandPhaseCompleted,
-            "discard_rejected",
-            "RecycleItem completed without SUCCESS",
+            "discard_not_enough_copies",
+            "RecycleItem rejected: not enough copies",
             false
+        );
+    } else if (result == 3) {
+        finish_runtime_discard(
+            context,
+            kCommandPhaseCompleted,
+            "discard_cannot_recycle_incubator",
+            "RecycleItem rejected: incubator cannot be recycled",
+            false
+        );
+    } else {
+        finish_runtime_discard(
+            context,
+            kCommandPhaseIndeterminate,
+            "discard_result_unknown",
+            "RecycleItem completed with an unknown result",
+            true
         );
     }
     return RuntimeDiscardPromisePollResult::kCompleted;
 }
-

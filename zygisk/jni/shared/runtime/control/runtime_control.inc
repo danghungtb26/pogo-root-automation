@@ -88,6 +88,8 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
     reset_runtime_discard_config();
+    clear_runtime_discard_suppressions();
+    reset_runtime_inventory_readiness();
     invalidate_runtime_desired_apply();
     __android_log_print(
         ANDROID_LOG_INFO,
@@ -114,6 +116,8 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     reset_runtime_catch_spin_config();
     reset_runtime_transfer_config();
     reset_runtime_discard_config();
+    clear_runtime_discard_suppressions();
+    reset_runtime_inventory_readiness();
     invalidate_runtime_desired_apply();
     (void)send_runtime_ui_status(context);
     return send_runtime_control_completed(

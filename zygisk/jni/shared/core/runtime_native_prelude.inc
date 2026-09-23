@@ -245,6 +245,13 @@ struct RuntimeBinding {
     const void *item_bag_get_item_count = nullptr;
     const void *item_bag_get_total_items = nullptr;
     bool inventory_read_verified = false;
+    // InventoryCache is the freshness boundary for discard. GetItemCount alone
+    // is a local read and cannot authorize a mutation after a reconnect.
+    void *inventory_cache = nullptr;
+    const void *inventory_cache_get_latest_timestamp = nullptr;
+    const void *inventory_cache_update_inventory = nullptr;
+    bool inventory_cache_read_verified = false;
+    uint64_t owner_generation = 0U;
     void *player_service = nullptr;
     const void *player_get_bag_is_full = nullptr;
     const void *player_get_max_items = nullptr;

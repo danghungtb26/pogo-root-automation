@@ -11,7 +11,9 @@ public:
         // the trigger and RecycleItem is the mutation.
         return binding.exact_build_verified &&
             binding.inventory_read_verified && kDiscardExecutionEnabled &&
-            binding.discard_verified;
+            binding.inventory_cache_read_verified &&
+            binding.discard_verified && binding.item_inventory_list_sorted != nullptr &&
+            binding.item_inventory_get_expiring_items != nullptr;
     }
 
     bool on_enable(ProbeContext &context) override {
@@ -27,12 +29,12 @@ public:
         // Own trigger: inventory is maintenance, poll at a low cadence (~30 s at
         // the observer's ~100 ms tick). Read on the observer's attached thread.
         constexpr uint64_t kInventoryEveryTicks = 300U;
-        if (runtime_discard_has_pending()) {
-            (void)request_main_thread_poll_runtime_discard(tick.context);
-        }
         if (!tick.binding.inventory_read_verified || tick.tick % kInventoryEveryTicks != 0U) return;
         pogo_runtime::RuntimeInventoryObservation inventory;
-        if (!read_runtime_inventory(tick.context.il2cpp_api, tick.binding, &inventory)) return;
+        // GetItemCount touches the live bag dictionary. The observer thread is
+        // only the scheduler; all game reads are marshalled to Unity's main
+        // thread and copied back before policy runs.
+        if (!request_main_thread_inventory(tick.context, &inventory)) return;
         send_runtime_inventory_payload(tick.context, inventory);
 
         const RuntimeDiscardConfig config = runtime_discard_config_snapshot();
@@ -44,7 +46,13 @@ public:
         for (const auto &stack : inventory.items) {
             int32_t max_count = 0;
             if (!runtime_discard_config_find_limit(config, stack.item_id, &max_count) ||
-                stack.count <= max_count) continue;
+                stack.count <= max_count ||
+                runtime_discard_item_suppressed(
+                    stack.item_id,
+                    config.revision,
+                    stack.count,
+                    tick.binding.owner_generation
+                )) continue;
             const int32_t amount = stack.count - max_count;
             __android_log_print(
                 ANDROID_LOG_INFO,

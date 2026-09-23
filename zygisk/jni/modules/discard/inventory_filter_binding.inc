@@ -191,10 +191,19 @@ void resolve_discard_inventory_filter_delegate(
     size_t assembly_count,
     RuntimeBinding *binding
 ) {
-    if (binding == nullptr || binding->item_inventory_filter_delegate != nullptr ||
-        assemblies == nullptr) {
+    if (binding == nullptr || assemblies == nullptr) {
         return;
     }
+    if (g_discard_owned_filter_owner_generation != 0U &&
+        g_discard_owned_filter_owner_generation != binding->owner_generation) {
+        if (g_discard_owned_filter_handle != 0U && api.gchandle_free != nullptr) {
+            api.gchandle_free(g_discard_owned_filter_handle);
+        }
+        g_discard_owned_filter_handle = 0U;
+        g_discard_owned_filter_owner_generation = 0U;
+        binding->item_inventory_filter_delegate = nullptr;
+    }
+    if (binding->item_inventory_filter_delegate != nullptr) return;
 
     Il2CppClass *gui_service_class = find_runtime_class(
         api,
@@ -235,6 +244,7 @@ void resolve_discard_inventory_filter_delegate(
             host_class,
             binding
         )) {
+        g_discard_owned_filter_owner_generation = binding->owner_generation;
         return;
     }
 

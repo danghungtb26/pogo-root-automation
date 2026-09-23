@@ -75,6 +75,23 @@ bool read_runtime_inventory(
         read_failed ? 1 : 0
     );
     if (read_failed || total > 2147483647LL) return false;
+    uint64_t observation_generation = 0U;
+    int64_t latest_timestamp = 0;
+    if (!update_runtime_inventory_readiness(
+            api,
+            binding,
+            &observation_generation,
+            &latest_timestamp
+        )) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime inventory baseline unavailable cache_generation=%llu timestamp=%lld",
+            static_cast<unsigned long long>(observation_generation),
+            static_cast<long long>(latest_timestamp)
+        );
+        return false;
+    }
     // The bag capacity is not read yet; report used==capacity==sum so the Kotlin
     // mapper's used<=capacity invariant holds. Discard uses per-item limits, not
     // capacity, so this does not affect the discard decision.

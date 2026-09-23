@@ -183,7 +183,9 @@ RuntimeFeatureModuleBase *resolve_module(Module module) {
 }
 
 bool ensure_observer_for_enabled_modules(ProbeContext &context) {
-    if (!g_runtime_module_registry.any_enabled()) return true;
+    if (!g_runtime_module_registry.any_enabled() && !runtime_discard_needs_maintenance()) {
+        return true;
+    }
     if (context.observation_running.load()) return true;
     if (!runtime_binding_snapshot(context).map_entity_read_verified) {
         // Give late-created map services one safe main-thread discovery pass
@@ -243,6 +245,9 @@ bool auto_transfer_module_enabled() {
 // Named-namespace entry point (declared in the prelude) so the shared observer
 // thread can dispatch a tick to every enabled module's observe() hook.
 void observe_enabled_modules(ObserverTickContext &tick) {
+    if (runtime_discard_needs_maintenance() && tick.context.main_thread_bridge.ready) {
+        (void)request_main_thread_poll_runtime_discard(tick.context);
+    }
     g_runtime_module_registry.observe_enabled(tick);
 }
 

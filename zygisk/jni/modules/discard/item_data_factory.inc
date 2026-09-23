@@ -56,55 +56,6 @@ void *create_recycle_item_data_on_main_thread(
     return nullptr;
 }
 
-void *create_expiring_item_hash_set_via_supplier(
-    const Il2CppApi &api,
-    const RuntimeBinding &binding,
-    void **exception
-) {
-    if (exception != nullptr) *exception = nullptr;
-    if (binding.hash_set_item_supplier == nullptr || api.runtime_invoke == nullptr) return nullptr;
-    const uint8_t include_all = 0U;
-    void *arguments[] = {const_cast<uint8_t *>(&include_all)};
-    void *expiring_items = api.runtime_invoke(
-        binding.hash_set_item_supplier,
-        nullptr,
-        arguments,
-        exception
-    );
-    if (exception != nullptr && *exception != nullptr) {
-        __android_log_print(
-            ANDROID_LOG_WARN,
-            kLogTag,
-            "native discard hash set supplier exception exception=%p",
-            *exception
-        );
-        return nullptr;
-    }
-    if (!is_probable_managed_pointer(expiring_items)) return nullptr;
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        kLogTag,
-        "native discard hash set supplier ok set=%p",
-        expiring_items
-    );
-    return expiring_items;
-}
-
-void *create_empty_expiring_item_hash_set(
-    const Il2CppApi &api,
-    const RuntimeBinding &binding,
-    void **exception
-) {
-    if (exception != nullptr) *exception = nullptr;
-    if (binding.hash_set_item_class == nullptr || binding.hash_set_item_ctor == nullptr ||
-        api.object_new == nullptr || api.runtime_invoke == nullptr) return nullptr;
-    void *empty_set = api.object_new(binding.hash_set_item_class);
-    if (!is_probable_managed_pointer(empty_set)) return nullptr;
-    (void)api.runtime_invoke(binding.hash_set_item_ctor, empty_set, nullptr, exception);
-    if (exception != nullptr && *exception != nullptr) return nullptr;
-    return empty_set;
-}
-
 void *resolve_recycle_expiring_items_copy(
     const Il2CppApi &api,
     const RuntimeBinding &binding,
@@ -126,11 +77,9 @@ void *resolve_recycle_expiring_items_copy(
         }
         if (exception != nullptr) *exception = nullptr;
     }
-    void *supplier_set = create_expiring_item_hash_set_via_supplier(api, binding, exception);
-    if (exception != nullptr && *exception != nullptr) {
-        if (exception != nullptr) *exception = nullptr;
-    } else if (is_probable_managed_pointer(supplier_set)) {
-        return supplier_set;
-    }
-    return create_empty_expiring_item_hash_set(api, binding, exception);
+    // The supplier and an empty HashSet have the right generic shape but are
+    // not proven to be the service generation used to create ItemData. Passing
+    // either one can make RecycleItem observe an unrelated expiration context.
+    // Keep the mutation unavailable until the genuine service copy is available.
+    return nullptr;
 }

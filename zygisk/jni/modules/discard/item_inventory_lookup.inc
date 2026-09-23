@@ -309,6 +309,8 @@ void *find_item_data_in_managed_list(
         );
         return nullptr;
     }
+    void *matched_item_data = nullptr;
+    int32_t matched_count = 0;
     for (int32_t index = 0; index < count; ++index) {
         if (exception != nullptr) *exception = nullptr;
         void *item_data = read_managed_list_element(api, list, index, exception);
@@ -319,16 +321,28 @@ void *find_item_data_in_managed_list(
         if (row_item_id != item_id) continue;
         int32_t row_count = 0;
         (void)read_runtime_field(api, item_data, "count", &row_count);
+        ++matched_count;
+        matched_item_data = item_data;
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
-            "native discard inventory row matched item_id=%d count=%d item_data=%p index=%d",
+            "native discard inventory row matched item_id=%d count=%d item_data=%p index=%d matches=%d",
             row_item_id,
             row_count,
             item_data,
-            index
+            index,
+            matched_count
         );
-        return item_data;
+    }
+    if (matched_count == 1) return matched_item_data;
+    if (matched_count > 1) {
+        __android_log_print(
+            ANDROID_LOG_WARN,
+            kLogTag,
+            "native discard inventory duplicate rows item_id=%d matches=%d; refusing ambiguous context",
+            item_id,
+            matched_count
+        );
     }
     __android_log_print(
         ANDROID_LOG_WARN,
@@ -351,14 +365,11 @@ void *invoke_inventory_list_sorted(
     if (!is_probable_managed_pointer(service) || api.runtime_invoke == nullptr ||
         !is_probable_managed_pointer(filter_delegate)) return nullptr;
     const void *resolved_list_sorted = list_sorted;
-    if (resolved_list_sorted == nullptr && api.object_get_class != nullptr &&
-        api.class_get_method_from_name != nullptr) {
+    if (resolved_list_sorted == nullptr && api.object_get_class != nullptr) {
         Il2CppClass *service_class = api.object_get_class(service);
-        resolved_list_sorted = service_class == nullptr
-            ? nullptr
-            : api.class_get_method_from_name(service_class, "ListSortedPlayerInventory", 5);
+        resolved_list_sorted = find_discard_list_sorted_method(api, service_class);
     }
-    if (resolved_list_sorted == nullptr) return nullptr;
+    if (!discard_list_sorted_signature(api, resolved_list_sorted)) return nullptr;
     uint8_t cannot_delete_items = 0U;
     void *arguments[] = {
         filter_delegate,

@@ -21,15 +21,20 @@ zero and switches the native decision to spinning to farm balls. The main-thread
 direct-catch path also retains its last-moment `kOutOfBalls` guard. Kotlin's
 `AutomationSnapshot.outOfBalls` remains only for the encounter throw flow.
 
-## Observe: poll, not event-driven, and owned by the discard module
+## Observe: main-thread reads, bounded polling, and native ownership
 
 Inventory observation is owned by the native discard module:
-`DiscardModule::observe(ObserverTickContext&)` reads
-inventory at its own low cadence (~30 s) on the shared observer's attached
-thread. The root observer thread only dispatches ticks to enabled modules'
-`observe()` hooks; it does not read inventory itself. `DiscardModule::available()`
-is gated on both inventory-read and `RecycleItem` bindings so the auto path
-cannot activate partially.
+`DiscardModule::observe(ObserverTickContext&)` requests a bounded
+`request_main_thread_inventory()` read at its own low cadence (~30 s). The
+observer thread is only a scheduler; it never reads the live bag dictionary,
+list or cache directly. Recycle Promise and refresh maintenance is dispatched
+through the shared observer even while the discard module is disabled, so a
+configuration toggle cannot abandon an in-flight game operation.
+
+`DiscardModule::available()` is gated on the exact build, inventory read,
+verified cache owner/timestamp/refresh methods, genuine inventory service
+context and `RecycleItem` contract. Static resolution alone does not enable
+mutation; `kDiscardExecutionEnabled` remains closed until device calibration.
 
 Inventory is **polled at a low cadence**, not driven by an item-added event.
 
@@ -46,10 +51,11 @@ Rationale:
   but subscribing to a C# event from native is more complex than a poll and is
   not worth it for discard.
 
-The observer thread reads inventory every `kInventoryTicks` (~30 s) from an
-attached il2cpp thread (`ItemBag` is a data service, not a Unity
-`MonoBehaviour`, so it does not need the Unity main-thread bridge that the map
-cell walk uses).
+The observer thread schedules inventory every `kInventoryTicks` (~30 s), while
+the actual `GetItemCount` calls and all mutation/Promise/cache operations run
+on Unity's main thread. A valid snapshot also requires the verified
+`InventoryCache.GetLatestTimestamp()` baseline; a failed read is unknown and
+does not publish an empty bag.
 
 ## Data flow
 
@@ -57,8 +63,9 @@ cell walk uses).
 Pokémon GO runtime
     |  IItemBag(ItemBagImpl).GetItemCount(Item) per curated item id
     v
-observer thread (runtime_observation.inc, ~30s cadence)
-    -> read_runtime_inventory (runtime_map_forts.inc)
+observer scheduler (~30s cadence)
+    -> Unity main-thread bridge
+    -> read_runtime_inventory + InventoryCache timestamp baseline
     -> send_runtime_inventory_payload  (INVENTORY observation, payload v1)
     v
 runtime bridge
@@ -72,6 +79,7 @@ PogoGameAdapter.readInventory -> PogoInventoryMapper -> InventorySnapshot
 native discard module
     -> compare against RuntimeDiscardConfig.maxCountByItemId
     -> main-thread IItemBag.RecycleItem + Promise polling
+    -> main-thread InventoryCache.UpdateInventory + full-response reconcile
 ```
 
 The catch-spin coordinator consumes its own native snapshot directly; the
@@ -83,7 +91,10 @@ through `DISCARD_CONFIG_SET`; it no longer plans automatic discard actions.
 
 - Binding: `IItemBag` is resolved as a Zenject service; `ItemBagImpl` yields
   `item_bag` and `item_bag_get_item_count` (`GetItemCount(Holoholo.Rpc.Item)`),
-  setting `inventory_read_verified` (`runtime_probe_discovery.inc`).
+  setting `inventory_read_verified` (`runtime_probe_service_owners.inc`). Its
+  `cwch` cache field is separately checked for zero-argument
+  `GetLatestTimestamp(): System.Int64` and
+  `UpdateInventory(): IPromise<GetHoloholoInventoryOutProto>`.
 - `read_runtime_inventory` calls `GetItemCount` for a **curated set** of common
   item ids (balls, potions, revives, berries) and emits `{itemId, count}` for
   the non-zero ones. `used_slots`/`capacity` are reported as the item sum (the
@@ -121,6 +132,15 @@ The executor is wired like native transfer:
   `IItemInventoryService.get_ExpiringItemsCopy()` when available.
 - `kDiscardExecutionEnabled` is a compile-time safety gate; the runtime binding
   diagnostic must still verify `RecycleItem` and its `ItemData` parameter class.
+- Automatic amount is recomputed from the current count and current configured
+  limit on the main-thread callback. Manual amount is preserved and must fit
+  the current stack. The intent carries config revision, action id and owner
+  generation; a stale callback is rejected before `RecycleItem`.
+- `Result=1` is server success for the mutation only. Native then retains the
+  barrier until `UpdateInventory()` completes with an exact
+  `GetHoloholoInventoryOutProto` and a valid copied inventory snapshot.
+  Response `NewCount`, prediction and telemetry are diagnostic only; native
+  does not write them into the cache or call game rollback methods.
 
 The **only** recycle entry point is `IItemBag.RecycleItem` — there is no
 lower-level `(itemId, count)` overload (the `RecycleInventoryItem` RPC, Method
@@ -128,14 +148,15 @@ lower-level `(itemId, count)` overload (the `RecycleInventoryItem` RPC, Method
 nested `ItemInventoryItemWidget.ItemData` and the third argument is an
 `ISet<Item>`.
 
-To finish (on device):
+To finish calibration (on device):
 
 1. Confirm the `RecycleItem` first parameter resolves to the nested `ItemData`
    class; the diagnostic log line reports `discard binding verified`.
-2. Verify the `ItemData` field offsets and whether `RecycleItem` reads more than
-   `item`/`count`/`recyclable` (e.g. `type`), and whether the `ISet<Item>` may be
-   null (construct an empty `HashSet<Item>` if not).
-3. Confirm the recycle post-condition and Promise result on device.
+2. Verify the `ItemData` field offsets and the genuine expiration/set context
+   while the bag UI is closed; missing or duplicate rows fail closed.
+3. Confirm the concrete recycle Promise result and the subsequent full-refresh
+   Promise/cache postcondition on device. A no-delta full response is valid only
+   when the response type and copied snapshot are both verified.
 
 Inventory read and the ball gate remain independent; native discard stays
 fail-closed whenever its mutation binding is not verified.
@@ -143,6 +164,8 @@ fail-closed whenever its mutation binding is not verified.
 ## Verification status
 
 - Kotlin (bridge/adapter/core) compiles.
-- Native is edits only, not cross-compiled here (needs the Zygisk API header).
-  The value-type `GetItemCount` invoke and the curated id coverage need on-device
-  verification.
+- Native multi-ABI build/package passes, but this is not runtime proof. The
+  value-type `GetItemCount` invoke, cache owner, curated id coverage, Promise
+  layout and cold-launch lifetime still need BlueStacks Air 1 evidence.
+- Production mutation is intentionally unavailable until the runtime/device
+  checklist closes; Kotlin remains the owner of persisted policy/UI only.

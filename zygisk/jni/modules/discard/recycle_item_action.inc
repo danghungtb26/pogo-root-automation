@@ -16,7 +16,6 @@ void *recycle_runtime_item_on_main_thread(
         binding.item_bag_recycle_item == nullptr || binding.item_data_class == nullptr ||
         api.runtime_invoke == nullptr ||
         item_id <= 0 || amount <= 0) return nullptr;
-
     const int32_t stack_count = read_runtime_item_count(api, binding, item_id);
     *failure = "Item count changed; waiting for fresh inventory";
     if (stack_count <= 0 || amount > stack_count) {
@@ -59,6 +58,15 @@ void *recycle_runtime_item_on_main_thread(
         );
         return nullptr;
     }
+#if defined(__ANDROID__)
+    // RecycleItem dereferences ItemData.itemExpirationData on the verified
+    // 0.427.0 path. Host preparation tests intentionally do not model managed
+    // field layout; the Android binding must prove the real row has this object.
+    void *expiration_data = nullptr;
+    *failure = "Item expiration context is unavailable";
+    if (!read_runtime_field(api, item_data, "itemExpirationData", &expiration_data) ||
+        !is_probable_managed_pointer(expiration_data)) return nullptr;
+#endif
     {
         std::lock_guard<std::mutex> lock(context.binding_mutex);
         binding = context.binding;
@@ -147,4 +155,3 @@ void *recycle_runtime_item_on_main_thread(
     }
     return promise;
 }
-
