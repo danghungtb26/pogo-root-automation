@@ -14,13 +14,10 @@ import dev.pogoroot.automation.core.automation.AutoFortNavigationCommand
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.scan.ScanMatchType
 import dev.pogoroot.automation.core.time.TeleportCooldown
-import dev.pogoroot.automation.core.time.TeleportCooldownMode
-import dev.pogoroot.automation.core.time.TeleportCooldownService
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.data.FavoriteLocation
 import dev.pogoroot.automation.data.FavoriteLocationRepository
-import dev.pogoroot.automation.data.LastActiveGameAction
 import dev.pogoroot.automation.data.LastActiveLocationRepository
 import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.location.JoystickLocationController
@@ -57,9 +54,10 @@ class JoystickOverlayService : Service() {
     private lateinit var gameForegroundDetector: GameForegroundDetector
     private lateinit var mainOverlay: MainOverlayView
     private lateinit var cooldownOverlay: CooldownOverlayView
+    private lateinit var cooldownRenderer: CooldownOverlayRenderer
     private lateinit var scanResultOverlays: ScanResultOverlays
+    private lateinit var settingsOverlay: SettingsOverlayController
 
-    private val cooldownService = TeleportCooldownService()
     private val foregroundExecutor = Executors.newSingleThreadScheduledExecutor()
     private var foregroundPoll: ScheduledFuture<*>? = null
     private val overlayDialogs = mutableSetOf<AlertDialog>()
@@ -71,7 +69,6 @@ class JoystickOverlayService : Service() {
     private var speedPresetIndex = 2
     private var lastPersistAt = 0L
     private var latestTeleportCooldown: TeleportCooldown? = null
-    private var cooldownMode = TeleportCooldownMode.CURRENT_POSITION
     private var latestAutoFortCommand: AutoFortNavigationCommand? = null
 
     private val autoFortNavigationListener: (AutoFortNavigationCommand) -> Unit = { command ->
@@ -104,7 +101,6 @@ class JoystickOverlayService : Service() {
         positionStore = OverlayPositionStore(this)
         gameForegroundDetector = GameForegroundDetector(this)
         latestTeleportCooldown = positionStore.loadCooldown()
-        cooldownMode = positionStore.loadCooldownMode()
         createNotificationChannel()
         startForeground(JOYSTICK_NOTIFICATION_ID, buildNotification())
 
@@ -151,6 +147,7 @@ class JoystickOverlayService : Service() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         mainHandler.post {
+            if (::settingsOverlay.isInitialized) settingsOverlay.onConfigurationChanged()
             if (::mainOverlay.isInitialized) mainOverlay.onConfigurationChanged()
             if (::cooldownOverlay.isInitialized) cooldownOverlay.onConfigurationChanged()
             if (::scanResultOverlays.isInitialized) scanResultOverlays.onConfigurationChanged()
@@ -172,6 +169,7 @@ class JoystickOverlayService : Service() {
             controllerStarted = false
         }
         if (::scanResultOverlays.isInitialized) scanResultOverlays.dispose()
+        if (::settingsOverlay.isInitialized) settingsOverlay.dispose()
         if (::cooldownOverlay.isInitialized) cooldownOverlay.dispose()
         if (::mainOverlay.isInitialized) mainOverlay.dispose()
         super.onDestroy()
@@ -199,6 +197,7 @@ class JoystickOverlayService : Service() {
             scanResultOverlays.render()
         } else {
             overlayVisible = false
+            if (::settingsOverlay.isInitialized) settingsOverlay.dismiss()
             collapseMainOverlay()
             if (::mainOverlay.isInitialized) mainOverlay.setVisible(false)
             if (::cooldownOverlay.isInitialized) cooldownOverlay.setVisible(false)
@@ -232,11 +231,7 @@ class JoystickOverlayService : Service() {
                 renderShortcutStates()
             },
             onSettings = {
-                collapseMainOverlay()
-                startActivity(
-                    Intent(this@JoystickOverlayService, AutomationSettingsActivity::class.java)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                )
+                settingsOverlay.open()
             },
             onClose = { stopSelf() },
         )
@@ -244,6 +239,13 @@ class JoystickOverlayService : Service() {
 
         cooldownOverlay = CooldownOverlayView(this, windowManager, positionStore)
         cooldownOverlay.ensure()
+        cooldownRenderer = CooldownOverlayRenderer(
+            positionStore = positionStore,
+            lastActiveLocationRepository = lastActiveLocationRepository,
+            controller = controller,
+            cooldownOverlay = cooldownOverlay,
+            latestTeleportCooldown = { latestTeleportCooldown },
+        )
 
         scanResultOverlays = ScanResultOverlays(
             context = this,
@@ -253,6 +255,29 @@ class JoystickOverlayService : Service() {
             onOpenResults = ::openScanResults,
         )
         scanResultOverlays.ensure()
+
+        settingsOverlay = SettingsOverlayController(
+            context = this,
+            windowManager = windowManager,
+            repository = automationConfigRepository,
+            positionStore = positionStore,
+            isForeground = { overlayVisible && !destroyed },
+            onHideMain = {
+                collapseMainOverlay()
+                mainOverlay.setVisible(false)
+            },
+            onShowMain = {
+                mainOverlay.setVisible(true)
+                renderShortcutStates()
+                renderCooldown()
+            },
+            onSaved = {
+                requestRuntimeConfigSync()
+                renderShortcutStates()
+                renderCooldown()
+            },
+        )
+        settingsOverlay.ensure()
     }
 
     private fun collapseMainOverlay() {
@@ -266,7 +291,6 @@ class JoystickOverlayService : Service() {
                 .putExtra(ScanResultsActivity.EXTRA_SECTION, matchType.name),
         )
     }
-
     private fun renderShortcutStates() {
         if (!::mainOverlay.isInitialized) return
         val config = automationConfigRepository.read()
@@ -450,41 +474,9 @@ class JoystickOverlayService : Service() {
     }
 
     private fun renderCooldown() {
-        if (!::cooldownOverlay.isInitialized) return
-        cooldownMode = positionStore.loadCooldownMode()
-
-        val lastActive = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
-            lastActiveLocationRepository.read()
-        } else {
-            null
-        }
-        val currentPoint = if (cooldownMode == TeleportCooldownMode.LAST_ACTIVE) {
-            controller.snapshot().point ?: loadSavedPoint()
-        } else {
-            null
-        }
-        val cooldown = when (cooldownMode) {
-            TeleportCooldownMode.CURRENT_POSITION -> latestTeleportCooldown
-            TeleportCooldownMode.LAST_ACTIVE -> lastActiveCooldown(lastActive, currentPoint)
-        }
-        val remaining = cooldown?.remainingMillis(System.currentTimeMillis()) ?: 0L
-        cooldownOverlay.render(remaining)
+        if (!::cooldownRenderer.isInitialized) return
+        cooldownRenderer.render()
     }
-
-    private fun lastActiveCooldown(
-        activity: LastActiveGameAction?,
-        destination: GeoPoint?,
-    ): TeleportCooldown? {
-        activity ?: return null
-        destination ?: return null
-        return cooldownService.forLastActive(
-            lastActivePoint = activity.point,
-            lastActiveAtEpochMs = activity.activeAtEpochMs,
-            destination = destination,
-        )
-    }
-
-    private fun loadSavedPoint(): GeoPoint? = positionStore.loadPoint()
 
     private fun persistPointOccasionally(point: GeoPoint?) {
         val now = android.os.SystemClock.elapsedRealtime()
@@ -492,8 +484,6 @@ class JoystickOverlayService : Service() {
         lastPersistAt = now
         persistPoint(point)
     }
-
     private fun persistPoint(point: GeoPoint?) = positionStore.persistPoint(point)
-
     private fun persistCooldown(cooldown: TeleportCooldown) = positionStore.persistCooldown(cooldown)
 }

@@ -32,3 +32,15 @@ internal fun newOverlayParams(width: Int, height: Int): WindowManager.LayoutPara
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
         android.graphics.PixelFormat.TRANSLUCENT,
     )
+
+internal fun newFocusableOverlayParams(width: Int, height: Int): WindowManager.LayoutParams =
+    WindowManager.LayoutParams(
+        width,
+        height,
+        overlayWindowType(),
+        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+        android.graphics.PixelFormat.TRANSLUCENT,
+    ).apply {
+        softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+    }
