@@ -133,7 +133,7 @@ void runtime_catch_spin_execute_catch(
         target.spawn_id,
         static_cast<uint64_t>(target.species_id)
     );
-    pause_runtime_navigation(context, "catch in progress");
+    pause_runtime_walk_candidate(context, "catch in progress");
     const MainThreadActionOutcome outcome = request_main_thread_direct_catch(
         context, target.spawn_id
     );
@@ -199,7 +199,7 @@ void runtime_catch_spin_execute_spin(
         runtime_catch_spin_log_rejected("spin", "fort_search_promise_pending");
         return;
     }
-    pause_runtime_navigation(context, "spin in progress");
+    pause_runtime_walk_candidate(context, "spin in progress");
     const MainThreadActionOutcome outcome = request_main_thread_spin(context, fort.fort_id);
     switch (outcome) {
         case MainThreadActionOutcome::kInvoked:
@@ -326,7 +326,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
     std::lock_guard<std::mutex> lock(g_runtime_catch_spin_coordinator.mutex);
 
     const RuntimeCatchSpinConfig config = runtime_catch_spin_config_snapshot();
-    pause_runtime_navigation_if_busy(tick.context, config);
+    pause_runtime_walk_candidate_if_busy(tick.context, config);
     if (!g_runtime_active.load() || !config.configured || !config.armed ||
         !((config.auto_catch && config.catch_all) || config.auto_spin ||
             config.auto_walk_to_fort)) return;
@@ -376,7 +376,7 @@ void run_runtime_catch_spin_observer_tick(ObserverTickContext &tick) {
         snapshot.has_player_position ? 1 : 0
     );
     (void)send_runtime_catch_spin_payload(tick.context, snapshot);
-    update_runtime_navigation(tick.context, config, snapshot);
+    update_runtime_walk_candidate(tick.context, config, snapshot);
 
     const int32_t ball_count = runtime_pokeball_count(snapshot);
     const int32_t total_ball_count = snapshot.inventory_available

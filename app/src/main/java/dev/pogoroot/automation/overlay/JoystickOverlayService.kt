@@ -10,7 +10,6 @@ import android.os.Looper
 import android.view.ContextThemeWrapper
 import android.view.WindowManager
 import android.util.Log
-import dev.pogoroot.automation.core.automation.AutoFortNavigationCommand
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.core.scan.ScanMatchType
 import dev.pogoroot.automation.core.time.TeleportCooldown
@@ -23,7 +22,8 @@ import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.location.JoystickLocationController
 import dev.pogoroot.automation.location.JoystickLocationState
 import dev.pogoroot.automation.location.RootMockLocationProvider
-import dev.pogoroot.automation.location.AutoFortNavigationBus
+import dev.pogoroot.automation.location.WalkCandidateCoordinator
+import dev.pogoroot.automation.location.WalkCandidateLocationActions
 import dev.pogoroot.automation.scan.ScanResultRepository
 import dev.pogoroot.automation.service.HeadlessAutomationService
 import java.util.concurrent.Executors
@@ -45,6 +45,7 @@ class JoystickOverlayService : Service() {
 
     private lateinit var windowManager: WindowManager
     private lateinit var controller: JoystickLocationController
+    private lateinit var walkCandidateActions: WalkCandidateLocationActions
     private lateinit var automationConfigRepository: AutomationConfigRepository
     private lateinit var favoriteLocationRepository: FavoriteLocationRepository
     private lateinit var lastActiveLocationRepository: LastActiveLocationRepository
@@ -69,16 +70,6 @@ class JoystickOverlayService : Service() {
     private var speedPresetIndex = 2
     private var lastPersistAt = 0L
     private var latestTeleportCooldown: TeleportCooldown? = null
-    private var latestAutoFortCommand: AutoFortNavigationCommand? = null
-
-    private val autoFortNavigationListener: (AutoFortNavigationCommand) -> Unit = { command ->
-        mainHandler.post {
-            if (destroyed) return@post
-            latestAutoFortCommand = command
-            applyAutoFortNavigationCommand()
-        }
-    }
-
     private val cooldownTick = object : Runnable {
         override fun run() {
             applyPendingMapTarget()
@@ -108,7 +99,8 @@ class JoystickOverlayService : Service() {
             sink = RootMockLocationProvider(this),
             onStateChanged = ::onLocationStateChanged,
         )
-        AutoFortNavigationBus.register(autoFortNavigationListener)
+        walkCandidateActions = WalkCandidateLocationActions(controller)
+        WalkCandidateCoordinator.attach(walkCandidateActions)
         foregroundPoll = foregroundExecutor.scheduleWithFixedDelay(
             ::pollGameForeground,
             0L,
@@ -137,7 +129,6 @@ class JoystickOverlayService : Service() {
         if (!controllerStarted) {
             controllerStarted = true
             controller.start(positionStore.loadPointOrDefault())
-            applyAutoFortNavigationCommand()
         }
         return START_NOT_STICKY
     }
@@ -156,13 +147,15 @@ class JoystickOverlayService : Service() {
 
     override fun onDestroy() {
         destroyed = true
-        AutoFortNavigationBus.unregister()
         foregroundPoll?.cancel(true)
         foregroundExecutor.shutdownNow()
         mainHandler.removeCallbacks(cooldownTick)
         dismissOverlayDialogs()
         runCatching { favoriteLocationsDialog?.dismiss() }
         favoriteLocationsDialog = null
+        if (::walkCandidateActions.isInitialized) {
+            WalkCandidateCoordinator.detach(walkCandidateActions)
+        }
         if (controllerStarted) {
             persistPoint(controller.snapshot().point)
             controller.stop()
@@ -214,7 +207,7 @@ class JoystickOverlayService : Service() {
             context = this,
             windowManager = windowManager,
             positionStore = positionStore,
-            controller = controller,
+            onJoystick = walkCandidateActions::userJoystick,
             speedPresets = speedPresets,
             onToggle = ::toggleAutomation,
             onTeleport = {
@@ -358,7 +351,7 @@ class JoystickOverlayService : Service() {
         val dialog = TeleportLocationDialog(
             context = this,
             currentPoint = { controller.snapshot().point },
-            onTeleport = controller::teleport,
+            onTeleport = walkCandidateActions::userTeleport,
         ).create()
         teleportDialog = dialog
         showOverlayDialog(dialog) {
@@ -392,13 +385,12 @@ class JoystickOverlayService : Service() {
             return
         }
 
-        runCatching {
-            if (walk) {
-                controller.walkTo(favorite.point)
-            } else {
-                controller.teleport(favorite.point)
-            }
-        }.onSuccess {
+        val result = if (walk) {
+            walkCandidateActions.userWalkTo(favorite.point)
+        } else {
+            runCatching { walkCandidateActions.userTeleport(favorite.point) }
+        }
+        result.onSuccess {
             favoriteLocationsDialog?.dismiss()
             showLocationToast(if (walk) "Walk started" else "Teleport requested")
         }.onFailure { error ->
@@ -428,6 +420,7 @@ class JoystickOverlayService : Service() {
     }
 
     private fun onLocationStateChanged(state: JoystickLocationState) {
+        WalkCandidateCoordinator.onLocationState(state)
         mainHandler.post {
             state.teleportCooldown?.let { cooldown ->
                 latestTeleportCooldown = cooldown
@@ -450,26 +443,8 @@ class JoystickOverlayService : Service() {
 
         val target = mapTargetRepository.read() ?: return
         mapTargetRepository.clear()
-        controller.walkTo(target.target)
-    }
-
-    private fun applyAutoFortNavigationCommand() {
-        if (!controllerStarted) return
-        when (val command = latestAutoFortCommand) {
-            is AutoFortNavigationCommand.WalkTo -> {
-                if (controller.snapshot().point == null) return
-                Log.i(
-                    LOG_TAG,
-                    "auto fort navigation walk fort=${command.fortId} " +
-                        "target=${command.target.latitude},${command.target.longitude}",
-                )
-                controller.walkTo(command.target)
-            }
-            is AutoFortNavigationCommand.Stop -> {
-                Log.i(LOG_TAG, "auto fort navigation stop reason=${command.reason}")
-                controller.stopWalking()
-            }
-            null -> Unit
+        walkCandidateActions.userWalkTo(target.target).onFailure { error ->
+            showLocationToast(error.message ?: "Location action failed")
         }
     }
 

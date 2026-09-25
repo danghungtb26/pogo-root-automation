@@ -21,6 +21,7 @@ object BridgeProtocol {
     const val RUNTIME_FORTS_PAYLOAD_VERSION = 1
     const val RUNTIME_INVENTORY_PAYLOAD_VERSION = 1
     const val RUNTIME_CATCH_SPIN_REQUEST_PAYLOAD_VERSION = 1
+    const val POINT_WALK_CANDIDATE_CAPABILITY = "POINT_WALK_CANDIDATE"
     const val NORMAL_MESSAGE_BYTES = 1 * 1024 * 1024
     const val HARD_MESSAGE_BYTES = 4 * 1024 * 1024
     const val FRAME_HEADER_BYTES = 4 + 2 + 2 + 8
@@ -63,6 +64,8 @@ enum class ObservationType(val wireValue: Int) {
     AUTOMATION_EVENT(10),
     /** Native-decided walk/stop instruction for the Android location service. */
     NAVIGATION(11),
+    /** Versioned candidate and correlated terminal for Kotlin-owned point walking. */
+    POINT_WALK_CANDIDATE(12),
 }
 
 enum class CommandPhase(val wireValue: Int) {

@@ -5,6 +5,7 @@ bool send_runtime_capability_update(
 ) {
     if (!binding.exact_build_verified) return false;
     std::vector<std::string> capabilities;
+    capabilities.emplace_back(pogo_runtime::kPointWalkCandidateCapability);
     if (binding.use_berry_verified) capabilities.emplace_back("USE_BERRY");
     if (binding.encounter_read_verified) {
         capabilities.emplace_back("READ_LIFECYCLE");

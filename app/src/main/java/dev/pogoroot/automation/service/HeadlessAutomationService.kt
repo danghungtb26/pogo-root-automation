@@ -17,15 +17,15 @@ import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.ToastAutomationEventSink
-import dev.pogoroot.automation.location.NativeNavigationReceiver
-import dev.pogoroot.automation.location.AutoFortNavigationBus
+import dev.pogoroot.automation.location.NativeWalkCandidateReceiver
+import dev.pogoroot.automation.location.WalkCandidateCoordinator
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
     private lateinit var apiServer: AutomationControlServer
     private lateinit var eventSink: AutomationEventSink
     private lateinit var runtimeFacade: RuntimeUiAutomationFacade
-    private lateinit var navigationReceiver: NativeNavigationReceiver
+    private lateinit var walkCandidateReceiver: NativeWalkCandidateReceiver
     private lateinit var mapTargetRepository: MapTargetRepository
     private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
@@ -36,12 +36,20 @@ class HeadlessAutomationService : Service() {
         configRepository = AutomationConfigRepository(this)
         eventSink = ToastAutomationEventSink(this, configRepository)
         mapTargetRepository = MapTargetRepository(this)
-        navigationReceiver = NativeNavigationReceiver(eventSink, AutoFortNavigationBus::publish)
+        walkCandidateReceiver = NativeWalkCandidateReceiver(
+            onCandidate = { candidate, nowNanos, previousSequence ->
+                WalkCandidateCoordinator.submit(candidate, nowNanos, previousSequence)
+            },
+            onTerminal = { terminal, previousSequence ->
+                WalkCandidateCoordinator.terminate(terminal, previousSequence)
+            },
+            onReset = WalkCandidateCoordinator::reset,
+        )
         runtimeFacade = RuntimeUiAutomationFacade(
             configRepository = configRepository,
             eventSink = eventSink,
             mapTargetRepository = mapTargetRepository,
-            navigationReceiver = navigationReceiver,
+            walkCandidateReceiver = walkCandidateReceiver,
         )
         apiServer = AutomationControlServer(
             configRepository = configRepository,
@@ -104,8 +112,8 @@ class HeadlessAutomationService : Service() {
             joystickAutoStartCoordinator.stop()
         }
         apiServer.stop()
-        if (::navigationReceiver.isInitialized) {
-            navigationReceiver.reset()
+        if (::walkCandidateReceiver.isInitialized) {
+            walkCandidateReceiver.reset("service stopped")
         }
         runtimeFacade.shutdown()
         super.onDestroy()

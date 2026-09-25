@@ -1,7 +1,6 @@
 package dev.pogoroot.automation.runtime
 
 import dev.pogoroot.automation.bridge.BridgeEvent
-import dev.pogoroot.automation.bridge.RuntimeNavigationPayload
 import dev.pogoroot.automation.bridge.RuntimeThrowDiagnostic
 import dev.pogoroot.automation.bridge.RuntimeUiStatus
 import dev.pogoroot.automation.core.model.MapTargetObservation
@@ -9,10 +8,10 @@ import dev.pogoroot.automation.events.AutomationEvent
 
 sealed interface RuntimeUiEvent {
     data class Ready(val value: BridgeEvent.RuntimeReady) : RuntimeUiEvent
+    data class ObservationSequence(val value: Long) : RuntimeUiEvent
     data class Status(val value: RuntimeUiStatus) : RuntimeUiEvent
     data class Automation(val value: AutomationEvent) : RuntimeUiEvent
     data class MapTarget(val value: MapTargetObservation) : RuntimeUiEvent
-    data class Navigation(val value: RuntimeNavigationPayload, val observedAtElapsedNs: Long) : RuntimeUiEvent
     data class ThrowDiagnostic(val value: RuntimeThrowDiagnostic) : RuntimeUiEvent
     data class Error(val message: String) : RuntimeUiEvent
 }
@@ -24,8 +23,6 @@ data class RuntimeUiState(
     val lastObservationSeq: Long? = null,
     val lastAutomationEvent: AutomationEvent? = null,
     val mapTarget: MapTargetObservation? = null,
-    val navigation: RuntimeNavigationPayload? = null,
-    val navigationExpiresAtElapsedNs: Long? = null,
     val throwDiagnostic: RuntimeThrowDiagnostic? = null,
     val lastError: String? = null,
 )
@@ -43,11 +40,10 @@ class RuntimeUiStateStore {
                 nativeStatus = null,
                 lastObservationSeq = null,
                 mapTarget = null,
-                navigation = null,
-                navigationExpiresAtElapsedNs = null,
                 throwDiagnostic = null,
                 lastError = null,
             )
+            is RuntimeUiEvent.ObservationSequence -> state.copy(lastObservationSeq = event.value)
             is RuntimeUiEvent.Status -> state.copy(
                 runtimeSessionId = event.value.runtimeSessionId,
                 nativeStatus = event.value,
@@ -55,10 +51,6 @@ class RuntimeUiStateStore {
             )
             is RuntimeUiEvent.Automation -> state.copy(lastAutomationEvent = event.value)
             is RuntimeUiEvent.MapTarget -> state.copy(mapTarget = event.value)
-            is RuntimeUiEvent.Navigation -> state.copy(
-                navigation = event.value,
-                navigationExpiresAtElapsedNs = event.observedAtElapsedNs + NAVIGATION_LEASE_NS,
-            )
             is RuntimeUiEvent.ThrowDiagnostic -> state.copy(throwDiagnostic = event.value)
             is RuntimeUiEvent.Error -> state.copy(lastError = event.message)
         }
@@ -71,8 +63,4 @@ class RuntimeUiStateStore {
 
     @Synchronized
     fun snapshot(): RuntimeUiState = state
-
-    private companion object {
-        const val NAVIGATION_LEASE_NS = 5_000_000_000L
-    }
 }

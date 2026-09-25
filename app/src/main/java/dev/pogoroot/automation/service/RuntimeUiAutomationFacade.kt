@@ -7,7 +7,7 @@ import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.config.RuntimeDesiredStateMapper
 import dev.pogoroot.automation.data.MapTargetRepository
 import dev.pogoroot.automation.events.AutomationEventSink
-import dev.pogoroot.automation.location.NativeNavigationReceiver
+import dev.pogoroot.automation.location.NativeWalkCandidateReceiver
 import dev.pogoroot.automation.root.DesiredStateReceipt
 import dev.pogoroot.automation.root.RuntimeUiClient
 import dev.pogoroot.automation.runtime.RuntimeUiState
@@ -41,7 +41,7 @@ class RuntimeUiAutomationFacade(
     private val configRepository: AutomationConfigRepository,
     eventSink: AutomationEventSink,
     mapTargetRepository: MapTargetRepository,
-    navigationReceiver: NativeNavigationReceiver,
+    walkCandidateReceiver: NativeWalkCandidateReceiver,
     private val client: RuntimeUiClient = RuntimeUiClient(),
 ) {
     private val executor = Executors.newSingleThreadScheduledExecutor()
@@ -53,8 +53,8 @@ class RuntimeUiAutomationFacade(
                 mapTargetRepository.publish(target)
             }
         },
-        onNavigation = navigationReceiver::receive,
-        onNavigationReset = { navigationReceiver.reset() },
+        onPointWalkCandidate = walkCandidateReceiver::receive,
+        onPointWalkCandidateReset = walkCandidateReceiver::reset,
     )
     @Volatile private var serviceRunning = false
     @Volatile private var lastSubmittedRevision: Long? = null

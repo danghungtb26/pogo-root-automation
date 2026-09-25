@@ -5,6 +5,7 @@ namespace {
 std::vector<std::string> runtime_ui_status_capabilities(const RuntimeBinding &binding) {
     std::vector<std::string> capabilities;
     if (!binding.exact_build_verified) return capabilities;
+    capabilities.emplace_back(pogo_runtime::kPointWalkCandidateCapability);
     if (binding.use_berry_verified) capabilities.emplace_back("USE_BERRY");
     if (binding.encounter_read_verified) {
         capabilities.emplace_back("ENCOUNTER");

@@ -12,7 +12,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.TextView
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
-import dev.pogoroot.automation.location.JoystickLocationController
 import kotlin.math.max
 
 /** Owns the floating button, shortcut grid and joystick panel. */
@@ -20,7 +19,7 @@ internal class MainOverlayView(
     private val context: Context,
     private val windowManager: WindowManager,
     private val positionStore: OverlayPositionStore,
-    private val controller: JoystickLocationController,
+    private val onJoystick: (Int, Int) -> Unit,
     private val speedPresets: DoubleArray,
     private val onToggle: (String) -> Unit,
     private val onTeleport: () -> Unit,
@@ -99,7 +98,7 @@ internal class MainOverlayView(
         )
         joystickPad = JoystickPadView(
             context = context,
-            onMove = controller::setJoystick,
+            onMove = onJoystick,
             onClose = { setMode(Mode.SHORTCUTS) },
         )
 

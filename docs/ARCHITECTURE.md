@@ -101,7 +101,7 @@ Native có hai phần chạy ở **hai tiến trình khác nhau**:
   Kotlin để thực hiện movement bằng Android location provider.
 - Tự xử lý readiness và bật/tắt module từ config. Có module trong source không
   đồng nghĩa tính năng đã được phép chạy trên mọi game build.
-- Phát observation, automation event, navigation và command result có cấu trúc.
+- Phát observation, automation event, point-walk candidate và command result có cấu trúc.
 
 ### Rule đặt code native
 
@@ -125,9 +125,9 @@ Native có hai phần chạy ở **hai tiến trình khác nhau**:
 |---|---|
 | `app/config/` | Nhận lựa chọn người dùng, validate/lưu config, tăng revision và map thành payload gửi native |
 | `app/service/` | Vòng đời service, API điều khiển, desired-state facade và báo trạng thái |
-| `app/runtime/` | UI state, status/event router và navigation handoff; coordinator cũ chỉ compatibility |
+| `app/runtime/` | UI state và status/event router; candidate event được chuyển vào location coordinator |
 | `app/root/` | `RuntimeUiClient`/`RuntimeBridgeClient`, root bootstrap/UID registration và IPC |
-| `app/location/` | Thực hiện joystick, teleport và walk qua Android mock-location provider; kiểm tra hạn dùng navigation |
+| `app/location/` | Admission/owner của walk candidate và thực hiện joystick, teleport, walk qua Android mock-location provider |
 | `app/overlay/`, `app/events/`, `app/scan/` | Settings, overlay, toast, hiển thị event/kết quả và state UI |
 | `app/data/` | Đọc/ghi dữ liệu app qua repository |
 | `core/` | Model/action contract, geo math, `WalkPlanner` và tiện ích thuần không biết Android/game runtime |
@@ -144,8 +144,10 @@ Native quyết định **hành động game nào cần chạy tiếp dựa trên
 Kotlin không thêm vòng scan → chọn Pokémon/item → gửi catch/discard/transfer
 trùng với coordinator native.
 
-Riêng location, native chọn fort; Kotlin dùng `WalkPlanner` để tính từng bước
-di chuyển và `RootMockLocationProvider` để cập nhật Android test providers.
+Riêng auto-walk đến fort, native chọn candidate từ game state. Kotlin kiểm tra
+session, identity, sequence, freshness và owner, giữ route được nhận trong RAM,
+rồi dùng `WalkPlanner` để tính từng bước di chuyển và
+`RootMockLocationProvider` để cập nhật Android test providers.
 Joystick/teleport của người dùng vẫn là chức năng Android. Map-tap walk nhận
 tọa độ từ binding native đã xác minh và chỉ chạy khi có `READ_MAP_TARGET`;
 không suy tọa độ từ screenshot hay fallback bằng `input tap`/`input swipe`.
@@ -157,9 +159,9 @@ không suy tọa độ từ screenshot hay fallback bằng `input tap`/`input sw
 | Joystick | Kotlin nhận hướng/lực kéo, tính tốc độ, bước tọa độ và ghi mock location |
 | Teleport | Kotlin validate tọa độ, chuyển vị trí, cập nhật state và thông tin cooldown hiển thị |
 | Walk đến tọa độ/favorite do người dùng chọn | Kotlin giữ target, tính hướng/khoảng cách/bước đi, arrival và dừng/hủy walk |
-| Auto-walk đến fort do automation chọn | Native chọn fort và quyết định pause/resume vì game state; Kotlin thực hiện walk/stop với freshness/lease guards |
+| Auto-walk đến fort do automation chọn | Native chọn fort và quyết định pause/resume vì game state; Kotlin admission coordinator giữ candidate đã nhận, còn controller tick walk tới terminal hoặc local arrival |
 | Map-tap walk | Native resolve tap thật thành tọa độ; Kotlin kiểm tra capability/freshness rồi đi đến tọa độ đó |
-| Mock-provider lifecycle và ưu tiên input location | Kotlin start/stop/cleanup provider, xử lý chuyển giữa manual joystick/teleport/walk và navigation native |
+| Mock-provider lifecycle và ưu tiên input location | Kotlin start/stop/cleanup provider; `WalkCandidateCoordinator` giữ một active route và ưu tiên USER input trước native candidate |
 
 Logic movement đặt trong `app/location/` và thuật toán thuần trong
 `core/location/`; overlay chỉ gọi controller và render state. Kotlin không
@@ -169,8 +171,10 @@ location controller; native vẫn xác minh vị trí/range/lifecycle của game
 trước khi hành động.
 
 Ước tính cooldown phục vụ location UI không phải kết quả xác nhận từ server
-và không cấp quyền chạy gameplay. Lease áp dụng cho navigation do native cấp;
-manual joystick/teleport/walk không cần thêm binding PoGo để thực hiện.
+và không cấp quyền chạy gameplay. Candidate timestamp chỉ được dùng để kiểm
+freshness lúc admission; route đã nhận sống trong RAM tới terminal, local
+arrival, thao tác USER, lỗi provider hoặc session reset, không cần lease/renewal.
+Manual joystick/teleport/walk không cần thêm binding PoGo để thực hiện.
 
 `core/` phải giữ độc lập với Android, SharedPreferences, socket, JNI, hook,
 offset và class game. Dữ liệu riêng PoGo được chuyển đổi qua adapter trước
@@ -212,7 +216,7 @@ phải nơi lưu inventory, hàng đợi action hay command/config cho native.
 - Native: game pointer/handle, runtime binding, desired/applied config mirror,
   pending action, cooldown gameplay, map/inventory snapshot và state coordinator.
 - Kotlin: connection/session, sequence, latest desired snapshot, native UI status,
-  navigation lease, UI event queue và scan summary.
+  active walk route/owner/generation, UI event queue và scan summary.
 - State sống theo process/session không được khôi phục như sự thật của phiên
   game mới. Kết quả scan hiện chỉ lưu trong bộ nhớ process app.
 
@@ -278,18 +282,22 @@ flowchart LR
    cùng guard, bật/tắt module và phát `RuntimeUiStatus` với desired/applied/ready
    tách biệt. Receipt nhận request không phải bằng chứng action game hoàn tất.
 4. Native đọc game state → quyết định action → thực thi trên thread phù hợp →
-   xác nhận outcome → gửi status, automation event, map target, navigation,
-   diagnostic hoặc result về Kotlin.
-5. `RuntimeUiEventRouter` kiểm tra session/identity/sequence/freshness và chỉ
-   cập nhật UI hoặc giao navigation lease 5 giây cho location controller; nó
-   không dựng game adapter, cache raw game state hay dispatch gameplay.
+   xác nhận outcome → gửi status, automation event, map target,
+   point-walk candidate, diagnostic hoặc result về Kotlin.
+5. `RuntimeUiEventRouter` kiểm tra session/identity/sequence/freshness; point-walk
+   candidate sau đó qua capability/admission/owner guards và được giữ trong
+   `WalkCandidateCoordinator` để location controller tick tới target. Legacy
+   `NAVIGATION(11)` không còn dispatch location. Router không dựng game adapter,
+   cache raw game state hay dispatch gameplay.
 6. Khi đổi session, client gửi lại desired snapshot mới nhất; native không khôi
    phục pointer, pending action hoặc readiness từ persistence. Không replay
    gameplay command; broker chỉ giữ status UI mới nhất để controller mới nhận.
 
 Các message chính từ app là control/config trong `COMMAND`. Chiều về gồm
-`RUNTIME_READY`, `OBSERVATION` (có `AUTOMATION_EVENT`, `NAVIGATION`,
-`MAP_TARGET`), `COMMAND_RESULT`, `BINDING_LOST` và `ERROR`.
+`RUNTIME_READY`, `OBSERVATION` (có `AUTOMATION_EVENT`,
+`POINT_WALK_CANDIDATE`, `MAP_TARGET`), `COMMAND_RESULT`, `BINDING_LOST` và
+`ERROR`. Candidate observation type 12 kết thúc bằng native `STOP`/`ARRIVED`
+hoặc location-side terminal; event này không phải gameplay result.
 Contract command gameplay vẫn tồn tại, nhưng vòng automation live hiện tại
 được điều phối tại native.
 
@@ -298,7 +306,7 @@ Contract command gameplay vẫn tồn tại, nhưng vòng automation live hiện
 - Sửa wire contract và codec **cả Kotlin lẫn C++** cùng thay đổi; giữ tương
   thích hoặc tăng version thích hợp. Không tái sử dụng tùy ý wire ID đã có.
 - Giữ session ID, runtime identity/build fingerprint, sequence, timestamp,
-  expiry, capability và request/result correlation theo contract từng message.
+  freshness, capability và request/result correlation theo contract từng message.
   Runtime/companion cấp session; Kotlin không tự tạo session thay thế.
 - Phân biệt socket đã kết nối, desired đã nhận, config đã apply, module đã
   ready và game action đã hoàn tất. ACK desired không phải kết quả catch.

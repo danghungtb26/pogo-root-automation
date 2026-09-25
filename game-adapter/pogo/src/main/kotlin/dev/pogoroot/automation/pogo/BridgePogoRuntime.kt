@@ -342,6 +342,7 @@ class BridgePogoRuntimeSource(
             ObservationType.THROW_DIAGNOSTIC,
             ObservationType.AUTOMATION_EVENT,
             ObservationType.NAVIGATION,
+            ObservationType.POINT_WALK_CANDIDATE,
             -> Unit
         }
         observationStates[event.messageSeq] =

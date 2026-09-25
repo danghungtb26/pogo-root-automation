@@ -5,14 +5,14 @@ import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.BridgeProtocol
 import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.bridge.ObservationType
+import dev.pogoroot.automation.bridge.PointWalkCandidatePayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeAutomationEventPayloadCodec
-import dev.pogoroot.automation.bridge.RuntimeNavigationPayload
-import dev.pogoroot.automation.bridge.RuntimeNavigationPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeThrowDiagnosticPayloadCodec
 import dev.pogoroot.automation.core.model.MapTargetObservation
 import dev.pogoroot.automation.events.AutomationEvent
 import dev.pogoroot.automation.events.AutomationEventSink
 import dev.pogoroot.automation.events.AutomationEventType
+import dev.pogoroot.automation.location.NativeWalkCandidateObservation
 import dev.pogoroot.automation.root.RuntimeUiClient
 import dev.pogoroot.automation.runtime.RuntimeUiEvent
 import dev.pogoroot.automation.runtime.RuntimeUiState
@@ -24,8 +24,8 @@ class RuntimeUiEventRouter(
     private val stateStore: RuntimeUiStateStore = RuntimeUiStateStore(),
     private val eventSink: AutomationEventSink = AutomationEventSink { },
     private val onMapTarget: (MapTargetObservation) -> Unit = {},
-    private val onNavigation: (RuntimeNavigationPayload, Long) -> Unit = { _, _ -> },
-    private val onNavigationReset: () -> Unit = {},
+    private val onPointWalkCandidate: (NativeWalkCandidateObservation, Long) -> Unit = { _, _ -> },
+    private val onPointWalkCandidateReset: (String) -> Unit = {},
     private val nowNanos: () -> Long = System::nanoTime,
 ) {
     private var runtimeSessionId: String? = null
@@ -43,7 +43,7 @@ class RuntimeUiEventRouter(
     fun snapshot(): RuntimeUiState = stateStore.snapshot()
 
     fun reset(reason: String = "runtime disconnected") {
-        onNavigationReset()
+        onPointWalkCandidateReset(reason)
         runtimeSessionId = null
         processedObservationSeq = 0L
         lastStatusElapsedNs = 0L
@@ -58,7 +58,7 @@ class RuntimeUiEventRouter(
     private fun ensureSession() {
         val ready = bridge.connect().getOrThrow()
         if (runtimeSessionId != ready.runtimeSessionId) {
-            onNavigationReset()
+            onPointWalkCandidateReset("runtime session changed")
             runtimeSessionId = ready.runtimeSessionId
             processedObservationSeq = 0L
             lastStatusElapsedNs = 0L
@@ -94,11 +94,17 @@ class RuntimeUiEventRouter(
             ) || event.messageSeq <= processedObservationSeq || !isFresh(event.observedAtElapsedNs) ||
             event.payload.size > BridgeProtocol.HARD_MESSAGE_BYTES
         ) return
+        val previousObservationSequence = processedObservationSeq
         processedObservationSeq = event.messageSeq
+        stateStore.accept(RuntimeUiEvent.ObservationSequence(event.messageSeq))
         when (event.observationType) {
             ObservationType.AUTOMATION_EVENT -> decodeAutomationEvent(event)
             ObservationType.MAP_TARGET -> decodeMapTarget(event)
-            ObservationType.NAVIGATION -> decodeNavigation(event)
+            // Fort-walk location execution is owned by point-walk candidates.
+            // Keep type 11 parse-free so it cannot drive a second live route.
+            ObservationType.NAVIGATION -> Unit
+            ObservationType.POINT_WALK_CANDIDATE ->
+                decodePointWalkCandidate(event, previousObservationSequence)
             ObservationType.THROW_DIAGNOSTIC -> decodeThrowDiagnostic(event)
             else -> Log.i(LOG_TAG, "ignored raw runtime observation type=${event.observationType}")
         }
@@ -125,20 +131,24 @@ class RuntimeUiEventRouter(
             .onFailure { acceptError("map target decode: ${it.message}") }
     }
 
-    private fun decodeNavigation(event: BridgeEvent.ObservationEvent) {
-        if (event.payloadVersion != RuntimeNavigationPayloadCodec.VERSION) {
-            onNavigationReset()
-            return
-        }
-        RuntimeNavigationPayloadCodec.decode(event.payload)
-            .onSuccess {
-                stateStore.accept(RuntimeUiEvent.Navigation(it, event.observedAtElapsedNs))
-                onNavigation(it, event.observedAtElapsedNs)
+    private fun decodePointWalkCandidate(
+        event: BridgeEvent.ObservationEvent,
+        previousObservationSequence: Long,
+    ) {
+        if (!capabilities().contains(BridgeProtocol.POINT_WALK_CANDIDATE_CAPABILITY)) return
+        PointWalkCandidatePayloadCodec.decode(event.payload, event.payloadVersion)
+            .onSuccess { candidate ->
+                onPointWalkCandidate(
+                    NativeWalkCandidateObservation(
+                        payload = candidate,
+                        sessionId = event.runtimeSessionId,
+                        sequence = event.messageSeq,
+                        observedAtNanos = event.observedAtElapsedNs,
+                    ),
+                    previousObservationSequence,
+                )
             }
-            .onFailure {
-                onNavigationReset()
-                acceptError("navigation decode: ${it.message}")
-            }
+            .onFailure { acceptError("point-walk candidate decode: ${it.message}") }
     }
 
     private fun decodeThrowDiagnostic(event: BridgeEvent.ObservationEvent) {

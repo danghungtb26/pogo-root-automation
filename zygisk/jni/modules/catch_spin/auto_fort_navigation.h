@@ -1,6 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <vector>
 #include "../../shared/bridge_kotlin/runtime_navigation_protocol.h"
+#include "../../shared/bridge_kotlin/runtime_walk_candidate_protocol.h"
 #include "../../shared/bridge_kotlin/runtime_catch_spin_protocol.h"
 
 // All fort selection and pause/resume policy lives here. Android only executes
@@ -63,7 +68,7 @@ public:
         return commands;
     }
 
-private:
+protected:
     static constexpr double kArrivalMeters = 12.0;
     Fort target_;
     std::string last_arrived_;
@@ -87,5 +92,114 @@ private:
         if (other == nullptr) return true;
         const double d = distance(snapshot, fort), previous = distance(snapshot, *other);
         return d < previous || (d == previous && fort.fort_id < other->fort_id);
+    }
+};
+
+// Production fort-walk emits one candidate per selected target. The legacy
+// coordinator above remains available to the existing host regression test;
+// it is no longer wired into the live bridge path.
+class RuntimeAutoFortWalkCandidateProducer : private RuntimeAutoFortNavigation {
+public:
+    using Candidate = pogo_runtime::RuntimePointWalkCandidate;
+    using Kind = pogo_runtime::PointWalkCandidateKind;
+    using Snapshot = pogo_runtime::RuntimeCatchSpinObservation;
+
+    std::vector<Candidate> pause_candidate() {
+        std::vector<Candidate> commands;
+        stop_active_candidate(&commands);
+        return commands;
+    }
+
+    std::vector<Candidate> reset_candidates() {
+        std::vector<Candidate> commands = pause_candidate();
+        target_ = Fort{};
+        last_arrived_.clear();
+        return commands;
+    }
+
+    std::vector<Candidate> update_candidates(const Snapshot &snapshot) {
+        std::vector<Candidate> commands;
+        if (!snapshot.nearby_available || !snapshot.nearby.is_complete ||
+            !snapshot.forts_available || !snapshot.has_player_position ||
+            !pogo_runtime::valid_navigation_coordinate(snapshot.player_latitude, snapshot.player_longitude)) {
+            stop_active_candidate(&commands);
+            return commands;
+        }
+        if (!last_arrived_.empty()) {
+            const auto previous = std::find_if(snapshot.forts.forts.begin(), snapshot.forts.forts.end(),
+                [this](const Fort &fort) { return fort.fort_id == last_arrived_; });
+            if (previous == snapshot.forts.forts.end() || !eligible(*previous) ||
+                distance(snapshot, *previous) > kArrivalMeters) last_arrived_.clear();
+        }
+        if (!snapshot.nearby.spawns.empty()) {
+            stop_active_candidate(&commands);
+            return commands;
+        }
+
+        if (!target_.fort_id.empty() && distance(snapshot, target_) <= kArrivalMeters) {
+            if (!active_candidate_id_.empty()) {
+                commands.push_back({Kind::kArrived, active_candidate_id_, 0.0, 0.0, false});
+                active_candidate_id_.clear();
+            }
+            last_arrived_ = target_.fort_id;
+            target_ = Fort{};
+        }
+
+        if (!target_.fort_id.empty()) {
+            const auto found = std::find_if(snapshot.forts.forts.begin(), snapshot.forts.forts.end(),
+                [this](const Fort &fort) { return fort.fort_id == target_.fort_id && eligible(fort); });
+            if (found == snapshot.forts.forts.end()) {
+                stop_active_candidate(&commands);
+                target_ = Fort{};
+            } else {
+                if (!active_candidate_id_.empty() &&
+                    (active_candidate_latitude_ != found->latitude ||
+                        active_candidate_longitude_ != found->longitude)) {
+                    stop_active_candidate(&commands);
+                }
+                target_ = *found;
+            }
+        }
+
+        if (target_.fort_id.empty()) {
+            const Fort *nearest = nullptr;
+            const Fort *away = nullptr;
+            for (const auto &fort : snapshot.forts.forts) {
+                if (!eligible(fort) || fort.fort_id == last_arrived_) continue;
+                if (nearer(snapshot, fort, nearest)) nearest = &fort;
+                if (distance(snapshot, fort) > kArrivalMeters && nearer(snapshot, fort, away)) away = &fort;
+            }
+            const Fort *selected = away != nullptr ? away : nearest;
+            if (selected != nullptr) target_ = *selected;
+        }
+
+        if (!target_.fort_id.empty() && active_candidate_id_.empty()) {
+            const std::string candidate_id = allocate_candidate_id();
+            if (!candidate_id.empty()) {
+                active_candidate_id_ = candidate_id;
+                active_candidate_latitude_ = target_.latitude;
+                active_candidate_longitude_ = target_.longitude;
+                commands.push_back({Kind::kWalk, active_candidate_id_, target_.latitude, target_.longitude, false});
+            }
+        }
+        return commands;
+    }
+
+private:
+    uint64_t candidate_sequence_ = 0U;
+    std::string active_candidate_id_;
+    double active_candidate_latitude_ = 0.0;
+    double active_candidate_longitude_ = 0.0;
+
+    void stop_active_candidate(std::vector<Candidate> *commands) {
+        if (commands == nullptr || active_candidate_id_.empty()) return;
+        commands->push_back({Kind::kStop, active_candidate_id_, 0.0, 0.0, false});
+        active_candidate_id_.clear();
+    }
+
+    std::string allocate_candidate_id() {
+        if (candidate_sequence_ == std::numeric_limits<uint64_t>::max()) return {};
+        ++candidate_sequence_;
+        return "fort-walk-" + std::to_string(candidate_sequence_);
     }
 };

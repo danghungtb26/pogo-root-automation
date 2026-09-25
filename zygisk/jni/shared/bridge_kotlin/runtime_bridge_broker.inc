@@ -195,6 +195,15 @@ bool handle_controller(int fd, BrokerContext &context) {
                     payload_version == pogo_runtime::kNavigationPayloadVersion) {
                     if (!send_runtime_navigation_observation(fd, context, map_target_payload,
                             observed_at_epoch_ms, observed_at_elapsed_ns)) return false;
+                } else if (observation_type == pogo_runtime::kPointWalkCandidateObservationType &&
+                    payload_version == pogo_runtime::kPointWalkCandidatePayloadVersion) {
+                    if (!send_runtime_walk_candidate_observation(
+                            fd,
+                            context,
+                            map_target_payload,
+                            observed_at_epoch_ms,
+                            observed_at_elapsed_ns
+                        )) return false;
                 } else if (observation_type == pogo_runtime::kLifecycleObservationType &&
                     payload_version == pogo_runtime::kLifecyclePayloadVersion &&
                     map_target_payload.size() == 4U) {
