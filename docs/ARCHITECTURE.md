@@ -69,8 +69,11 @@ pogo-root-automation/
 │   └── fake/                      Adapter xác định cho development/tests
 ├── scripts/                       Build, package và thao tác device/emulator
 ├── docs/                          Kiến trúc, thiết kế và bằng chứng kiểm chứng
-├── reverse/                       Reverse output sinh tự động, được ignore
-└── pogo-apkm/                     APK đầu vào reverse, chỉ đọc
+└── reverse/                       Artifact read-only, REA Evidence và report
+    ├── artifacts/                 APK/APKM/native input; binary lớn được ignore
+    ├── rea/                       Bundle Evidence deterministic được commit
+    ├── reports/                   Historical analyst reference
+    └── pogo-0.427.0/              Legacy hypothesis material, không chứng minh 0.433
 ```
 
 `app/` runtime chỉ phụ thuộc `core/` và `bridge/protocol/` (ngoài joystick AAR).
@@ -78,6 +81,8 @@ Các module `game-adapter/*` vẫn tồn tại để phục vụ adapter/test v�
 độc lập, nhưng không nằm trong dependency graph của APK controller.
 `core/` không phụ thuộc Android hay native; `bridge/protocol/` giữ wire DTO và
 codec của IPC. Native được build riêng qua CMake/NDK và script Magisk.
+Reverse binding dùng REA theo `AGENTS.md` và `reverse/README.md`; không có
+dependency runtime/build nào từ artifact reverse vào APK controller.
 
 ## 2. Native gồm gì, xử lý gì?
 

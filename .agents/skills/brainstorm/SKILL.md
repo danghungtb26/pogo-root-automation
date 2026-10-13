@@ -34,13 +34,14 @@ Output là kết quả phân tích có dẫn chứng và lý do ngắn gọn, kh
 
 ## Quy tắc đọc source Pokémon GO
 
-- Khi cần đọc source để xác định class, function/method, param, field, RVA hoặc hành vi của Pokémon GO, **bắt buộc đọc trong `reverse/` trước**.
-- Theo `AGENTS.md`, bộ reverse hiện tại nằm ở `reverse/pogo-0.427.0/classes/`, ứng với Pokémon GO `0.427.0`, version code `2026082702`, `arm64-v8a`. Đối chiếu metadata thực tế; không mặc định kết quả đúng cho phiên bản hay ABI khác.
-- Tìm bằng `rg` trong các class extract đã tuyển chọn trước. Chỉ tra dump đầy đủ dạng nén trong cùng thư mục khi extract chưa đủ. Không giải nén toàn bộ thành file text vượt giới hạn 500 dòng của dự án.
+- Khi cần xác định class, function/method, param, field, RVA hoặc hành vi của Pokémon GO, **bắt buộc bắt đầu từ `reverse/README.md`, artifact hash và REA Evidence**.
+- Kiểm `reverse/artifacts/SHA256SUMS`, import/query bundle canonical trong `reverse/rea/` trước khi chạy REA probe mới. Dùng đúng APK/base/split/native artifact cho version/build/ABI cần phân tích.
+- Với APK/DEX dùng REA Android operations; với ELF dùng REA native provider, search/xref và function dossier có mục tiêu. Mỗi fact phải ghi Evidence ID, artifact SHA-256, authority, coverage và limitation.
 - Không lấy code trong `app/`, `core/`, `game-adapter/` hoặc `zygisk/` làm bằng chứng thay thế cho implementation của game. Chỉ đọc các phần đó khi cần đối chiếu điểm tích hợp, sau lượt tra reverse; ghi rõ đâu là game, đâu là framework.
-- Nếu reverse thiếu hoặc không khớp build, ghi chính xác dữ liệu thiếu và phần kết luận bị chặn. Khi cần tái tạo, dùng entry point `./scripts/reverse-pogo-apk.sh` theo `AGENTS.md`; không sửa APK đầu vào.
+- `reverse/reports/` và `reverse/pogo-0.427.0/` là historical reference để tạo hypothesis, không chứng minh binding 0.433.0. Không chạy hoặc tạo lại `scripts/reverse-pogo-apk.sh`/Il2CppDumper pipeline.
+- Nếu REA evidence thiếu, provider không sẵn sàng hoặc artifact không khớp build, ghi residual unknown, dữ liệu thiếu và phần kết luận bị chặn; không sửa APK đầu vào và không tự chuyển sang tool/script reverse khác.
 - Không bắt đầu bằng dò tên trên live process. Sau lượt reverse, chỉ dùng runtime để xác minh instance, owner, lifetime, ABI/layout và postcondition khi cần. Khảo sát mặc định chỉ đọc và dùng script hiện có theo `AGENTS.md`.
-- Dump chỉ có signature, metadata hoặc method body rỗng **không chứng minh implementation hay call graph**. Phân biệt `Đã xác nhận`, `Suy luận` và `Chưa xác minh` cho từng nhận định; nêu bằng chứng cần bổ sung. Không suy ra chắc chắn hành vi chỉ từ tên method.
+- Signature, metadata, pseudocode decompiler hoặc method body rỗng **không tự chứng minh original source hay call graph**. Phân biệt `Đã xác nhận`, `Suy luận` và `Chưa xác minh` cho từng nhận định; nêu Evidence cần bổ sung. Không suy ra chắc chắn hành vi chỉ từ tên method.
 
 ## Quy trình
 
@@ -58,8 +59,8 @@ Output là kết quả phân tích có dẫn chứng và lý do ngắn gọn, kh
 ### Bước 2 — Thu thập bằng chứng từ reverse
 
 - Xác định package/version/version code/ABI/build mà bằng chứng áp dụng; giá trị thiếu ghi `Chưa xác minh`.
-- Tra các class, interface, model, enum và method liên quan trong reverse theo quy tắc trên.
-- Ghi đường dẫn và số dòng cho từng bằng chứng. Với dump nén, ghi đường dẫn archive, symbol và số dòng của nội dung giải nén được trích đọc.
+- Tra các class, interface, model, enum và method liên quan bằng REA theo quy tắc trên.
+- Ghi artifact path/hash, Evidence ID, provider/profile, authority, coverage, limitation và location/address/range khi REA cung cấp. Historical report phải được gắn nhãn riêng, không trộn với observed Evidence.
 - Lập danh sách symbol liên quan cùng vai trò sơ bộ, nguồn và giới hạn dữ liệu. Chưa thấy symbol thì ghi từ khóa/phạm vi đã tìm; không tự đặt tên game method cho đủ output.
 
 **Output bước 2:** bảng nguồn reverse, symbol tìm được, phạm vi phiên bản và dữ liệu còn thiếu. Lưu và thông báo trước bước 3.
@@ -74,13 +75,13 @@ Với mỗi function/method trực tiếp liên quan đến tính năng hoặc h
 - Hành vi: điều kiện trước khi gọi, dữ liệu đọc/ghi, thay đổi state, side effect, nhánh lỗi và điều kiện hoàn tất. Mỗi mô tả phải chỉ rõ điều nào đã xác nhận, suy luận hoặc chưa xác minh.
 - Caller/callee, dependency owner, thread và object lifetime nếu có bằng chứng; không bịa quan hệ gọi từ danh sách signature.
 - RVA/offset khi nguồn cung cấp và cần cho binding; luôn gắn với build/ABI. Không trộn param C# với receiver hoặc param ngầm của native ABI chưa được xác minh.
-- Nguồn `path:line` hỗ trợ signature và nguồn hỗ trợ hành vi; hai loại bằng chứng có thể khác nhau.
+- Nguồn REA Evidence/location hỗ trợ signature và nguồn hỗ trợ hành vi; hai loại bằng chứng có thể khác nhau. `path:line` chỉ dùng cho source/framework hoặc report tham khảo.
 
 Dùng mẫu ngắn cho từng symbol:
 
 ```markdown
 ### {Namespace.Class.Method} — {trạng thái bằng chứng}
-- Nguồn: {path:line}; build/ABI: {giá trị hoặc Chưa xác minh}
+- Nguồn: {Evidence ID + artifact hash/location, hoặc path:line cho source}; build/ABI: {giá trị hoặc Chưa xác minh}
 - Signature: `{signature chính xác hoặc Chưa tìm thấy}`
 - Vai trò và hành vi: {giải thích có dẫn chứng}
 

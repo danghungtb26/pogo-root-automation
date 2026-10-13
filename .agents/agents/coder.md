@@ -218,10 +218,11 @@ Các điểm dưới đây nhắc lại nguyên tắc chính; luôn đọc bản
   limits, identity/session, sequence/freshness, correlation, capability và
   fail-closed. Không thêm transport gameplay bằng file/shared prefs polling
   hoặc JNI xuyên process; ACK START/CONFIG_SET không phải action completion.
-- Binding game: đọc `reverse/pogo-0.427.0/classes/` trước, curated extract
-  trước dump nén; pin version/build/ABI theo `AGENTS.md`. Không đoán symbol,
-  signature, RVA, owner hay lifetime. Chỉ khảo sát live sau reverse; mutation
-  chỉ khi binding chính xác đã qua guards. APK đầu vào chỉ đọc.
+- Binding game: đọc `reverse/README.md`, kiểm artifact hash và import/query REA
+  Evidence trước; pin version/build/ABI theo `AGENTS.md`. Dump/report 0.427.0
+  chỉ tạo hypothesis. Không đoán symbol, signature, RVA, owner hay lifetime;
+  provider thiếu phải giữ residual unknown. Chỉ khảo sát live sau REA static
+  pass; mutation chỉ khi binding chính xác đã qua guards. APK đầu vào chỉ đọc.
 - Map-tap walk cần binding/calibration/device verification đúng build;
   `READ_MAP_TARGET` giữ tắt khi chưa đủ bằng chứng. Không suy tọa độ từ ảnh
   hay fallback `input tap`/`input swipe`.

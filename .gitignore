@@ -11,6 +11,15 @@ zygisk/module/libs/
 zygisk/module/obj/
 /pogo-apkm/
 /reverse/*
+!/reverse/README.md
+!/reverse/artifacts/
+/reverse/artifacts/*
+!/reverse/artifacts/README.md
+!/reverse/artifacts/SHA256SUMS
+!/reverse/rea/
+!/reverse/rea/**
+!/reverse/reports/
+!/reverse/reports/**
 !/reverse/pogo-0.427.0/
 /reverse/pogo-0.427.0/*
 !/reverse/pogo-0.427.0/*.gz

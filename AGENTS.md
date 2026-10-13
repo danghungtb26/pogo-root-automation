@@ -136,29 +136,40 @@ relevant log file only when the operation fails.
 
 ## Reverse-engineered APK workflow
 
-For version-specific Pokémon GO class, method, field, or RVA questions, read
-the local reverse output in `reverse/pogo-0.427.0/classes/` first. Use the
-full compressed dump files in that directory only when the curated class
-extract is insufficient. Do not begin by enumerating the live process to
-discover names that are already present in the reverse output.
+REA is the canonical reverse workflow. Do not run or recreate
+`scripts/reverse-pogo-apk.sh`, and do not use the old local Il2CppDumper output
+as evidence for a new binding.
 
-Use the live process only after the reverse pass, to verify instance state,
+Start from [the reverse index](reverse/README.md), verify the hashes in
+`reverse/artifacts/SHA256SUMS`, then import
+`reverse/rea/rea-evidence-2026-10-13.json` into REA. Query retained evidence
+before producing another analysis record. Use the staged read-only artifacts:
+
+- `reverse/artifacts/pogo-0.433.0/` for the APKM and REA-extracted base/arm64
+  split;
+- `reverse/artifacts/pgsroot-1.0.15/`, `libhela-1.273.1/` and
+  `pgtools-6.0.6/` as comparison artifacts;
+- `reverse/reports/` as historical analyst notes, not as a replacement for
+  artifact-backed REA evidence.
+
+For APK/DEX questions use REA Android operations such as
+`inspect_android_package`, `search_android_classes`, `inspect_android_class`,
+`inspect_android_method` and `trace_android_references`. For native questions
+use `open_binary`, focused search/xrefs and `analyze_function`; cite exact
+Evidence IDs, artifact SHA-256, authority, coverage and limitations. Export the
+updated deterministic bundle back to `reverse/rea/` when new evidence matters
+to implementation.
+
+`reverse/pogo-0.427.0/` is legacy historical material only. It may help form a
+search hypothesis but never proves a 0.433.0 class, field, method, layout, RVA
+or call path. If a required REA provider is unavailable, record the residual
+unknown and keep the associated capability closed instead of falling back to
+the legacy script/dump.
+
+Use the live process only after the REA static pass, to verify instance state,
 dependency owners, object lifetimes, ABI/layout assumptions, lifecycle
 postconditions, and device-specific behavior. Keep the process survey
 read-only unless an exact reverse-derived binding has passed its guards.
-
-Regenerate the local reverse artifacts with:
-
-```bash
-./scripts/reverse-pogo-apk.sh
-```
-
-The inputs are the exact APKs under `pogo-apkm/`; they are read-only and must
-not be modified or committed. Reverse output and the local Il2CppDumper tool
-are generated, ignored artifacts. The current output is pinned to Pokémon GO
-`0.427.0`, version code `2026082702`, arm64-v8a. Keep readable generated text
-files at or below the 500-line project limit; retain any complete oversized
-dump only in compressed form.
 
 ## Gradle usage
 

@@ -9,10 +9,10 @@ Dùng cùng quy trình trong `../SKILL.md`. Trả lời ở bước tương ứn
 
 ## Bước 2 — Bằng chứng game
 
-- Bộ reverse nào khớp phiên bản/build/ABI đang phân tích?
-- Class/interface/model/enum nào tham gia? Đã đọc extract nào trong `reverse/`?
-- Extract đã đủ chưa? Nếu chưa, phần nào trong dump nén cần tra thêm?
-- Bằng chứng là implementation, metadata/signature hay chỉ là suy luận?
+- Artifact/hash và REA bundle nào khớp phiên bản/build/ABI đang phân tích?
+- Class/interface/model/enum nào tham gia? Evidence ID/provider/location nào hỗ trợ?
+- Coverage đã đủ chưa? Nếu chưa, REA probe/provider nào và residual unknown nào cần ghi?
+- Bằng chứng là artifact observation, metadata/signature, decompiler pseudocode, historical report hay chỉ là suy luận?
 
 ## Bước 3 — Function/method và param
 

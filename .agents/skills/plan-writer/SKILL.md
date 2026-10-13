@@ -24,10 +24,10 @@ Viết kế hoạch mà agent có thể thực hiện theo thứ tự, biết s�
 
 ## 2. Đối chiếu source và chọn template
 
-- Khi cần xác định class, function/method, param, field, RVA hoặc hành vi game, đọc `reverse/pogo-0.427.0/classes/` trước theo `AGENTS.md`; dùng extract trước dump nén. Đối chiếu version/build/ABI, không suy ra implementation từ signature hoặc body rỗng.
-- Tận dụng bằng chứng brainstorm đã có, mở lại đoạn reverse liên quan khi cần kiểm tra trước khi chốt task. Không dùng framework làm bằng chứng thay thế implementation game; không bắt đầu bằng dò live process.
+- Khi cần xác định class, function/method, param, field, RVA hoặc hành vi game, đọc `reverse/README.md`, kiểm artifact hash, import/query bundle `reverse/rea/` và dùng REA trên đúng build/ABI theo `AGENTS.md`. Dump 0.427.0/report cũ chỉ tạo hypothesis; không suy ra implementation từ signature, body rỗng hay tên method.
+- Tận dụng Evidence ID trong brainstorm đã có và inspect lại retained Evidence khi cần kiểm tra trước khi chốt task. Không dùng framework/report làm bằng chứng thay thế implementation game; không bắt đầu bằng dò live process.
 - Đọc source framework cần thiết để xác nhận path, caller/callee, contract và test đang có. Dùng `rg`/`rg --files`; phân biệt file hiện có với file mới dự kiến tạo.
-- Task dùng game method phải dẫn tới nguồn reverse hoặc mục brainstorm có nguồn, ghi signature, param và hành vi liên quan. Symbol chưa xác minh trở thành dependency discovery, không trở thành method/RVA được đoán sẵn trong task code.
+- Task dùng game method phải dẫn tới artifact hash + REA Evidence ID hoặc mục brainstorm có nguồn tương đương, ghi authority/coverage/limitation, signature, param và hành vi liên quan. Symbol chưa xác minh trở thành dependency discovery, không trở thành method/RVA được đoán sẵn trong task code.
 - Đọc [phân công](references/agents.md), [quy tắc thực thi và ghi chú](references/execution-notes.md), [kiểm chứng](references/verification.md), rồi chỉ đọc template phù hợp:
 
 | Scope | Dùng khi | Template |
@@ -132,7 +132,7 @@ Khi sửa plan đang thực thi, giữ ID, checkbox và lịch sử ghi chú đ�
 Trước khi bàn giao, rà soát:
 
 - Task dùng đúng module/path/tooling của repo; tên file mới được ghi rõ là dự kiến tạo.
-- Method game có bằng chứng reverse/build/ABI; phần chưa xác minh có discovery dependency.
+- Method game có artifact hash + REA Evidence/build/ABI; phần chưa xác minh có discovery dependency hoặc residual unknown.
 - Mỗi task có ID, layer, owner, AC phù hợp, dependency và Verify; nếu không ánh xạ AC trực tiếp, nêu điều kiện kỹ thuật mà task hỗ trợ.
 - Dependency không vòng; task code không chạy trước guard/bằng chứng cần thiết.
 - Mọi checkbox có `<details><summary>` ngay dưới; task mới vẫn `[ ]`, không có ghi chú thành công bịa sẵn.

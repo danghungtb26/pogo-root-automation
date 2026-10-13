@@ -1,0 +1,10 @@
+1c8f198cd212e7303e5a5e38e34857f4ced42eb432ac62b07807bfd286503690  reverse/artifacts/pogo-0.433.0/base.apk
+1b120bb485310777f196fdb8cb827b63887e91f83fe81dc0cdb7e67a2d518278  reverse/artifacts/pogo-0.433.0/com.nianticlabs.pokemongo_arm64-v8a_0.433.0.apkm
+8f4a472ca8fd59cc794f4f0b32fff3920c55211bbab955ec8b79f7aa4fe5f0a0  reverse/artifacts/pogo-0.433.0/split_config.arm64_v8a.apk
+f5961a8548256da287b4f79466a169c302b90ec59be7f6461e8e58b482c0fb0d  reverse/artifacts/pogo-0.433.0/native/global-metadata.dat
+6b1e11619362ddd53f9dbcd7be1d4296bdec5dda27b9f742c16b8403359c25a0  reverse/artifacts/pogo-0.433.0/native/libil2cpp.so
+2e0f328a15094ebc0f2f91cfac72fb94024abdce95ac48b229b4be7b3dce7297  reverse/artifacts/pgsroot-1.0.15/pgsroot1.0.15_BIeEp(arm64).apk
+7bdb545aae4d3bb870da6c8afab8150979e27b5e1736f51e33d0d9e3239a00df  reverse/artifacts/libhela-1.273.1/libhela-1.273.1-embedded-ui.apk
+893b84c077942b988e3419eeac54d973a35f9dd90a65e79b33bd894f081a6ef2  reverse/artifacts/libhela-1.273.1/libhela-1.273.1-pogo-0.433.0.so
+9fc15ebd95f454a2428bb613873de8acef68d71344cbfaf8cda50fcd88708f39  reverse/artifacts/libhela-1.273.1/pgsrt1.273.1_0.433.0.dt
+b30b5c45a6425bdc74a13254dac5e22e8e58f827d098562b12fa1cd41660f78f  reverse/artifacts/pgtools-6.0.6/pgtools-6.0.6-079d8b42e6c6cfaae64033341f861ac6.apk

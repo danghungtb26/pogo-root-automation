@@ -4,9 +4,10 @@ Dùng cho method/field binding theo build, native hook, owner resolution, lifecy
 
 ## Bằng chứng trước implementation
 
-- Đọc curated extract trong `reverse/pogo-0.427.0/classes/` trước dump nén; đối chiếu metadata build/ABI theo `AGENTS.md`.
-- Ghi class/owner, signature, param, return/callback, field/RVA cần thiết và nguồn; không dựng call graph từ tên method.
-- Task runtime discovery chỉ sau reverse, ưu tiên read-only; xác minh instance owner, lifetime, thread, ABI/layout và postcondition còn thiếu bằng script hiện có.
+- Đọc `reverse/README.md`, kiểm hash trong `reverse/artifacts/SHA256SUMS`, import bundle ở `reverse/rea/` và tra retained Evidence trước khi chạy probe REA mới; không dùng `scripts/reverse-pogo-apk.sh` hoặc dump 0.427.0 để chứng minh binding 0.433.0.
+- Ghi class/owner, signature, param, return/callback, field/RVA cần thiết cùng Evidence ID, artifact SHA-256, authority, coverage và limitation; không dựng call graph từ tên method hoặc báo cáo lịch sử.
+- Dùng REA Android tools cho APK/DEX và REA native tools cho ELF/callsite. Provider thiếu thì ghi residual unknown, không tự thay bằng script reverse khác.
+- Task runtime discovery chỉ sau REA static pass, ưu tiên read-only; xác minh instance owner, lifetime, thread, ABI/layout và postcondition còn thiếu bằng script device hiện có.
 
 ## Binding và guards
 
