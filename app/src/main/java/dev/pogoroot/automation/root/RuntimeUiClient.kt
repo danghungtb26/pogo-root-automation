@@ -37,6 +37,10 @@ class RuntimeUiClient(
 
     fun currentStatus(): RuntimeUiStatus? = latestStatus
 
+    fun rememberDesiredState(state: RuntimeDesiredState) {
+        latestDesiredState = state
+    }
+
     fun connect(): Result<BridgeEvent.RuntimeReady> = runCatching {
         bindTransportListeners()
         val wasConnected = transport.connected
@@ -57,7 +61,7 @@ class RuntimeUiClient(
     }
 
     fun submitDesiredState(state: RuntimeDesiredState): Result<DesiredStateReceipt> = runCatching {
-        latestDesiredState = state
+        rememberDesiredState(state)
         val ready = if (transport.connected) {
             transport.currentRuntimeReady() ?: transport.connect().getOrThrow()
         } else {

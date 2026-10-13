@@ -3,6 +3,7 @@ package dev.pogoroot.automation.service
 import android.util.Log
 import dev.pogoroot.automation.bridge.RuntimeNativeLifecycle
 import dev.pogoroot.automation.config.AutomationConfigRepository
+import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
 import dev.pogoroot.automation.config.RuntimeDesiredStateMapper
 import dev.pogoroot.automation.data.MapTargetRepository
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit
 data class RuntimeUiAutomationStatus(
     val running: Boolean,
     val enabled: Boolean,
+    val catchSpinArmed: Boolean,
     val runtimeSessionId: String?,
     val runtimeControlState: String,
     val runtimeModules: Map<String, String>,
@@ -39,9 +41,11 @@ data class RuntimeUiAutomationStatus(
  */
 class RuntimeUiAutomationFacade(
     private val configRepository: AutomationConfigRepository,
+    private val catchSpinArmState: CatchSpinArmState,
     eventSink: AutomationEventSink,
     mapTargetRepository: MapTargetRepository,
     walkCandidateReceiver: NativeWalkCandidateReceiver,
+    private val onRuntimeInactive: (String) -> Unit = {},
     private val client: RuntimeUiClient = RuntimeUiClient(),
 ) {
     private val executor = Executors.newSingleThreadScheduledExecutor()
@@ -55,6 +59,13 @@ class RuntimeUiAutomationFacade(
         },
         onPointWalkCandidate = walkCandidateReceiver::receive,
         onPointWalkCandidateReset = walkCandidateReceiver::reset,
+        onRuntimeSessionChanged = { previous, current ->
+            if (previous != null && previous != current) disarmForRuntimeBoundary("runtime_session_changed")
+        },
+        onRuntimeSessionLost = { reason ->
+            disarmForRuntimeBoundary(reason)
+            onRuntimeInactive(reason)
+        },
     )
     @Volatile private var serviceRunning = false
     @Volatile private var lastSubmittedRevision: Long? = null
@@ -77,6 +88,37 @@ class RuntimeUiAutomationFacade(
     }
 
     fun disable(): HeadlessAutomationConfig = configRepository.update { it.copy(enabled = false) }
+
+    fun armCurrentSession(): Result<DesiredStateReceipt> = onRuntimeThread {
+        val sessionId = router.snapshot().runtimeSessionId
+            ?: return@onRuntimeThread Result.failure(
+                IllegalStateException("No active runtime session is available to arm."),
+            )
+        catchSpinArmState.arm(sessionId)
+        val config = configRepository.update { it.copy(enabled = true) }
+        lastSubmittedRevision = null
+        client.submitDesiredState(mapDesiredState(config, sessionId)).onFailure {
+            catchSpinArmState.disarm("arm_submit_failed")
+            val disarmed = configRepository.update { it }
+            val desired = mapDesiredState(disarmed, sessionId = null)
+            client.rememberDesiredState(desired)
+            lastSubmittedRevision = null
+            if (client.connected) client.submitDesiredState(desired)
+        }
+    }
+
+    fun disarm(reason: String): Result<DesiredStateReceipt>? {
+        if (!catchSpinArmState.disarm(reason)) return null
+        val config = configRepository.update { it }
+        lastSubmittedRevision = null
+        val desired = mapDesiredState(config, router.snapshot().runtimeSessionId)
+        client.rememberDesiredState(desired)
+        return if (client.connected) {
+            client.submitDesiredState(desired)
+        } else {
+            null
+        }
+    }
 
     fun updateConfig(transform: (HeadlessAutomationConfig) -> HeadlessAutomationConfig):
         HeadlessAutomationConfig = configRepository.update(transform)
@@ -103,11 +145,12 @@ class RuntimeUiAutomationFacade(
         serviceRunning = false
         poll?.cancel(true)
         poll = null
+        catchSpinArmState.disarm("service_shutdown")
         val disabled = configRepository.update { it.copy(enabled = false) }
         runCatching {
             executor.submit {
                 lastSubmittedRevision = null
-                client.submitDesiredState(RuntimeDesiredStateMapper.map(disabled))
+                client.submitDesiredState(mapDesiredState(disabled, router.snapshot().runtimeSessionId))
                 router.stop()
             }.get(SHUTDOWN_TIMEOUT_MS, TimeUnit.MILLISECONDS)
         }.onFailure { error ->
@@ -121,7 +164,9 @@ class RuntimeUiAutomationFacade(
     private fun pollRuntime() {
         val config = configRepository.read()
         if (lastSubmittedRevision != config.configRevision) {
-            val result = client.submitDesiredState(RuntimeDesiredStateMapper.map(config))
+            val result = client.submitDesiredState(
+                mapDesiredState(config, router.snapshot().runtimeSessionId),
+            )
             if (result.isSuccess) {
                 lastSubmittedRevision = config.configRevision
             } else {
@@ -139,7 +184,9 @@ class RuntimeUiAutomationFacade(
 
     private fun submitCurrentDesiredStateOnRuntimeThread(): Result<DesiredStateReceipt> {
         val config = configRepository.read()
-        return client.submitDesiredState(RuntimeDesiredStateMapper.map(config)).also { result ->
+        return client.submitDesiredState(
+            mapDesiredState(config, router.snapshot().runtimeSessionId),
+        ).also { result ->
             if (result.isSuccess) lastSubmittedRevision = config.configRevision
         }
     }
@@ -159,6 +206,9 @@ class RuntimeUiAutomationFacade(
         return RuntimeUiAutomationStatus(
             running = serviceRunning,
             enabled = config.enabled,
+            catchSpinArmed = catchSpinArmState.snapshot(
+                native?.runtimeSessionId ?: state.runtimeSessionId,
+            ),
             runtimeSessionId = native?.runtimeSessionId ?: state.runtimeSessionId,
             runtimeControlState = lifecycle.toControlState(client.connected),
             runtimeModules = native?.modules?.associate { it.moduleName to it.state.name }.orEmpty(),
@@ -185,6 +235,22 @@ class RuntimeUiAutomationFacade(
         RuntimeNativeLifecycle.STOPPING -> "STOPPING"
         RuntimeNativeLifecycle.ERROR -> "ERROR"
         RuntimeNativeLifecycle.UNKNOWN -> "ATTACHED_IDLE"
+    }
+
+    private fun mapDesiredState(
+        config: HeadlessAutomationConfig,
+        sessionId: String?,
+    ) = RuntimeDesiredStateMapper.map(config, catchSpinArmState.snapshot(sessionId))
+
+    private fun disarmForRuntimeBoundary(reason: String) {
+        if (!catchSpinArmState.disarm(reason)) return
+        val config = configRepository.update { it }
+        lastSubmittedRevision = null
+        val desired = mapDesiredState(config, sessionId = null)
+        client.rememberDesiredState(desired)
+        if (client.connected) {
+            runCatching { client.submitDesiredState(desired) }
+        }
     }
 
     private companion object {

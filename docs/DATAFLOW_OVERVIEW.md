@@ -8,7 +8,7 @@
 
 ```text
 APP (Kotlin)
-  UI · SharedPreferences · HTTP facade · RuntimeUiClient · fake location
+  UI · SharedPreferences · RuntimeUiClient · fake location
         │ RuntimeDesiredState / RuntimeUiStatus / typed events
 BRIDGE (Kotlin ↔ C++)
   versioned frames · session · identity · sequence · freshness · peer auth
@@ -28,7 +28,7 @@ shared-preference polling hoặc direct cross-process JNI làm gameplay transpor
 
 ```mermaid
 flowchart LR
-    UI["Settings / HTTP API"] --> P["AutomationConfigRepository"]
+    UI["Settings / overlay"] --> P["AutomationConfigRepository"]
     P --> F["RuntimeUiAutomationFacade"]
     F --> M["RuntimeDesiredStateMapper"]
     M --> C["RuntimeUiClient"]
@@ -123,23 +123,12 @@ Location exception:
 - Map target có TTL 30 giây; local arrival chỉ dừng movement, không dispatch
   gameplay.
 
-## 7. API và compatibility
+## 7. UI control và compatibility
 
-`AutomationControlServer` giữ endpoint/query tương thích cho scripts:
-
-| Endpoint | Hành vi hiện tại |
-|---|---|
-| `GET /v1/status` | Desired config + native status, phân biệt ready/applied |
-| `POST /v1/start` | Ghi desired enabled/config qua facade |
-| `POST /v1/stop` | Ghi desired disabled; không gửi gameplay loop |
-| `POST /v1/config` | Validate/lưu config và tăng revision |
-| `POST /v1/runtime/diagnostic` | Gửi explicit diagnostic request |
-
-`RuntimeLifecycleCoordinator`, ba config dispatcher và `RuntimeControlBridge`
-vẫn có thể tồn tại cho `RuntimeLifecycleCoordinatorTest`, nhưng production
-service/API không tạo chúng. `game-adapter/*`, `RuntimeSessionManager` và action
-contract còn consumer cũng được giữ có lý do; không tuyên bố đã xóa toàn bộ
-legacy source.
+MainActivity/overlay là control surface duy nhất. Manual arm chỉ tồn tại trong
+RAM cho exact runtime session; không có loopback HTTP hoặc host CLI để arm.
+`RuntimeLifecycleCoordinator` và compatibility classes còn test consumer có thể
+tồn tại, nhưng production service không tạo chúng.
 
 ## 8. Verification boundary
 

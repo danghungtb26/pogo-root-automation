@@ -4,10 +4,13 @@ import dev.pogoroot.automation.bridge.RuntimeDesiredState
 
 /** Maps durable Android settings to the single native desired-state snapshot. */
 object RuntimeDesiredStateMapper {
-    fun map(config: HeadlessAutomationConfig): RuntimeDesiredState = RuntimeDesiredState(
+    fun map(
+        config: HeadlessAutomationConfig,
+        catchSpinArmed: Boolean = false,
+    ): RuntimeDesiredState = RuntimeDesiredState(
         configRevision = config.configRevision,
         enabled = config.enabled,
-        catchSpinArmed = config.catchSpinArmed,
+        catchSpinArmed = catchSpinArmed,
         autoCatch = config.autoCatch,
         autoSpin = config.autoSpin,
         autoEncounter = config.autoEncounter,

@@ -201,7 +201,11 @@ bool send_runtime_ui_status(ProbeContext &context) {
     } else {
         status.lifecycle = pogo_runtime_ui_status::NativeLifecycle::kBindingReady;
     }
-    if (!first_error.empty()) {
+    if (!binding.exact_build_verified) {
+        status.error_code = "unsupported_build";
+        status.error_message =
+            "0.433.0 runtime identity is incomplete; gameplay mutation is disabled";
+    } else if (!first_error.empty()) {
         status.error_code = first_error;
         status.error_message = "one or more desired native modules are unavailable";
     } else if (desired_enabled && !map_ready) {

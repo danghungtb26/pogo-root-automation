@@ -7,6 +7,7 @@ import android.location.LocationManager
 import android.os.SystemClock
 import dev.pogoroot.automation.core.model.GeoPoint
 import dev.pogoroot.automation.root.ProcessRootShell
+import dev.pogoroot.automation.root.RootCommand
 import dev.pogoroot.automation.root.RootShell
 
 interface MockLocationSink {
@@ -25,7 +26,7 @@ class RootMockLocationProvider(
 
     override fun start(): Result<Unit> = runCatching {
         val appOps = rootShell.execute(
-            "appops set ${appContext.packageName} android:mock_location allow",
+            RootCommand.SetMockLocation(appContext.packageName, allowed = true),
             timeoutMillis = 5_000L,
         )
         check(appOps.isSuccess) {
@@ -81,7 +82,7 @@ class RootMockLocationProvider(
         // so temporarily restore it for cleanup before denying it again.
         runCatching {
             rootShell.execute(
-                "appops set ${appContext.packageName} android:mock_location allow",
+                RootCommand.SetMockLocation(appContext.packageName, allowed = true),
                 timeoutMillis = 5_000L,
             )
         }
@@ -98,7 +99,7 @@ class RootMockLocationProvider(
         // failed part-way through.
         runCatching {
             rootShell.execute(
-                "appops set ${appContext.packageName} android:mock_location deny",
+                RootCommand.SetMockLocation(appContext.packageName, allowed = false),
                 timeoutMillis = 5_000L,
             )
         }

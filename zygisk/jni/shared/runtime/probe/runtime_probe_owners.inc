@@ -293,11 +293,6 @@ const void *find_runtime_method_with_two_parameters(
 
 bool verify_expected_il2cpp_build_id(const char *library_path) {
     if (library_path == nullptr || library_path[0] == '\0') return false;
-    static constexpr uint8_t kExpectedBuildId[] = {
-        0x84U, 0xedU, 0x21U, 0x00U, 0x98U, 0x99U, 0xc8U, 0x4aU,
-        0xbcU, 0xa0U, 0x1eU, 0x0bU, 0x8cU, 0x6fU, 0x4bU, 0x0bU,
-        0x05U, 0x4fU, 0x26U, 0x4eU,
-    };
     const int fd = open(library_path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) return false;
     Elf64_Ehdr header{};
@@ -340,8 +335,12 @@ bool verify_expected_il2cpp_build_id(const char *library_path) {
             const uint8_t *name = notes.data() + offset;
             const uint8_t *description = name + name_padded;
             if (type == 3U && name_size >= 3U && memcmp(name, "GNU", 3U) == 0 &&
-                description_size == sizeof(kExpectedBuildId) &&
-                memcmp(description, kExpectedBuildId, sizeof(kExpectedBuildId)) == 0) {
+                description_size == pogo_runtime_profile::kIl2cppBuildIdSize &&
+                memcmp(
+                    description,
+                    pogo_runtime_profile::kIl2cppBuildId,
+                    pogo_runtime_profile::kIl2cppBuildIdSize
+                ) == 0) {
                 close(fd);
                 return true;
             }

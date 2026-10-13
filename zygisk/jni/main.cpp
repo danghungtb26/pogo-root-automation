@@ -12,6 +12,7 @@
 #include "shared/bridge_kotlin/runtime_transfer_config_protocol.h"
 #include "shared/bridge_kotlin/runtime_desired_state_protocol.h"
 #include "shared/bridge_kotlin/runtime_ui_status_protocol.h"
+#include "shared/runtime/probe/runtime_build_profile.h"
 #include "shared/core/runtime_native_prelude.inc"
 #include "shared/core/runtime_native_declarations.inc"
 #include "shared/runtime/inventory/runtime_inventory_common.inc"

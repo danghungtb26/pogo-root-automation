@@ -24,23 +24,15 @@ jobs:
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: "9.5.0"
 
       - name: Shell syntax
         run: |
           bash -n scripts/build-magisk.sh
-          bash -n scripts/push-emulator.sh
-          bash -n scripts/install-magisk-module.sh
           bash -n scripts/logcat-full.sh
           bash -n scripts/lib/emulator.sh
           bash -n scripts/package-magisk.sh
-          bash -n scripts/device-smoke-test.sh
-          bash -n scripts/bluestacks-smoke-test.sh
-          bash -n scripts/binding-probe-test.sh
           bash -n scripts/collect-binding-diagnostics.sh
           bash -n scripts/vendor-pogoenhancer-libs.sh
-          bash -n scripts/headless-control.sh
           sh -n zygisk/module/bin/runtime-status.sh
           sh -n zygisk/module/post-fs-data.sh
           sh -n zygisk/module/uninstall.sh
@@ -53,8 +45,8 @@ jobs:
           test "$(git hash-object app/libs/parser-1.6.0.aar)" = "477b7512e2aa76283330de9e659635a4f9a19680"
           test "$(git hash-object app/libs/virtualjoystick-1.10.1.aar)" = "de697c4501bf8b2fac31343b1bee7f572eee208c"
 
-      - name: Test and build controller APK
-        run: ./gradlew test assembleDebug
+      - name: Build canonical multi-ABI module
+        run: ./scripts/build-magisk.sh
 
       - name: Test native readiness, navigation and telemetry
         run: |
@@ -77,50 +69,28 @@ jobs:
             zygisk/tests/runtime_discard_preparation_test.cpp -o /tmp/runtime_discard_preparation_test
           /tmp/runtime_discard_preparation_test
 
-      - name: Fetch canonical Zygisk API header
-        run: |
-          mkdir -p "$RUNNER_TEMP/zygisk-api"
-          curl -fsSL \
-            https://raw.githubusercontent.com/topjohnwu/zygisk-module-sample/7bb941ac8edfcffd1d23761e401c45ca95409dc1/module/jni/zygisk.hpp \
-            -o "$RUNNER_TEMP/zygisk-api/zygisk.hpp"
+      - name: Test and build controller APK
+        run: ./gradlew test assembleDebug
 
-      - name: Build arm64 Zygisk runtime
+      - name: Inspect standalone and bundled module artifacts
         run: |
-          CMAKE="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
-          NDK="$ANDROID_HOME/ndk/28.2.13676358"
-          "$CMAKE" \
-            -S zygisk/jni \
-            -B build/zygisk-arm64 \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-28 \
-            -DZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
-          "$CMAKE" --build build/zygisk-arm64
-
-      - name: Build x86_64 Zygisk runtime
-        run: |
-          CMAKE="$ANDROID_HOME/cmake/3.22.1/bin/cmake"
-          NDK="$ANDROID_HOME/ndk/28.2.13676358"
-          "$CMAKE" \
-            -S zygisk/jni \
-            -B build/zygisk-x86_64 \
-            -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
-            -DANDROID_ABI=x86_64 \
-            -DANDROID_PLATFORM=android-28 \
-            -DZYGISK_API_DIR="$RUNNER_TEMP/zygisk-api"
-          "$CMAKE" --build build/zygisk-x86_64
-
-      - name: Package multi-ABI Magisk module
-        run: |
-          ./scripts/package-magisk.sh \
-            build/zygisk-arm64/libpogo_root_automation.so \
-            build/zygisk-x86_64/libpogo_root_automation.so \
-            build/pogo-root-automation-magisk-multiabi.zip
           test -s build/pogo-root-automation-magisk-multiabi.zip
+          test -s build/pogo-root-automation-magisk-multiabi.manifest.json
           unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/arm64-v8a.so'
           unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/x86_64.so'
+          test "$(sha256sum build/pogo-root-automation-magisk-multiabi.zip | cut -d ' ' -f 1)" = \
+            "$(jq -r '.zipSha256' build/pogo-root-automation-magisk-multiabi.manifest.json)"
+          test "$(unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -c '^assets/pogo-module/.*\.zip$')" -eq 1
+          unzip -p app/build/outputs/apk/debug/app-debug.apk \
+            assets/pogo-module/pogo-root-automation-magisk-multiabi.zip \
+            > "$RUNNER_TEMP/bundled-module.zip"
+          unzip -p app/build/outputs/apk/debug/app-debug.apk \
+            assets/pogo-module/pogo-root-automation-magisk-multiabi.manifest.json \
+            > "$RUNNER_TEMP/bundled-module.manifest.json"
+          cmp build/pogo-root-automation-magisk-multiabi.manifest.json \
+            "$RUNNER_TEMP/bundled-module.manifest.json"
+          test "$(sha256sum "$RUNNER_TEMP/bundled-module.zip" | cut -d ' ' -f 1)" = \
+            "$(jq -r '.zipSha256' "$RUNNER_TEMP/bundled-module.manifest.json")"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -128,3 +98,4 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             build/pogo-root-automation-magisk-multiabi.zip
+            build/pogo-root-automation-magisk-multiabi.manifest.json

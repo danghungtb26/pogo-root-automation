@@ -320,10 +320,18 @@ class JoystickOverlayService : Service() {
 
     private fun applyAutomationToggle(key: String, enabled: Boolean) {
         if (key == "automation") {
-            automationConfigRepository.update { it.copy(catchSpinArmed = enabled) }
-            CatchSpinArmState.setArmed(enabled)
+            if (enabled) {
+                val current = automationConfigRepository.read()
+                HeadlessAutomationService.enable(
+                    this,
+                    autoCatch = current.autoCatch,
+                    autoSpin = current.autoSpin,
+                    autoEncounter = current.autoEncounter,
+                )
+            } else {
+                HeadlessAutomationService.disable(this)
+            }
             renderShortcutStates()
-            requestRuntimeConfigSync()
             return
         }
         automationConfigRepository.update { current ->

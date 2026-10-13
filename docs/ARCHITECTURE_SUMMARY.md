@@ -6,13 +6,13 @@
 ## 1. Project đang làm gì?
 
 Đây là Android controller cho Pokémon GO trên thiết bị/emulator đã root. Kotlin
-giữ UI, persistence, HTTP facade và fake-location; native giữ readiness,
+giữ UI, persistence và fake-location; native giữ readiness,
 game-state interpretation, module policy và gameplay. Khi binding chưa sẵn sàng,
 native phát trạng thái fail-closed thay vì nhờ app suy đoán.
 
 Các khả năng chính:
 
-- Foreground service và HTTP control plane trên `127.0.0.1:8765`.
+- Foreground service được điều khiển qua app UI/overlay; không mở HTTP port.
 - Desired-state sync có revision qua bridge; status native tách received,
   applied và ready.
 - Floating joystick, teleport và walk-to-location qua Android mock location.
@@ -26,8 +26,7 @@ hiding hay anti-detection.
 ## 2. Runtime flow
 
 ```text
-Host scripts / operator
-  -> ADB forward -> local HTTP API
+App UI / overlay
   -> HeadlessAutomationService
   -> RuntimeUiAutomationFacade
   -> RuntimeUiClient / RuntimeBridgeClient
@@ -44,8 +43,8 @@ không chọn gameplay target và không gửi mutation mới.
 
 - `MainActivity` khởi động service và hiển thị trạng thái cấu hình.
 - `AutomationBootReceiver` khởi động lại service sau boot.
-- `HeadlessAutomationService` tạo repository, `RuntimeUiAutomationFacade`,
-  location wiring và loopback API.
+- `HeadlessAutomationService` tạo repository, `RuntimeUiAutomationFacade` và
+  location wiring.
 - `JoystickOverlayService` là service độc lập cho location control.
 
 `AutomationConfigRepository` giữ config trong SharedPreferences namespace
@@ -71,21 +70,11 @@ reconcile atomically theo revision, rồi phát:
 chỉ cache status UI mới nhất để controller mới nhận; không replay gameplay
 command hay pending mutation.
 
-## 5. Local control API
+## 5. Control surface
 
-Server chỉ bind `127.0.0.1`; host helper tạo ADB port forward.
-
-| Method | Endpoint | Tác dụng |
-|---|---|---|
-| `GET` | `/health`, `/v1/health` | Health check |
-| `GET` | `/v1/status` | Desired config và native status |
-| `POST` | `/v1/start?...` | Cập nhật desired enabled/config qua facade |
-| `POST` | `/v1/stop` | Ghi desired disabled, không dispatch gameplay |
-| `POST` | `/v1/config?...` | Cập nhật config/revision |
-| `POST` | `/v1/runtime/diagnostic` | Yêu cầu diagnostic explicit qua native |
-
-Không có direct manual catch/spin route. Native là owner của gameplay action;
-Kotlin chỉ hiển thị outcome/event và thực hiện movement được phép.
+MainActivity và overlay là các nguồn user action duy nhất. Không có loopback
+HTTP/ADB-forward control plane. Native vẫn là owner của gameplay action; Kotlin
+chỉ hiển thị outcome/event và thực hiện movement được phép.
 
 ## 6. Built-in joystick và location control
 
@@ -140,7 +129,7 @@ loại khỏi đường runtime live.
 | Android entry/service | `app/src/main/java/dev/pogoroot/automation/MainActivity.kt`, `service/HeadlessAutomationService.kt` |
 | UI runtime facade | `service/RuntimeUiAutomationFacade.kt`, `runtime/RuntimeUiStateStore.kt` |
 | Status/event bridge | `root/RuntimeUiClient.kt`, `runtime/observation/RuntimeUiEventRouter.kt` |
-| Config/API | `config/AutomationConfig.kt`, `config/RuntimeDesiredStateMapper.kt`, `service/AutomationControlServer.kt` |
+| Config/UI mapping | `config/AutomationConfig.kt`, `config/RuntimeDesiredStateMapper.kt` |
 | Joystick/location | `location/*`, `overlay/*` |
 | Native bridge | `zygisk/jni/main.cpp`, `zygisk/jni/shared/bridge_kotlin/*` |
 | Bridge contracts | `bridge/protocol/...` |

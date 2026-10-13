@@ -461,10 +461,10 @@ class RuntimeBridgeClient(
 
     private fun registerControllerUid(): Boolean {
         val uid = Process.myUid()
-        val command = "mkdir -p $BROKER_DIRECTORY && chmod 0711 $BROKER_DIRECTORY && " +
-            "printf '%s\\n' '$uid' > $CONTROLLER_UID_FILE && " +
-            "chmod 0600 $CONTROLLER_UID_FILE"
-        return rootShell.execute(command, timeoutMillis = 3_000L).isSuccess
+        return rootShell.execute(
+            RootCommand.RegisterControllerUid(uid),
+            timeoutMillis = 3_000L,
+        ).isSuccess
     }
 
     private fun <T> ConcurrentLinkedQueue<T>.findAndRemove(predicate: (T) -> Boolean): T? {
@@ -475,8 +475,6 @@ class RuntimeBridgeClient(
     }
 
     companion object {
-        private const val BROKER_DIRECTORY = "/data/adb/pogo_root_automation"
-        private const val CONTROLLER_UID_FILE = "$BROKER_DIRECTORY/controller.uids"
         private const val MODULE_LOAD_COMMAND_PREFIX = "runtime-module-load:"
         const val DEFAULT_SOCKET_NAME = "pogo_root_automation_runtime"
         private const val CONTROL_TIMEOUT_NS = 30_000_000_000L

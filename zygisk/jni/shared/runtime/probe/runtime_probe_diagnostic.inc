@@ -43,6 +43,7 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
         api,
         assemblies,
         assembly_count,
+        context.process_name,
         context.il2cpp_path,
         &binding
     );

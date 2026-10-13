@@ -146,7 +146,7 @@ Cơ chế bù (chỉ **thủ công**, không auto — để START không tự ch
   rồi `send_runtime_capability_update` để advertise lại. Khi đang có module observe thì
   vẫn giữ binding đóng băng (trả "binding stays frozen"). Chỉ chạy khi có lệnh `DIAGNOSTIC`.
 - **Client**: `DIAGNOSTIC` chỉ được kích qua API thủ công
-  (`RuntimeLifecycleCoordinator.runDiagnostic` → `AutomationControlServer`). **Không** có
+  (`RuntimeLifecycleCoordinator.runDiagnostic`, compatibility-only). **Không** có
   auto re-probe trong `syncModules`/`ensureRunning`: module vẫn auto-attach bình thường,
   nhưng START/sync không tự bắn diagnostic.
 

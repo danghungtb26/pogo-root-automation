@@ -42,48 +42,48 @@ flowchart TD
 
 ## Task
 
-- [ ] **T-805** **[docs]** *(reviewer)* — Lập inventory consumer tại `docs/issues/2026-10-13/pgs-style-zygisk-0433/evidence/cleanup-inventory.md`: với từng script/class candidate ghi direct caller, CI/doc consumer, side effect, replacement và verdict `KEEP`, `DELETE` hoặc `UNRESOLVED`. Historical issue docs không được tính là production consumer; nếu source/CI hiện tại còn caller ngoài bảng trên, giữ file và ghi blocker thay vì xóa mù. **AC:** `AC-16`; mọi deletion có evidence không còn consumer hoặc có replacement đã chốt. **Phụ thuộc:** `T-206`, `T-408`, `T-506`, `T-603`, `T-703`. **Verify:** `rg` toàn repo cho basename/symbol/import; đối chiếu `.github/workflows/ci.yml`, Gradle task graph và maintained docs; inventory liệt kê đủ 12 script hiện còn sau khi reverse script đã bị xóa.
+- [x] **T-805** **[docs]** *(reviewer)* — Lập inventory consumer tại `docs/issues/2026-10-13/pgs-style-zygisk-0433/evidence/cleanup-inventory.md`: với từng script/class candidate ghi direct caller, CI/doc consumer, side effect, replacement và verdict `KEEP`, `DELETE` hoặc `UNRESOLVED`. Historical issue docs không được tính là production consumer; nếu source/CI hiện tại còn caller ngoài bảng trên, giữ file và ghi blocker thay vì xóa mù. **AC:** `AC-16`; mọi deletion có evidence không còn consumer hoặc có replacement đã chốt. **Phụ thuộc:** `T-206`, `T-408`, `T-506`, `T-603`, `T-703`. **Verify:** `rg` toàn repo cho basename/symbol/import; đối chiếu `.github/workflows/ci.yml`, Gradle task graph và maintained docs; inventory liệt kê đủ 12 script hiện còn sau khi reverse script đã bị xóa.
 
   <details>
-  <summary>Chưa thực hiện — T-805</summary>
+  <summary>Đã thực hiện — T-805</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  Đã tạo `evidence/cleanup-inventory.md` với 12 script/library entry và `AutomationControlServer`: caller, side effect, replacement, KEEP/DELETE. `rg` production/CI/docs xác nhận sáu device/headless script chỉ còn historical evidence trước khi xóa; retained diagnostics dùng `lib/emulator.sh`.
 
   </details>
 
-- [ ] **T-806** **[scripts]** *(coder/reviewer)* — Xóa sáu entry point đã xác nhận obsolete: `scripts/push-emulator.sh`, `install-magisk-module.sh`, `device-smoke-test.sh`, `bluestacks-smoke-test.sh`, `binding-probe-test.sh`, `headless-control.sh`. Giữ và làm nhất quán `logcat-full.sh`/`collect-binding-diagnostics.sh` với exact target selection từ `scripts/lib/emulator.sh`; cập nhật shell-syntax list trong CI, `AGENTS.md`, README và maintained docs. Không sửa historical issue evidence. **AC:** `AC-16`; không còn host path bypass APK self-install hoặc script tự launch/force-stop game trong canonical workflow; diagnostics thất bại vẫn có target guard. **Phụ thuộc:** `T-805`. **Verify:** `rg` maintained source/docs/CI không còn positive callsite tới sáu script; `bash -n` mọi script còn lại; negative path của retained diagnostic dừng trước thao tác nếu target không đúng/không online; không chạy device.
+- [x] **T-806** **[scripts]** *(coder/reviewer)* — Xóa sáu entry point đã xác nhận obsolete: `scripts/push-emulator.sh`, `install-magisk-module.sh`, `device-smoke-test.sh`, `bluestacks-smoke-test.sh`, `binding-probe-test.sh`, `headless-control.sh`. Giữ và làm nhất quán `logcat-full.sh`/`collect-binding-diagnostics.sh` với exact target selection từ `scripts/lib/emulator.sh`; cập nhật shell-syntax list trong CI, `AGENTS.md`, README và maintained docs. Không sửa historical issue evidence. **AC:** `AC-16`; không còn host path bypass APK self-install hoặc script tự launch/force-stop game trong canonical workflow; diagnostics thất bại vẫn có target guard. **Phụ thuộc:** `T-805`. **Verify:** `rg` maintained source/docs/CI không còn positive callsite tới sáu script; `bash -n` mọi script còn lại; negative path của retained diagnostic dừng trước thao tác nếu target không đúng/không online; không chạy device.
 
   <details>
-  <summary>Chưa thực hiện — T-806</summary>
+  <summary>Đã thực hiện — T-806</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  Đã xóa đúng sáu entry point trong inventory; CI syntax list và maintained docs không còn gọi chúng. `bash -n` đạt cho toàn bộ script còn giữ và `sh -n` đạt cho ba module script. Không chạy device; target guard của retained diagnostics được giữ nguyên.
 
   </details>
 
-- [ ] **T-807** **[app]** *(android/reviewer)* — Bỏ control surface không còn consumer cùng `headless-control.sh`: xóa `app/.../service/AutomationControlServer.kt`, bỏ `apiServer` start/stop trong `HeadlessAutomationService`, xóa localhost port/API text/import khỏi `MainActivity`, đổi notification/channel copy để mô tả runtime controller thay vì HTTP API và cập nhật maintained docs. Giữ `RuntimeUiAutomationFacade`, service lifecycle, overlay intents, manual arm/config sync và boot behavior cần cho app; không xóa compatibility class chỉ vì test là consumer. **AC:** `AC-15`, `AC-16`; controller không mở port 8765 hoặc có đường HTTP arm/config, UI/overlay vẫn là control surface duy nhất và session mới vẫn OFF. **Phụ thuộc:** `T-806`. **Verify:** `rg` không còn `AutomationControlServer`, `ServerSocket`, `DEFAULT_PORT`, `/v1/start` hoặc `8765` trong production source/maintained docs; focused app compile + existing tests; static review service start/destroy/manual-arm paths.
+- [x] **T-807** **[app]** *(android/reviewer)* — Bỏ control surface không còn consumer cùng `headless-control.sh`: xóa `app/.../service/AutomationControlServer.kt`, bỏ `apiServer` start/stop trong `HeadlessAutomationService`, xóa localhost port/API text/import khỏi `MainActivity`, đổi notification/channel copy để mô tả runtime controller thay vì HTTP API và cập nhật maintained docs. Giữ `RuntimeUiAutomationFacade`, service lifecycle, overlay intents, manual arm/config sync và boot behavior cần cho app; không xóa compatibility class chỉ vì test là consumer. **AC:** `AC-15`, `AC-16`; controller không mở port 8765 hoặc có đường HTTP arm/config, UI/overlay vẫn là control surface duy nhất và session mới vẫn OFF. **Phụ thuộc:** `T-806`. **Verify:** `rg` không còn `AutomationControlServer`, `ServerSocket`, `DEFAULT_PORT`, `/v1/start` hoặc `8765` trong production source/maintained docs; focused app compile + existing tests; static review service start/destroy/manual-arm paths.
 
   <details>
-  <summary>Chưa thực hiện — T-807</summary>
+  <summary>Đã thực hiện — T-807</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  Đã xóa `AutomationControlServer.kt`, bỏ start/stop server khỏi service và bỏ permission INTERNET. MainActivity/overlay/service intent là control surface duy nhất; manual arm/session-disarm path vẫn giữ. `rg` production/maintained docs sạch với `AutomationControlServer`, `ServerSocket`, `/v1/start`, `DEFAULT_PORT`, `8765`; full Gradle đạt.
 
   </details>
 
-- [ ] **T-808** **[build]** *(build/reviewer)* — Chuẩn hóa `.github/workflows/ci.yml` và local documentation theo flow trên: CI gọi một lần `scripts/build-magisk.sh` thay cho hai block CMake + package lặp, chạy existing host C++ checks, Gradle tests, assemble APK từ đúng ZIP vừa build, rồi inspect entry/hash trước upload. Không tạo script orchestration mới; dùng dependency Gradle ở `T-102` và command canonical hiện có. **AC:** `AC-01`, `AC-12`, `AC-16`; local/CI có cùng thứ tự, không build/package native hai lần và không chạy device/E2E. **Phụ thuộc:** `T-103`, `T-806`, `T-807`. **Verify:** Review job dependency; chạy local equivalent trong đúng thứ tự; ZIP/APK hash/entry check pass; `rg` CI không còn CMake/package duplication hoặc script đã xóa.
+- [x] **T-808** **[build]** *(build/reviewer)* — Chuẩn hóa `.github/workflows/ci.yml` và local documentation theo flow trên: CI gọi một lần `scripts/build-magisk.sh` thay cho hai block CMake + package lặp, chạy existing host C++ checks, Gradle tests, assemble APK từ đúng ZIP vừa build, rồi inspect entry/hash trước upload. Không tạo script orchestration mới; dùng dependency Gradle ở `T-102` và command canonical hiện có. **AC:** `AC-01`, `AC-12`, `AC-16`; local/CI có cùng thứ tự, không build/package native hai lần và không chạy device/E2E. **Phụ thuộc:** `T-103`, `T-806`, `T-807`. **Verify:** Review job dependency; chạy local equivalent trong đúng thứ tự; ZIP/APK hash/entry check pass; `rg` CI không còn CMake/package duplication hoặc script đã xóa.
 
   <details>
-  <summary>Chưa thực hiện — T-808</summary>
+  <summary>Đã thực hiện — T-808</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  CI/local đều theo thứ tự syntax+vendored preflight → một `build-magisk.sh` → sáu host C++ checks → Gradle test/assemble → artifact/hash inspect. Không còn CMake/package duplicate hoặc device script. Local equivalent đạt; ZIP/APK bundled entry và manifest/hash khớp.
 
   </details>
 
-- [ ] **T-809** **[docs]** *(reviewer)* — Cập nhật `README.md`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/LIVE_AUTOMATION_READINESS.md`, tài liệu build và overview plan để chỉ còn flow build → host test → artifact inspect → user manual BlueStacks test. Ghi rõ retained diagnostic scripts chỉ chạy khi manual test thất bại; không mô tả chúng là E2E gate. **AC:** `AC-12`, `AC-16`; một người mới không gặp hai workflow build/install mâu thuẫn. **Phụ thuộc:** `T-808`. **Verify:** Link/path/command audit; `rg` maintained docs không còn script/API cũ, raw ADB install flow hoặc claim agent chạy BlueStacks; Mermaid khớp CI/task dependency; `git diff --check`.
+- [x] **T-809** **[docs]** *(reviewer)* — Cập nhật `README.md`, `AGENTS.md`, `docs/ARCHITECTURE.md`, `docs/LIVE_AUTOMATION_READINESS.md`, tài liệu build và overview plan để chỉ còn flow build → host test → artifact inspect → user manual BlueStacks test. Ghi rõ retained diagnostic scripts chỉ chạy khi manual test thất bại; không mô tả chúng là E2E gate. **AC:** `AC-12`, `AC-16`; một người mới không gặp hai workflow build/install mâu thuẫn. **Phụ thuộc:** `T-808`. **Verify:** Link/path/command audit; `rg` maintained docs không còn script/API cũ, raw ADB install flow hoặc claim agent chạy BlueStacks; Mermaid khớp CI/task dependency; `git diff --check`.
 
   <details>
-  <summary>Chưa thực hiện — T-809</summary>
+  <summary>Đã thực hiện — T-809</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  Đã cập nhật README, AGENTS, ARCHITECTURE, LIVE_AUTOMATION_READINESS, RUNTIME_BRIDGE, M2, dataflow, architecture summary và catch/spin doc sang self-install + user manual BlueStacks handoff. Retained diagnostics chỉ dành cho manual failure; `rg` maintained docs không còn workflow/API cũ, `git diff --check` sạch.
 
   </details>
 

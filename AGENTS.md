@@ -226,14 +226,12 @@ ABI-specific configuration.
 ## Build the Magisk ZIP
 
 The APK build and the Zygisk runtime build are separate. Use the existing
-workflow scripts below for native builds, packaging, emulator uploads,
-module installation and logcat collection. These scripts replace ad hoc
-commands for those operations.
+workflow scripts below for native builds, packaging and failure diagnostics.
+The APK bundles and self-installs the module; installation/reboot and live
+feature checks are a manual BlueStacks handoff, not host-script entry points.
 
 ```bash
 ./scripts/build-magisk.sh
-./scripts/push-emulator.sh
-./scripts/install-magisk-module.sh
 ./scripts/logcat-full.sh
 ```
 
@@ -251,10 +249,9 @@ current Mac, use the installed NDK through its supported override:
 ANDROID_NDK="$HOME/Library/Android/sdk/ndk/27.1.12297006" ./scripts/build-magisk.sh
 ```
 
-The install script uses Magisk already installed on the emulator. Use
-`--reboot` when a reboot is requested or authorized, and `--apk <path>` to
-also install the controller APK. Logcat supports `--follow` for continuous
-capture; its default output directory is `build/logs/`.
+Logcat supports `--follow` for continuous capture; its default output directory
+is `build/logs/`. `collect-binding-diagnostics.sh` and logcat are retained only
+for a failed manual test and must use the configured **BlueStacks Air 1** target.
 
 The build script calls `scripts/package-magisk.sh` internally and validates
 that the ZIP contains both `zygisk/arm64-v8a.so` and `zygisk/x86_64.so`.

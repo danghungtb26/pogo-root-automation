@@ -34,23 +34,12 @@ The companion writes only:
 
 The controller-side root script derives current liveness and installed game version at read time. If both supported Pokémon GO packages are installed, the observed process is preferred so the reported version matches the actual attached client.
 
-## Device smoke test
+## Manual device handoff
 
-After installing the controller APK and the Magisk zip from CI, reboot the rooted device, connect ADB, then run:
-
-```bash
-./scripts/device-smoke-test.sh
-```
-
-The script verifies:
-
-1. ADB can obtain root via `su`;
-2. the module status command exists;
-3. launching Pokémon GO reaches `connected` and reports a version;
-4. force-stop reaches `disconnected`;
-5. relaunch returns to `connected`.
-
-It does not test any game-state hook because M1 intentionally has none.
+The debug APK contains the validated Magisk ZIP. The user installs the APK via
+the BlueStacks Air 1 UI, grants root on first foreground open, confirms reboot,
+then observes connect/disconnect manually. Host device-smoke/deploy scripts are
+not part of the canonical workflow.
 
 ## Current limitation
 
@@ -73,21 +62,12 @@ snapshot; the broker caches only the latest UI status and never replays a
 gameplay command. Unsupported actions remain rejected and there is no alternate
 screen/input automation path.
 
-## Explicit post-init diagnostic
+## Diagnostics
 
-For build-specific binding work, the controller exposes an explicit diagnostic
-request:
-
-```bash
-ANDROID_SERIAL=127.0.0.1:5565 bash scripts/headless-control.sh diagnostic
-```
-
-Call it only after Pokémon GO has finished loading into a stable game screen.
-The request travels through the existing authenticated bridge. Native performs
-build-specific discovery only behind its lifecycle/main-thread guards and
-publishes capabilities/status only after the corresponding checks pass. Missing
-device evidence keeps the capability disabled; this document does not claim a
-live Air 1 result when no Air 1 target is available.
+The app UI is the only control surface. After a failed manual test, use the
+target-guarded `scripts/collect-binding-diagnostics.sh` and
+`scripts/logcat-full.sh`; missing device evidence keeps every affected
+capability disabled.
 
 ## Action and location boundary
 

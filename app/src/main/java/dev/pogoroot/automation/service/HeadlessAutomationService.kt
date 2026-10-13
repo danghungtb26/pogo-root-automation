@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import android.util.Log
+import dev.pogoroot.automation.AutomationApplication
 import dev.pogoroot.automation.MainActivity
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
@@ -22,7 +23,6 @@ import dev.pogoroot.automation.location.WalkCandidateCoordinator
 
 class HeadlessAutomationService : Service() {
     private lateinit var configRepository: AutomationConfigRepository
-    private lateinit var apiServer: AutomationControlServer
     private lateinit var eventSink: AutomationEventSink
     private lateinit var runtimeFacade: RuntimeUiAutomationFacade
     private lateinit var walkCandidateReceiver: NativeWalkCandidateReceiver
@@ -30,9 +30,22 @@ class HeadlessAutomationService : Service() {
     private lateinit var joystickAutoStartCoordinator: JoystickAutoStartCoordinator
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
     private var joystickAutoStartPoll: ScheduledFuture<*>? = null
+    private var runtimeInitialized = false
 
     override fun onCreate() {
         super.onCreate()
+        createNotificationChannel()
+        val app = application as AutomationApplication
+        val installState = app.moduleInstallStateRepository.read()
+        if (!installState.gameplayAllowed) {
+            startForeground(
+                NOTIFICATION_ID,
+                buildNotification(installState.errorCode ?: installState.state.name.lowercase()),
+            )
+            Log.w(LOG_TAG, "runtime service blocked by module state=${installState.state}")
+            stopSelf()
+            return
+        }
         configRepository = AutomationConfigRepository(this)
         eventSink = ToastAutomationEventSink(this, configRepository)
         mapTargetRepository = MapTargetRepository(this)
@@ -47,22 +60,27 @@ class HeadlessAutomationService : Service() {
         )
         runtimeFacade = RuntimeUiAutomationFacade(
             configRepository = configRepository,
+            catchSpinArmState = app.catchSpinArmState,
             eventSink = eventSink,
             mapTargetRepository = mapTargetRepository,
             walkCandidateReceiver = walkCandidateReceiver,
-        )
-        apiServer = AutomationControlServer(
-            configRepository = configRepository,
-            runtimeFacade = runtimeFacade,
+            onRuntimeInactive = { reason ->
+                app.moduleInstallStateRepository.transition(
+                    state = dev.pogoroot.automation.root.ModuleInstallState.INSTALLED,
+                    runtimeSessionId = null,
+                    errorCode = "module_inactive",
+                    message = reason,
+                )
+                stopSelf()
+            },
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
         )
 
-        createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification())
-        apiServer.start()
+        startForeground(NOTIFICATION_ID, buildNotification("Runtime controller connected"))
         runtimeFacade.start()
+        runtimeInitialized = true
         joystickAutoStartPoll = joystickAutoStartExecutor.scheduleWithFixedDelay(
             ::syncJoystickAutoStart,
             0L,
@@ -72,6 +90,7 @@ class HeadlessAutomationService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!runtimeInitialized) return START_NOT_STICKY
         when (intent?.action) {
             ACTION_ENABLE -> {
                 Log.i(LOG_TAG, "automation master enable requested from overlay")
@@ -83,12 +102,15 @@ class HeadlessAutomationService : Service() {
                             ?: current.autoEncounter,
                     )
                 }
+                runtimeFacade.armCurrentSession().onFailure { error ->
+                    Log.w(LOG_TAG, "manual runtime arm failed", error)
+                }
             }
 
             ACTION_DISABLE -> {
                 Log.i(LOG_TAG, "automation master disable requested from overlay")
                 // The service remains alive; native reconciles disabled desired state.
-                runtimeFacade.disable()
+                runtimeFacade.disarm("explicit_user_action")
             }
 
             ACTION_SYNC_RUNTIME_CONFIG -> {
@@ -111,11 +133,10 @@ class HeadlessAutomationService : Service() {
         if (::joystickAutoStartCoordinator.isInitialized) {
             joystickAutoStartCoordinator.stop()
         }
-        apiServer.stop()
         if (::walkCandidateReceiver.isInitialized) {
             walkCandidateReceiver.reset("service stopped")
         }
-        runtimeFacade.shutdown()
+        if (::runtimeFacade.isInitialized) runtimeFacade.shutdown()
         super.onDestroy()
     }
 
@@ -128,16 +149,16 @@ class HeadlessAutomationService : Service() {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "Headless automation",
+                "PoGo runtime controller",
                 NotificationManager.IMPORTANCE_LOW,
             ).apply {
-                description = "Keeps the local control API and automation worker running"
+                description = "Keeps the verified native runtime controller connected"
                 setShowBadge(false)
             },
         )
     }
 
-    private fun buildNotification(): Notification {
+    private fun buildNotification(contentText: String): Notification {
         val openIntent = PendingIntent.getActivity(
             this,
             0,
@@ -153,7 +174,7 @@ class HeadlessAutomationService : Service() {
 
         return Notification.Builder(this, CHANNEL_ID)
             .setContentTitle("PoGo automation service")
-            .setContentText("Headless API on 127.0.0.1:${AutomationControlServer.DEFAULT_PORT}")
+            .setContentText(contentText)
             .setSmallIcon(android.R.drawable.stat_notify_sync_noanim)
             .setContentIntent(openIntent)
             .addAction(
@@ -185,10 +206,13 @@ class HeadlessAutomationService : Service() {
         private const val NOTIFICATION_ID = 2102
         private const val LOG_TAG = "PogoRootAutomation"
 
-        fun start(context: Context) {
+        fun start(context: Context): Boolean {
+            val app = context.applicationContext as? AutomationApplication ?: return false
+            if (!app.moduleInstallStateRepository.read().gameplayAllowed) return false
             context.startForegroundService(
                 Intent(context, HeadlessAutomationService::class.java),
             )
+            return true
         }
 
         fun enable(
@@ -197,6 +221,8 @@ class HeadlessAutomationService : Service() {
             autoSpin: Boolean = true,
             autoEncounter: Boolean = false,
         ) {
+            val app = context.applicationContext as? AutomationApplication ?: return
+            if (!app.moduleInstallStateRepository.read().gameplayAllowed) return
             context.startForegroundService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_ENABLE)
@@ -207,6 +233,8 @@ class HeadlessAutomationService : Service() {
         }
 
         fun disable(context: Context) {
+            val app = context.applicationContext as? AutomationApplication ?: return
+            if (!app.moduleInstallStateRepository.read().gameplayAllowed) return
             context.startService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_DISABLE),
@@ -214,6 +242,8 @@ class HeadlessAutomationService : Service() {
         }
 
         fun requestRuntimeConfigSync(context: Context) {
+            val app = context.applicationContext as? AutomationApplication ?: return
+            if (!app.moduleInstallStateRepository.read().gameplayAllowed) return
             context.startService(
                 Intent(context, HeadlessAutomationService::class.java)
                     .setAction(ACTION_SYNC_RUNTIME_CONFIG),

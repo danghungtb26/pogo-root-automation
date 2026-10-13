@@ -1,17 +1,42 @@
 package dev.pogoroot.automation.engine
 
-import java.util.concurrent.atomic.AtomicBoolean
+data class CatchSpinArmSnapshot(
+    val armed: Boolean,
+    val runtimeSessionId: String?,
+    val generation: Long,
+    val reason: String,
+)
 
-/**
- * UI mirror of the persisted catch-spin arm. The service restores it before
- * connecting; config is the authority used when synchronizing native modules.
- */
+/** Process-local permission to run catch/spin for one exact runtime session. */
 object CatchSpinArmState {
-    private val armed = AtomicBoolean(false)
+    private var state = CatchSpinArmSnapshot(false, null, 0L, "process_start")
 
-    fun isArmed(): Boolean = armed.get()
-
-    fun setArmed(value: Boolean) {
-        armed.set(value)
+    @Synchronized
+    fun arm(sessionId: String): CatchSpinArmSnapshot {
+        require(sessionId.isNotBlank()) { "runtime session id is required to arm" }
+        state = CatchSpinArmSnapshot(true, sessionId, state.generation + 1L, "explicit_user_action")
+        return state
     }
+
+    @Synchronized
+    fun disarm(reason: String): Boolean {
+        val changed = state.armed || state.runtimeSessionId != null
+        state = CatchSpinArmSnapshot(
+            false,
+            null,
+            state.generation + if (changed) 1L else 0L,
+            reason.ifBlank { "unspecified" },
+        )
+        return changed
+    }
+
+    @Synchronized
+    fun snapshot(sessionId: String?): Boolean = state.armed &&
+        !sessionId.isNullOrBlank() && state.runtimeSessionId == sessionId
+
+    @Synchronized
+    fun current(): CatchSpinArmSnapshot = state
+
+    @Synchronized
+    fun isArmed(): Boolean = state.armed
 }

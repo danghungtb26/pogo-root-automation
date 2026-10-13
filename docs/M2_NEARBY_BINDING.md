@@ -57,16 +57,10 @@ Adapter resolution must fail closed when the observed runtime does not match a s
 
 ## Device test flow
 
-After installing the controller APK and multi-ABI Magisk module and rebooting:
-
-```bash
-./scripts/device-smoke-test.sh
-./scripts/bluestacks-smoke-test.sh        # BlueStacks only
-bash ./scripts/binding-probe-test.sh
-./scripts/collect-binding-diagnostics.sh
-```
-
-`binding-probe-test.sh` waits for `probe_state=ready`. On timeout it automatically writes diagnostics so the next binding iteration has package/version/ABI/native-map evidence.
+Device verification is a user-run BlueStacks Air 1 handoff through the app UI.
+Only after a manual failure should the retained
+`scripts/collect-binding-diagnostics.sh` or `scripts/logcat-full.sh` capture
+evidence. Neither command is an E2E gate.
 
 ## Version fail-safe
 

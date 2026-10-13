@@ -169,6 +169,7 @@ void discover_runtime_owners(
     const Il2CppApi &api,
     const Il2CppAssembly **assemblies,
     size_t assembly_count,
+    const char *process_name,
     const char *il2cpp_path,
     RuntimeBinding *binding
 ) {
@@ -176,12 +177,26 @@ void discover_runtime_owners(
     const uint64_t previous_generation = binding->owner_generation;
     *binding = RuntimeBinding{};
     binding->owner_generation = previous_generation + 1U;
-    binding->exact_build_verified = verify_expected_il2cpp_build_id(il2cpp_path);
+    pogo_runtime_profile::Verification profile;
+    profile.package_name = process_name != nullptr &&
+        strcmp(process_name, pogo_runtime_profile::kPackageName) == 0;
+    profile.il2cpp_build_id = verify_expected_il2cpp_build_id(il2cpp_path);
+    // The current injected API cannot independently prove PackageManager's
+    // versionCode or hash global-metadata.dat. Keep mutation fail-closed until
+    // those exact runtime observations are implemented and device-verified.
+    profile.version_code = false;
+    profile.metadata_sha256 = false;
+    binding->exact_build_verified = profile.mutation_allowed();
     __android_log_print(
         binding->exact_build_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "managed diagnostic: expected libil2cpp build id match=%d",
-        binding->exact_build_verified ? 1 : 0
+        "managed diagnostic: profile package=%d build_id=%d version=%d metadata=%d mutation=%d reason=%s",
+        profile.package_name ? 1 : 0,
+        profile.il2cpp_build_id ? 1 : 0,
+        profile.version_code ? 1 : 0,
+        profile.metadata_sha256 ? 1 : 0,
+        binding->exact_build_verified ? 1 : 0,
+        profile.reason()
     );
     if (api.runtime_invoke == nullptr || api.class_get_type == nullptr ||
         api.type_get_object == nullptr || assemblies == nullptr) {

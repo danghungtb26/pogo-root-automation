@@ -198,7 +198,7 @@ Code phải truy cập qua Android API/repository, không hardcode đường d�
 
 | Dữ liệu | Namespace | Owner hiện tại | Thời gian giữ |
 |---|---|---|---|
-| Config tính năng, enabled/armed, limits, filter, delay, config revision | `headless_automation` | `AutomationConfigRepository` trong `app/config/AutomationConfig.kt` | Qua restart app/game |
+| Policy tính năng, enabled, limits, filter, delay, config revision | `headless_automation` | `AutomationConfigRepository` trong `app/config/AutomationConfig.kt` | Qua restart app/game; manual arm không persist |
 | Favorite locations | `favorite_locations` | `app/data/FavoriteLocationRepository.kt` | Đến khi người dùng xóa; danh sách JSON trong preference |
 | Điểm joystick, cooldown hiển thị, vị trí các overlay | `built_in_joystick` | `app/overlay/OverlayPositionStore.kt` | Qua restart app |
 | Vị trí/thời điểm action gần nhất được ghi nhận | `last_active_location` | `app/data/LastActiveLocationRepository.kt` | Qua restart app; không thay thế game state mới |

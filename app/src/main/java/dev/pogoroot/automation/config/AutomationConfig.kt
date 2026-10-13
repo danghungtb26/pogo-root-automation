@@ -20,6 +20,7 @@ enum class BerryMode {
 data class HeadlessAutomationConfig(
     /** Persisted service intent; runtime readiness still gates all actions. */
     val enabled: Boolean = true,
+    /** Compatibility-only default for legacy tests; live repository reads this as false. */
     val catchSpinArmed: Boolean = true,
     /** Monotonic persisted revision used when synchronizing config to native. */
     val configRevision: Long = DEFAULT_CONFIG_REVISION,
@@ -85,7 +86,7 @@ class AutomationConfigRepository(context: Context) {
 
     fun read(): HeadlessAutomationConfig = HeadlessAutomationConfig(
         enabled = prefs.getBoolean(KEY_ENABLED, true),
-        catchSpinArmed = prefs.getBoolean("catch_spin_armed", true),
+        catchSpinArmed = false,
         configRevision = prefs.getLong(
             KEY_CONFIG_REVISION,
             HeadlessAutomationConfig.DEFAULT_CONFIG_REVISION,
@@ -141,7 +142,6 @@ class AutomationConfigRepository(context: Context) {
         val next = transformed.copy(configRevision = nextRevision)
         prefs.edit()
             .putBoolean(KEY_ENABLED, next.enabled)
-            .putBoolean("catch_spin_armed", next.catchSpinArmed)
             .putLong(KEY_CONFIG_REVISION, next.configRevision)
             .putBoolean(KEY_AUTO_CATCH, next.autoCatch)
             .putBoolean(KEY_CATCH_ALL, next.catchAll)
@@ -190,6 +190,7 @@ class AutomationConfigRepository(context: Context) {
             )
         }
         editor.remove(KEY_LEGACY_ENCOUNTER_SWEEP)
+            .remove(KEY_LEGACY_CATCH_SPIN_ARMED)
             .remove(KEY_LEGACY_RUNTIME_MODE)
             .remove(KEY_LEGACY_CATCH_THROW_DURATION)
             .remove(KEY_LEGACY_CATCH_RESULT_DELAY)
@@ -249,6 +250,7 @@ class AutomationConfigRepository(context: Context) {
         private const val KEY_CATCH_SETTLE_DELAY = "catch_settle_delay_ms"
         private const val KEY_STRUCTURED_ALLOWLIST = "structured_allowed_build_fingerprints"
         private const val KEY_LEGACY_ENCOUNTER_SWEEP = "encounter_sweep"
+        private const val KEY_LEGACY_CATCH_SPIN_ARMED = "catch_spin_armed"
         private const val KEY_LEGACY_RUNTIME_MODE = "runtime_mode"
         private const val KEY_LEGACY_CATCH_THROW_DURATION = "catch_throw_duration_ms"
         private const val KEY_LEGACY_CATCH_RESULT_DELAY = "catch_result_delay_ms"

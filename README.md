@@ -78,7 +78,7 @@ virtualjoystick-1.10.1.aar
 
 ## Runtime targets
 
-### Build, install and capture logs
+### Build, package and manual handoff
 
 The host scripts use Bash on macOS/Linux. Build both native ABIs and package
 the module ZIP with one command (SDK NDK `28.2.13676358`, CMake `3.22.1`):
@@ -88,37 +88,33 @@ the module ZIP with one command (SDK NDK `28.2.13676358`, CMake `3.22.1`):
 ```
 
 This fetches the pinned canonical Zygisk API 4 header when needed and writes
-`build/pogo-root-automation-magisk-multiabi.zip`. Set `ANDROID_HOME` if the SDK
-is outside its standard location; `ANDROID_NDK`, `ANDROID_CMAKE`,
-`ANDROID_NINJA`, and `ZYGISK_API_DIR` can override local tool/header paths.
+`build/pogo-root-automation-magisk-multiabi.zip` plus the adjacent
+`build/pogo-root-automation-magisk-multiabi.manifest.json`. The manifest records
+the module identity, ABIs, ZIP SHA-256, source revision and pinned target
+fingerprint. Set `ANDROID_HOME` if the SDK is outside its standard location;
+`ANDROID_NDK`, `ANDROID_CMAKE`, `ANDROID_NINJA`, and `ZYGISK_API_DIR` can
+override local tool/header paths.
+
+Build the native artifact before the controller. Gradle validates that ZIP and
+manifest, rejects a stale/hash-mismatched pair, and embeds exactly one copy in
+the APK under `assets/pogo-module/`:
+
+```bash
+./scripts/build-magisk.sh
+./gradlew test assembleDebug
+```
 For example, a machine with NDK 27 already installed can explicitly use:
 
 ```bash
 ANDROID_NDK="$HOME/Library/Android/sdk/ndk/27.1.12297006" ./scripts/build-magisk.sh
 ```
 
-Start **BlueStacks Air 1** with root and Magisk already installed, then:
-
-```bash
-adb devices -l
-export ANDROID_SERIAL=127.0.0.1:5565
-./scripts/push-emulator.sh
-./scripts/install-magisk-module.sh
-```
-
-The device scripts default to this serial and reconnect it after restarting ADB
-if missing; they never automatically choose another connected device. Push
-accepts an optional local ZIP path. Install extracts that uploaded ZIP into a
-temporary directory, checks its module ID and both libraries, then calls
-`magisk --install-module`. Enable Zygisk in Magisk settings and restart the
-instance to activate it, or pass `--reboot` to the install script.
-
-To also build and install the controller APK:
-
-```bash
-./gradlew assembleDebug
-./scripts/install-magisk-module.sh --apk app/build/outputs/apk/debug/app-debug.apk --reboot
-```
+The debug APK contains the exact validated module ZIP and manifest. Install the
+APK through the **BlueStacks Air 1 UI**, open it in the foreground, grant the
+single root request, and let the app install the module. The app reports a
+separate reboot-required state and never reboots automatically. After a
+user-confirmed reboot, open Pokémon GO and explicitly arm automation for that
+runtime session; a new/disconnected session always starts OFF.
 
 Capture all available logcat buffers as root, with all tags and priorities:
 
@@ -145,12 +141,10 @@ BlueStacks is supported as an emulator runtime target when the instance has work
 
 BlueStacks may expose x86_64 as its Android/Zygote ABI while translating ARM application libraries. Game bindings must therefore use collected runtime diagnostics rather than assuming ARM64 offsets/signatures apply to BlueStacks.
 
-After installing the controller APK and multi-ABI Magisk ZIP and rebooting the instance, run:
-
-```bash
-./scripts/bluestacks-smoke-test.sh
-./scripts/collect-binding-diagnostics.sh
-```
+After manual installation/reboot, use
+`./scripts/collect-binding-diagnostics.sh` only when the user-observed flow
+fails. It validates the configured target through `scripts/lib/emulator.sh`.
+It is not a build or E2E gate.
 
 ## Milestones
 

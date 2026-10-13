@@ -16,36 +16,36 @@ Plan: [Tổng quan](00-overview.md)
 - [ ] **T-501** **[zygisk]** *(native)* — Port direct binding/target resolver 0.433.0 trong `direct_map_bindings.inc`, `direct_map_actions.inc`, `map_actions.inc` và `runtime_catch_range.inc`: consume normalized targets từ mọi source `SUPPORTED_OFFLINE` của `T-403`, resolve lại live `MapPokemon`/subclass theo source + stable id trên main thread, validate encounter/species/coordinate/generation/expiry; source không hỗ trợ direct `TryCapture` phải có eligibility reason riêng, không ép cast. **AC:** `AC-13`, `AC-14`; candidate code chỉ chấp nhận type/session/freshness hợp lệ và live status giữ `UNVERIFIED_DEVICE` khi chưa có runtime proof. **Phụ thuộc:** `T-303`, `T-306`, `T-403`, `T-408`. **Verify:** Native build + existing host checks; audit source→resolver table và invalid/unknown/expired rejection paths. Live target/object match nằm trong handoff user.
 
   <details>
-  <summary>Chưa thực hiện — T-501</summary>
+  <summary>Bị chặn — T-501</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
 
   </details>
 
 - [ ] **T-502** **[zygisk]** *(native)* — Hoàn thiện policy trong `catch.inc`, `catch_proximity.inc`, `coordinator.inc`: chỉ dùng Poké Ball item id `1`, yêu cầu inventory/map/location fresh, range hợp lệ, chọn gần nhất rồi tie-break bằng stable target id, giữ một pending catch; hết ball trả `NO_BALL` và nhường spin, không retry loop. **AC:** Target và ball selection deterministic, fail closed khi state stale/unknown và tuân action arbiter. **Phụ thuộc:** `T-405`, `T-406`, `T-501`. **Verify:** Existing native checks; trace trên snapshot có nhiều target xác nhận ordering/range/tie-break; zero-ball/stale-state không dispatch mutation.
 
   <details>
-  <summary>Chưa thực hiện — T-502</summary>
+  <summary>Bị chặn — T-502</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
 
   </details>
 
 - [ ] **T-503** **[zygisk]** *(native)* — Nối dispatch và terminal result qua `main_thread_direct_actions.inc`, `direct_catch_promise_observer.inc`, `direct_catch_map_sync.inc` và `requested_catch_ids.inc`: giữ Promise bằng GC handle đúng lifetime, parse authoritative server result/captured storage ID, chờ map postcondition, mark inventory/storage dirty; timeout là `INDETERMINATE` và suppress blind retry. Sửa `runtime_capabilities.inc` và `runtime_ui_status_bridge.inc` để `DIRECT_CATCH` bắt buộc binding/outcome/map-sync contract và hiển thị `UNVERIFIED_DEVICE` cho tới khi user xác minh, không như gate hiện tại chỉ dựa binding. **AC:** Code không báo success khi mới dispatch; failure/escape/no-ball/timeout là trạng thái riêng; captured storage ID được provenance-tag và capability không publish `LIVE_READY` sớm. **Phụ thuộc:** `T-303`, `T-502`. **Verify:** Native/host checks cho pending/terminal/timeout/dedupe paths, build/package và static gate review; success/failure server thật chuyển sang handoff user.
 
   <details>
-  <summary>Chưa thực hiện — T-503</summary>
+  <summary>Bị chặn — T-503</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
 
   </details>
 
 - [ ] **T-504** **[bridge]** *(native/android)* — Mở rộng `runtime_automation_event_protocol.h`, `runtime_automation_event_bridge.inc`, `RuntimeAutomationEventMapper.kt`, `AutomationEvents.kt` và UI status để phát `CATCH_DISPATCHED`, terminal outcome, target id/species, captured storage ID chỉ ở boundary nội bộ, error reason và postcondition state. Notification/UI không dùng “caught” trước terminal success. **AC:** Event model và UI mapper chỉ cho Auto Transfer nhận success có storage ID hợp lệ. **Phụ thuộc:** `T-407`, `T-503`. **Verify:** Native/Gradle existing checks; protocol version/codec/mapper match và static event correlation review. UI/event live output chuyển sang handoff user.
 
   <details>
-  <summary>Chưa thực hiện — T-504</summary>
+  <summary>Bị chặn — T-504</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
 
   </details>
 
@@ -59,9 +59,9 @@ chưa thực hiện. Nội dung session OFF → user arm → catch outcome/map s
 - [ ] **T-506** **[zygisk]** *(native)* — Thêm strategy/fallback tách file (đề xuất — chưa tồn tại: `catch_strategy.inc`, `virtual_go_plus_binding.inc`, `virtual_go_plus_action.inc`) theo contract `T-307`. Strategy `AUTO` ưu tiên direct `TryCapture`; chỉ chọn `VIRTUAL_GO_PLUS` trước dispatch nếu direct unavailable và fallback contract có đủ offline evidence. Cả hai dùng cùng manual arm, target snapshot, Poké Ball item 1 và action arbiter; cấm fallback nếu direct đã dispatch/pending/indeterminate, đồng thời dedupe stable target id xuyên strategy. Live status của cả hai giữ `UNVERIFIED_DEVICE`. **AC:** `AC-13`, `AC-15`; direct là primary, fallback không tạo duplicate catch và thiếu fallback evidence không làm hỏng direct. **Phụ thuộc:** `T-307`, `T-503`, `T-504`. **Verify:** Native checks/build; host/static strategy matrix direct/fallback/neither/pending/indeterminate cho đúng selection/rejection; không chạy game/device.
 
   <details>
-  <summary>Chưa thực hiện — T-506</summary>
+  <summary>Bị chặn — T-506</summary>
 
-  Chưa có thay đổi hoặc kết quả kiểm chứng. Agent cập nhật khối này ngay sau khi xử lý task, trước khi sang task tiếp theo.
+  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
 
   </details>
 

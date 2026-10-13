@@ -26,6 +26,8 @@ class RuntimeUiEventRouter(
     private val onMapTarget: (MapTargetObservation) -> Unit = {},
     private val onPointWalkCandidate: (NativeWalkCandidateObservation, Long) -> Unit = { _, _ -> },
     private val onPointWalkCandidateReset: (String) -> Unit = {},
+    private val onRuntimeSessionChanged: (String?, String) -> Unit = { _, _ -> },
+    private val onRuntimeSessionLost: (String) -> Unit = {},
     private val nowNanos: () -> Long = System::nanoTime,
 ) {
     private var runtimeSessionId: String? = null
@@ -44,6 +46,7 @@ class RuntimeUiEventRouter(
 
     fun reset(reason: String = "runtime disconnected") {
         onPointWalkCandidateReset(reason)
+        onRuntimeSessionLost(reason)
         runtimeSessionId = null
         processedObservationSeq = 0L
         lastStatusElapsedNs = 0L
@@ -58,7 +61,9 @@ class RuntimeUiEventRouter(
     private fun ensureSession() {
         val ready = bridge.connect().getOrThrow()
         if (runtimeSessionId != ready.runtimeSessionId) {
+            val previousSessionId = runtimeSessionId
             onPointWalkCandidateReset("runtime session changed")
+            onRuntimeSessionChanged(previousSessionId, ready.runtimeSessionId)
             runtimeSessionId = ready.runtimeSessionId
             processedObservationSeq = 0L
             lastStatusElapsedNs = 0L
@@ -71,7 +76,10 @@ class RuntimeUiEventRouter(
             is BridgeEvent.RuntimeUiStatus -> consumeStatus(event.status)
             is BridgeEvent.ObservationEvent -> consumeObservation(event)
             is BridgeEvent.BindingLost -> reset(event.reason.ifBlank { "runtime binding lost" })
-            is BridgeEvent.RuntimeError -> acceptError("${event.code}: ${event.message}")
+            is BridgeEvent.RuntimeError -> {
+                acceptError("${event.code}: ${event.message}")
+                onRuntimeSessionLost("runtime_error:${event.code}")
+            }
             else -> Unit
         }
     }

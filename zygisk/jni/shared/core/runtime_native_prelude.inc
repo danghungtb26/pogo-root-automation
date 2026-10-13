@@ -50,13 +50,10 @@ constexpr uint32_t kRuntimeCommandMagic = 0x504F4743U;
 constexpr uint32_t kRuntimeResultMagic = 0x504F4752U;
 constexpr uint32_t kRuntimeCapabilitiesMagic = 0x504F474BU;
 constexpr uint32_t kRuntimeUiStatusMagic = 0x504F4753U;
-// This binding is intentionally pinned to the APK/libil2cpp evidence captured
-// on BlueStacks Air 1. Any other runtime stays probe-only.
-constexpr const char *kVerifiedBuildFingerprint =
-    "com.nianticlabs.pokemongo|2026082702|il2cpp|il2cpp_runtime_invoke_v1|"
-    "arm64-v8a|aarch64|native|il2cpp=84ed21009899c84abca01e0b8c6f4b0b054f264e|"
-    "metadata=2c7c88033dbdff96ba35cab5bc2d44943b00e8c20874cd1ee1bd8e768e780212|"
-    "apk=405a351ce2f89be9b03c0cf7d2ec364ccad619bbc24b1ca064022f18b75674c2";
+// This binding is intentionally pinned to the canonical 0.433.0 profile.
+// Runtime mutation remains closed until every strong-identity field is
+// independently verified in the target process.
+constexpr const char *kVerifiedBuildFingerprint = pogo_runtime_profile::kFingerprint;
 // Pokémon GO can load Unity before the IL2CPP shared object on a cold
 // BlueStacks start. Keep the probe alive long enough to observe the same
 // process after that delayed load instead of publishing a false mapped-only

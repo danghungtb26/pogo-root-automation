@@ -71,7 +71,7 @@ arm64 split APK:     8f4a472ca8fd59cc794f4f0b32fff3920c55211bbab955ec8b79f7aa4fe
 libil2cpp SHA-256:   6b1e11619362ddd53f9dbcd7be1d4296bdec5dda27b9f742c16b8403359c25a0
 ```
 
-Method metadata đã xác nhận:
+Method metadata search identities supplied by the plan (not binding evidence):
 
 | Class | Method | Slot | Token |
 |---|---|---:|---:|
@@ -84,8 +84,17 @@ Method metadata đã xác nhận:
 | `Niantic.Holoholo.IItemBag` | `RecycleItem(itemProto, numToRecycle, expiringItemsCopy)` | 19 | `0x06000f93` |
 | `Niantic.Holoholo.Internal.ItemBagImpl` | `RecycleItem(itemData, numToRecycle, expiringItemsCopy)` | 23 | `0x06002971` |
 
-Token chỉ là identity metadata, không phải RVA hay địa chỉ runtime. Native vẫn
-resolve bằng namespace/class/method/signature và xác minh owner/return type.
+Token/slot chỉ là search identity, không phải RVA hay địa chỉ runtime. REA
+providers hiện thiếu nên các tuple này vẫn `UNRESOLVED`; native không được
+resolve/call chúng cho 0.433.0 tới khi ledger có Evidence tương ứng.
+
+## Trạng thái implementation hiện tại
+
+Phase 0–2 và cleanup/build Phase 8 đã hoàn tất. Phase 3 chốt artifact/profile
+fail-closed nhưng direct-catch, storage và Virtual GO Plus contracts còn bị chặn
+bởi REA provider gap. Vì vậy Phase 4–7 không được port bằng layout 0.427.0 và
+vẫn để mở với blocker chi tiết. Artifact hiện tại dùng để kiểm installer,
+lifecycle và manual session arm; gameplay mutation không `LIVE_READY`.
 
 ## Acceptance criteria
 
