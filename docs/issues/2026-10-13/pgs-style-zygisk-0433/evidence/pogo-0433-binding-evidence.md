@@ -12,20 +12,22 @@ giữ ở trạng thái `UNVERIFIED_DEVICE`.
 | Artifact/claim | SHA-256 / value | REA Evidence | Authority | Coverage và limitation |
 |---|---|---|---|---|
 | APKM `reverse/artifacts/pogo-0.433.0/com.nianticlabs.pokemongo_arm64-v8a_0.433.0.apkm` | `1b120bb485310777f196fdb8cb827b63887e91f83fe81dc0cdb7e67a2d518278` | `ev_1f307dab...`, `ev_bf551a9b...`, `ev_022695...` | shipped artifact, observed | Complete central-directory inventory and extraction; nested APK semantics are not decoded by these records. |
-| Base APK `reverse/artifacts/pogo-0.433.0/base.apk` | `1c8f198cd212e7303e5a5e38e34857f4ced42eb432ac62b07807bfd286503690` | `ev_4d913f...`, `ev_42ee22...`, `ev_d5331c...` | shipped artifact, observed | Complete central-directory inventory and extraction; current REA session has no configured JADX provider. |
+| Base APK `reverse/artifacts/pogo-0.433.0/base.apk` | `1c8f198cd212e7303e5a5e38e34857f4ced42eb432ac62b07807bfd286503690` | `ev_4d913f...`, `ev_42ee22...`, `ev_d5331c...`, `ev_59ea3043...` | shipped artifact, observed | Complete central-directory inventory/extraction plus decoded manifest/package identity from JADX 0.7.1. The DEX provider does not decode IL2CPP metadata members. |
 | arm64 split `reverse/artifacts/pogo-0.433.0/split_config.arm64_v8a.apk` | `8f4a472ca8fd59cc794f4f0b32fff3920c55211bbab955ec8b79f7aa4fe5f0a0` | `ev_6ce607...`, `ev_011ef4...`, `ev_9c80a3...` | shipped artifact, observed | Complete central-directory inventory and extraction only. |
-| `native/libil2cpp.so` | `6b1e11619362ddd53f9dbcd7be1d4296bdec5dda27b9f742c16b8403359c25a0` | Child of extraction chain `ev_9c80a3...`; no deep native dossier | shipped artifact + local ELF note | SHA-256 verified by manifest. GNU build-id note is `da59ce3024c4ccfe16fa6616281a4d111de67aa2`. Ghidra/Hopper/IDA is unavailable in the current REA server. |
+| `native/libil2cpp.so` | `6b1e11619362ddd53f9dbcd7be1d4296bdec5dda27b9f742c16b8403359c25a0` | Child of extraction chain `ev_9c80a3...`; no deep native dossier | shipped artifact + local ELF note | SHA-256 verified by manifest. GNU build-id note is `da59ce3024c4ccfe16fa6616281a4d111de67aa2`. REA selected Ghidra 12.1.3 for the arm64 ELF; both the initial 300-second probe and the retried 30-minute CLI probe timed out before producing Evidence. See the [timeout record](ghidra-timeout-2026-10-13.md). |
 | `native/global-metadata.dat` | `f5961a8548256da287b4f79466a169c302b90ec59be7f6461e8e58b482c0fb0d` | Child of extraction chain `ev_d5331c...`; no metadata-member Evidence | shipped artifact, observed identity | Exact bytes are pinned; IL2CPP metadata members are not decoded by retained REA Evidence. |
-| Package | `com.nianticlabs.pokemongo` | none for decoded manifest | plan input, `UNRESOLVED` in REA | `inspect_android_package` is unavailable because `REA_JADX_MCP_JAR` 0.7.1 is not configured. |
-| Version | `0.433.0` / versionCode `2026100702` | none for decoded manifest | plan input, `UNRESOLVED` in REA | Must be rechecked with the exact base APK after the JADX provider is available. Runtime mutation remains fingerprint-gated. |
+| Package | `com.nianticlabs.pokemongo` | `ev_59ea3043...` | shipped artifact, observed | Decoded from `AndroidManifest.xml` of the pinned base APK by JADX 0.7.1. |
+| Version | `0.433.0` / versionCode `2026100702` | `ev_59ea3043...` | shipped artifact, observed | Decoded from the pinned base APK. Runtime mutation remains fingerprint-gated because runtime versionCode and metadata-hash observation are separate requirements. |
 
-The canonical bundle `reverse/rea/rea-evidence-2026-10-13.json` imported with
-17 retained records and 2 residual unknowns. The Android unknown is
+The canonical bundle `reverse/rea/rea-evidence-2026-10-13.json` now contains
+18 retained records and 2 residual unknowns. The Android/IL2CPP unknown is
 `unk_1aaa6e...`; the native deep-analysis unknown is `unk_27690a...`.
 
 ## Map source inventory
 
-JADX/native deep-analysis providers were unavailable in this run. The table is
+JADX 0.7.1 verified the APK/manifest identity but cannot decode IL2CPP metadata
+members. Ghidra 12.1.3 accepted the arm64 ELF, but the 300-second probe and its
+30-minute CLI retry both timed out without retained Evidence. The table is
 therefore a complete discovery queue, not a declaration that a type exists.
 Every unresolved source is excluded from runtime collection and mutation.
 
@@ -84,12 +86,17 @@ for binding authority even when a historical report contains the same text.
 ## Verification record
 
 - `shasum -a 256 -c reverse/artifacts/SHA256SUMS`: all 10 entries passed.
-- REA import: 17 records, 2 unknowns; summary query returned the same counts.
-- `inspect_android_package(base.apk)`: capability unavailable; missing caller-supplied
-  JADX MCP 0.7.1 JAR, so no Android class/method claim was promoted.
+- REA import started from 17 records/2 unknowns; export after the new APK identity
+  observation produced 18 records/2 unknowns.
+- `inspect_android_package(base.apk)`: JADX 0.7.1 returned package
+  `com.nianticlabs.pokemongo`, version `0.433.0`, versionCode `2026100702` in
+  Evidence `ev_59ea3043...`; it did not decode IL2CPP metadata members.
 - `open_binary(libil2cpp.so)`: artifact identity/format/architecture matched
-  SHA-256 and arm64. Deep provider availability check reported Ghidra not
-  configured and no selected native provider, so no function/RVA claim was made.
+  SHA-256 and arm64, and REA selected Ghidra 12.1.3. The first bounded
+  managed-name search timed out after 300 seconds; the CLI retry timed out after
+  1,800 seconds. Neither produced Evidence, so no function/RVA claim was made.
+  Full environment, command and cleanup behavior are recorded in the
+  [Ghidra timeout note](ghidra-timeout-2026-10-13.md).
 - NDK `llvm-readelf -n`: build ID matched
   `da59ce3024c4ccfe16fa6616281a4d111de67aa2`.
 

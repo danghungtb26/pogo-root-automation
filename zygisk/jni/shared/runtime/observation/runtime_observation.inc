@@ -181,7 +181,12 @@ bool read_active_runtime_encounter(
 // Used only by the legacy push-observer path (a periodic fallback tick) when the
 // runtime is not in native module-owned snapshot mode.
 void mark_world_dirty(ProbeContext &context) {
-    context.world_dirty.store(true, std::memory_order_relaxed);
+    (void)context;
+    (void)pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kPokemonSource |
+        pogo_runtime_world_state::kFortSource |
+        pogo_runtime_world_state::kLocationSource
+    );
 }
 
 void *runtime_observation_thread(void *opaque_context) {
@@ -191,14 +196,12 @@ void *runtime_observation_thread(void *opaque_context) {
     // Tick is ~100 ms (see usleep below). Fallback poll keeps the pre-refactor
     // cadence; reconcile is a rare full re-read that recovers from any missed
     // dirty signal once the hook is driving updates.
-    constexpr uint32_t kFallbackPollTicks = 2U;   // ~200 ms
     constexpr uint32_t kReconcileTicks = 300U;    // ~30 s
 
     bool was_encounter = false;
     bool sent_initial_state = false;
     uint64_t last_encounter_id = 0U;
     uint32_t lifecycle_heartbeat_ticks = 0U;
-    uint32_t nearby_ticks = 0U;
     uint32_t reconcile_ticks = 0U;
     uint64_t observer_tick = 0U;
     uint32_t encounter_owner_refresh_ticks = 0U;
@@ -222,14 +225,21 @@ void *runtime_observation_thread(void *opaque_context) {
             !g_runtime_explicit_snapshot_mode.load() &&
             (binding.map_entity_read_verified || binding.forts_read_verified);
         if (observe_source && context->main_thread_bridge.ready) {
-            // A periodic tick marks the world dirty so the observer keeps re-reading
-            // at the fallback poll cadence.
-            if (nearby_ticks >= kFallbackPollTicks) {
-                mark_world_dirty(*context);
-                nearby_ticks = 0U;
-            }
             const bool reconcile_due = reconcile_ticks >= kReconcileTicks;
-            if (context->world_dirty.exchange(false) || reconcile_due) {
+            if (reconcile_due) {
+                mark_world_dirty(*context);
+                __android_log_print(
+                    ANDROID_LOG_INFO,
+                    kLogTag,
+                    "runtime world-state reconcile reason=fallback_interval"
+                );
+            }
+            const auto dirty = pogo_runtime_world_state::dirty_sources();
+            const auto world = pogo_runtime_world_state::snapshot();
+            const bool map_dirty = dirty.pokemon > world.map.state.dirty_generation ||
+                dirty.forts > world.map.state.dirty_generation ||
+                dirty.location > world.location.state.dirty_generation;
+            if (map_dirty) {
                 pogo_runtime::RuntimeNearbyObservation nearby_observation;
                 pogo_runtime::RuntimeFortsObservation forts_observation;
                 if (request_main_thread_map_snapshot(
@@ -242,7 +252,6 @@ void *runtime_observation_thread(void *opaque_context) {
                 reconcile_ticks = 0U;
             }
         }
-        ++nearby_ticks;
         ++reconcile_ticks;
         if (context->il2cpp_api_ready && binding.encounter_read_verified &&
             api.domain_get != nullptr && api.thread_attach != nullptr &&
@@ -268,6 +277,20 @@ void *runtime_observation_thread(void *opaque_context) {
 
         if (active_encounter) {
             if (!was_encounter || last_encounter_id != observation.encounter_id) {
+                const uint64_t dirty_generation = pogo_runtime_world_state::mark_dirty(
+                    pogo_runtime_world_state::kEncounterSource
+                );
+                (void)pogo_runtime_world_state::commit_encounter(
+                    binding.owner_generation,
+                    dirty_generation,
+                    static_cast<uint64_t>(now_elapsed_nanos()),
+                    pogo_runtime_world_state::Availability::kReady,
+                    true,
+                    observation,
+                    nullptr
+                );
+            }
+            if (!was_encounter || last_encounter_id != observation.encounter_id) {
                 __android_log_print(
                     ANDROID_LOG_INFO,
                     kLogTag,
@@ -281,6 +304,20 @@ void *runtime_observation_thread(void *opaque_context) {
             was_encounter = true;
             last_encounter_id = observation.encounter_id;
         } else {
+            if (was_encounter || !sent_initial_state) {
+                const uint64_t dirty_generation = pogo_runtime_world_state::mark_dirty(
+                    pogo_runtime_world_state::kEncounterSource
+                );
+                (void)pogo_runtime_world_state::commit_encounter(
+                    binding.owner_generation,
+                    dirty_generation,
+                    static_cast<uint64_t>(now_elapsed_nanos()),
+                    pogo_runtime_world_state::Availability::kEmpty,
+                    false,
+                    pogo_runtime::RuntimeEncounterObservation{},
+                    nullptr
+                );
+            }
             const bool left_encounter = was_encounter;
             if (was_encounter) {
                 __android_log_print(
@@ -338,7 +375,7 @@ bool start_runtime_observation(ProbeContext &context) {
     }
     // Guarantee the first observer cycle performs a full read (the flag may retain
     // a stale value across a stop/restart of the observer thread).
-    context.world_dirty.store(true, std::memory_order_relaxed);
+    (void)pogo_runtime_world_state::mark_dirty(pogo_runtime_world_state::kAllSources);
     if (context.observation_thread_started) {
         if (context.observation_running.load()) return false;
         pthread_join(context.observation_thread, nullptr);

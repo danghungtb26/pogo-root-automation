@@ -13,18 +13,33 @@ Plan: [Tổng quan](00-overview.md)
 - [ ] **T-401** **[zygisk]** *(native)* — Thêm world-state store tách file (đề xuất `zygisk/jni/shared/runtime/state/runtime_world_state.h` và `.inc`) chứa snapshot bất biến cho session/location/map/inventory/encounter, `ownerGeneration`, `dirtyGeneration`, `revision`, timestamp và availability `NOT_READY`, `EMPTY`, `READY`, `STALE`, `ERROR`. Collector build bản tạm rồi commit nguyên tử; không lưu managed pointer trong snapshot. Wire declaration/include tối thiểu qua `runtime_native_declarations.inc`, `runtime_native_prelude.inc` và `main.cpp`. **AC:** Reader thấy một revision nhất quán và phân biệt empty hợp lệ với read failure. **Phụ thuộc:** `T-302`, `T-304`, `T-305`. **Verify:** Native compile + existing host checks; review memory ownership/concurrency; forced session reset làm revision/generation đổi và xóa snapshot cũ.
 
   <details>
-  <summary>Bị chặn — T-401</summary>
+  <summary>Đã triển khai phần store/build — T-401</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  Đã thêm `runtime_world_state.h/.inc` với snapshot copy-out bất biến theo
+  `session_generation`/`owner_generation`/`dirty_generation`/`revision`, năm trạng
+  thái availability và commit nguyên tử riêng cho map/location/inventory/encounter.
+  Reset được nối vào START/STOP và mỗi lần owner binding được dựng lại; các reader
+  hiện tại commit dữ liệu POD đã copy, không giữ managed pointer. Native arm64 và
+  x86_64 build/package đạt, toàn bộ existing host C++ checks và
+  `./gradlew test assembleDebug --rerun-tasks` đạt, `git diff --check` sạch.
+  Chưa đánh dấu `[x]`: T-304 và typed map-source contract vẫn thiếu qualifying
+  IL2CPP Evidence, nên collector Phase 4 chưa được phép coi scanner cũ là authoritative.
 
   </details>
 
 - [ ] **T-402** **[zygisk]** *(native)* — Thêm dirty-source/generation cho từng Pokémon source, fort, location, inventory và encounter; hook/callback từ contract `T-306` chỉ ghi cờ/generation bounded, không enumerate collection hoặc mutate gameplay. Reconcile timer chỉ làm fallback khi event bị mất, với interval và reason quan sát được; bỏ `kCatchSpinScanEveryTicks` như trigger full scan mặc định. **AC:** `AC-14`; code không còn full map/inventory scan khoảng 2 giây khi state không dirty, callback không giữ object/pointer qua frame và source update không làm mất các source khác. **Phụ thuộc:** `T-306`, `T-401`. **Verify:** Existing host-native checks + static call-path review cho dirty coalescing, bounded queue và idle path; compile log counters để user quan sát sau, không chạy device.
 
   <details>
-  <summary>Bị chặn — T-402</summary>
+  <summary>Đã triển khai dirty-generation nền — T-402</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  World-state store hiện giữ generation riêng cho Pokémon/fort/location/inventory/
+  encounter bằng bitmask bounded, không có queue managed object. Encounter transition,
+  direct-catch terminal, spin terminal, transfer attempt và discard terminal chỉ mark
+  source dirty; legacy observer chỉ reconcile map fallback mỗi 30 giây với log reason,
+  không còn tự mark map mỗi ~200 ms. Native build hai ABI đạt. Chưa đánh dấu `[x]`:
+  catch-spin coordinator vẫn có `kCatchSpinScanEveryTicks` ~2 giây và source callback
+  typed của T-306 chưa có qualifying IL2CPP Evidence; phần đó phải được thay cùng
+  T-403/T-406 thay vì giả hook/callback.
 
   </details>
 

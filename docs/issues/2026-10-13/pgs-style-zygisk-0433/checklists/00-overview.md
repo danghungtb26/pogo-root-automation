@@ -175,8 +175,9 @@ process game thật được ghi `UNVERIFIED_DEVICE` và chuyển sang handoff u
 
 1. Field obfuscate/map owner/catch outcome của 0.433.0 chưa được trích đầy đủ.
    `T-302`–`T-304` là discovery bắt buộc; `T-501`–`T-503` bị chặn tới khi có
-   REA evidence. Bundle hiện giữ residual unknown vì provider JADX/native deep
-   analysis chưa cấu hình; không được lấp khoảng trống bằng script/dump cũ.
+   REA evidence. JADX/Ghidra hiện đã khả dụng, nhưng chưa có qualifying IL2CPP
+   metadata member/native dossier cho các contract này; residual unknown vẫn mở
+   và không được lấp khoảng trống bằng script/dump cũ.
 2. `RecycleItem` đã rõ signature nhưng layout `ItemData`, owner của
    `ExpiringItemsCopy` và full-refresh postcondition chưa có runtime proof.
    `T-701` chặn implementation ở `T-702`–`T-703`; live verification nằm trong handoff user.

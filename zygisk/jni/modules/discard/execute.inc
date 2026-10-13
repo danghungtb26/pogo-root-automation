@@ -166,6 +166,9 @@ void finish_runtime_discard(
         g_runtime_discard.blocked = blocked;
     }
     free_runtime_discard_handle(context, handle);
+    (void)pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kInventorySource
+    );
     const bool success = phase == kCommandPhaseCompleted &&
         (error_code == nullptr || error_code[0] == '\0');
     __android_log_print(

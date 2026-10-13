@@ -64,6 +64,11 @@ void set_pending_direct_catch_terminal(
     context.pending_direct_catch.captured_pokemon_id = captured_pokemon_id;
     context.pending_direct_catch.error_code = error_code == nullptr ? "" : error_code;
     context.pending_direct_catch.message = message == nullptr ? "" : message;
+    uint32_t dirty_sources = pogo_runtime_world_state::kPokemonSource;
+    if (catch_outcome_wire == 1U) {
+        dirty_sources |= pogo_runtime_world_state::kInventorySource;
+    }
+    (void)pogo_runtime_world_state::mark_dirty(dirty_sources);
     if (context.pending_direct_catch.command_id.empty() &&
         catch_outcome_wire != 1U && catch_outcome_wire != 4U) {
         (void)send_runtime_automation_event(

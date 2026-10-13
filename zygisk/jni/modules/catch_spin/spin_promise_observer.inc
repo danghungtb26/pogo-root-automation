@@ -94,6 +94,10 @@ void mark_runtime_spin_terminal(
         complete_runtime_spin_for_spinner(context, terminal.fort_id, terminal.spinner_gc_handle);
         (void)refresh_runtime_map_after_action(context, "spin completed");
     }
+    (void)pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kFortSource |
+        pogo_runtime_world_state::kInventorySource
+    );
     publish_runtime_spin_terminal(context, terminal);
     (void)send_runtime_automation_event(
         context,

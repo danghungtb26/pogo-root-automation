@@ -18,7 +18,7 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Đã thực hiện — T-301</summary>
 
-  Đã verify đủ 10 hash, import/query bundle canonical (17 records, 2 residual unknown), và nối provenance APKM→base/arm64 split→`libil2cpp.so`/metadata qua `ev_022695...`, `ev_9c80a3...`, `ev_d5331c...`. `inspect_android_package` báo thiếu JADX MCP 0.7.1; native session báo không có Ghidra/provider. Không có Evidence mới nên không export bundle giả và không dùng dump/script 0.427.0.
+  Đã verify đủ 10 hash và nối provenance APKM→base/arm64 split→`libil2cpp.so`/metadata qua `ev_022695...`, `ev_9c80a3...`, `ev_d5331c...`. Pass tiếp theo dùng JADX 0.7.1 xác nhận package/version/versionCode trong `ev_59ea3043...`; Ghidra 12.1.3 nhận đúng ELF arm64 nhưng truy vấn đầu tiên timeout trước khi sinh Evidence. Bundle canonical đã export lại thành 18 records/2 residual unknown; không dùng dump/script 0.427.0.
 
   </details>
 
@@ -27,7 +27,7 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Đã thực hiện — T-302</summary>
 
-  Ledger đã liệt kê đủ 10 candidate source, `MapEntityCell`, fort và location. Mỗi hàng có verdict `UNRESOLVED`, residual Evidence/limitation và owner/lifetime `UNVERIFIED_DEVICE`. Không class/field/layout nào từ 0.427.0 được promote; vì provider thiếu, runtime source tương ứng phải bị loại khỏi capability.
+  Ledger đã liệt kê đủ 10 candidate source, `MapEntityCell`, fort và location. Mỗi hàng có verdict `UNRESOLVED`, residual Evidence/limitation và owner/lifetime `UNVERIFIED_DEVICE`. JADX chỉ chứng minh DEX/manifest, còn Ghidra chưa trả dossier IL2CPP; không class/field/layout nào từ 0.427.0 được promote và runtime source tương ứng vẫn bị loại khỏi capability.
 
   </details>
 
@@ -36,7 +36,7 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-303</summary>
 
-  BLOCKED bởi residual unknown `unk_1aaa6e...`/`unk_27690a...`: chưa có JADX/native deep provider để chứng minh exact method tuple, request/result/Promise, captured storage ID và postcondition. Ledger đã ghi contract thiếu và `DIRECT_CATCH=UNAVAILABLE`; không triển khai binding đoán.
+  BLOCKED bởi residual unknown `unk_1aaa6e...`/`unk_27690a...`: provider hiện hoạt động cho manifest/ELF, nhưng chưa có qualifying IL2CPP metadata member/native dossier để chứng minh exact method tuple, request/result/Promise, captured storage ID và postcondition. Ledger giữ `DIRECT_CATCH=UNAVAILABLE`; không triển khai binding đoán.
 
   </details>
 
@@ -45,7 +45,7 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-304</summary>
 
-  BLOCKED bởi cùng provider gap. Bảng token/slot chỉ được giữ làm search identity; mọi storage tuple, `ItemData`, expiring items, Promise/result và refresh signal vẫn `UNRESOLVED`. Transfer/discard mutation không được mở.
+  BLOCKED vì chưa có qualifying IL2CPP metadata member/native dossier dù JADX/Ghidra đã khả dụng. Bảng token/slot chỉ được giữ làm search identity; mọi storage tuple, `ItemData`, expiring items, Promise/result và refresh signal vẫn `UNRESOLVED`. Transfer/discard mutation không được mở.
 
   </details>
 

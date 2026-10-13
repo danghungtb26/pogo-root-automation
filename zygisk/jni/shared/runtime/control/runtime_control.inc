@@ -91,6 +91,10 @@ bool activate_runtime(ProbeContext &context, const char *request_id) {
     clear_runtime_discard_suppressions();
     reset_runtime_inventory_readiness();
     invalidate_runtime_desired_apply();
+    pogo_runtime_world_state::reset(
+        runtime_binding_snapshot(context).owner_generation,
+        static_cast<uint64_t>(now_elapsed_nanos())
+    );
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -119,6 +123,10 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     clear_runtime_discard_suppressions();
     reset_runtime_inventory_readiness();
     invalidate_runtime_desired_apply();
+    pogo_runtime_world_state::reset(
+        runtime_binding_snapshot(context).owner_generation,
+        static_cast<uint64_t>(now_elapsed_nanos())
+    );
     (void)send_runtime_ui_status(context);
     return send_runtime_control_completed(
         context.fd,

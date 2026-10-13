@@ -59,6 +59,10 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
         std::lock_guard<std::mutex> binding_lock(context.binding_mutex);
         context.binding = binding;
     }
+    pogo_runtime_world_state::reset(
+        binding.owner_generation,
+        static_cast<uint64_t>(now_elapsed_nanos())
+    );
     api.thread_detach(thread);
 
     // Scene services are often created after the Zenject owners inspected

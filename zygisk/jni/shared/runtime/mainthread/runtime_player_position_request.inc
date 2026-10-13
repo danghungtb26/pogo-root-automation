@@ -7,6 +7,9 @@ bool request_main_thread_player_position(
         context.main_thread_bridge.java_vm == nullptr) return false;
     std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
     if (context.main_thread_bridge.pending_token != 0U) return false;
+    const uint64_t dirty_generation = pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kLocationSource
+    );
     const uint64_t token = context.main_thread_bridge.next_token++;
     context.main_thread_bridge.pending_token = token;
     context.main_thread_bridge.pending_type = MainThreadTaskType::kReadPlayerPosition;
@@ -53,6 +56,17 @@ bool request_main_thread_player_position(
     if (!completed || context.main_thread_bridge.pending_token != token ||
         !context.main_thread_bridge.pending_success ||
         !context.main_thread_bridge.pending_has_player_position) {
+        const RuntimeBinding binding = runtime_binding_snapshot(context);
+        (void)pogo_runtime_world_state::commit_location(
+            binding.owner_generation,
+            dirty_generation,
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            pogo_runtime_world_state::Availability::kError,
+            false,
+            0.0,
+            0.0,
+            "location_snapshot_failed"
+        );
         context.main_thread_bridge.pending_token = 0U;
         return false;
     }
@@ -64,6 +78,17 @@ bool request_main_thread_player_position(
         "main-thread player position completed lat=%.7f lng=%.7f",
         *latitude,
         *longitude
+    );
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    (void)pogo_runtime_world_state::commit_location(
+        binding.owner_generation,
+        dirty_generation,
+        static_cast<uint64_t>(now_elapsed_nanos()),
+        pogo_runtime_world_state::Availability::kReady,
+        true,
+        *latitude,
+        *longitude,
+        nullptr
     );
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;

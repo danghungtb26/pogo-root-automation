@@ -12,8 +12,10 @@ The canonical target is Pokémon GO `0.433.0` (`2026100702`), package
 Code/build status is complete for the bundled module installer and
 session-scoped manual arm. Live status is **UNVERIFIED_DEVICE**. The available
 REA bundle proves artifact identity/provenance but its current environment has
-no JADX or native deep-analysis provider. Map-source, direct catch, Virtual GO
-Plus, transfer and discard method contracts therefore remain `UNRESOLVED`.
+JADX 0.7.1 and Ghidra 12.1.3 available. JADX confirmed the pinned APK package,
+version and versionCode; the first bounded Ghidra query timed out without a
+retained IL2CPP dossier. Map-source, direct catch, Virtual GO Plus, transfer and
+discard method contracts therefore remain `UNRESOLVED` rather than inferred.
 
 The native profile checks the package and 0.433.0 GNU build ID. It deliberately
 keeps mutation closed because runtime versionCode and metadata hash are not yet

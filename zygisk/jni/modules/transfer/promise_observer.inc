@@ -73,6 +73,11 @@ void finish_runtime_transfer(
         g_runtime_transfer.blocked = blocked;
     }
     free_runtime_transfer_handle(context, handle);
+    if (release_attempted) {
+        (void)pogo_runtime_world_state::mark_dirty(
+            pogo_runtime_world_state::kInventorySource
+        );
+    }
     const bool terminal_success = phase == kCommandPhaseCompleted &&
         (error_code == nullptr || error_code[0] == '\0');
     const bool transfer_success = terminal_success && release_invoked;

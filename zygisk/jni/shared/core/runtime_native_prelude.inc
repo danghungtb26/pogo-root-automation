@@ -418,11 +418,6 @@ struct ProbeContext {
     std::atomic<bool> observation_running{false};
     pthread_t observation_thread{};
     bool observation_thread_started = false;
-    // Dirty-flag for the legacy push-observer path: set by the periodic fallback
-    // tick so the observer re-reads the map only when needed (plus a rare
-    // reconcile). Unused in native module-owned snapshot mode. Starts true so the first
-    // cycle always reads.
-    std::atomic<bool> world_dirty{true};
     // Set only after a successful main-thread map snapshot with a valid player
     // position. Binding verification alone is not enough for module start or
     // automation-event toasts — MapEntityService can exist before overworld.

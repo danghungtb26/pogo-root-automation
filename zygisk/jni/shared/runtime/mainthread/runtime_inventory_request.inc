@@ -6,6 +6,9 @@ bool request_main_thread_inventory(
         context.main_thread_bridge.java_vm == nullptr) return false;
     std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
     if (context.main_thread_bridge.pending_token != 0U) return false;
+    const uint64_t dirty_generation = pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kInventorySource
+    );
     const uint64_t token = context.main_thread_bridge.next_token++;
     context.main_thread_bridge.pending_token = token;
     context.main_thread_bridge.pending_type = MainThreadTaskType::kReadInventory;
@@ -49,6 +52,15 @@ bool request_main_thread_inventory(
     );
     if (!completed || context.main_thread_bridge.pending_token != token ||
         !context.main_thread_bridge.pending_success) {
+        const RuntimeBinding binding = runtime_binding_snapshot(context);
+        (void)pogo_runtime_world_state::commit_inventory(
+            binding.owner_generation,
+            dirty_generation,
+            static_cast<uint64_t>(now_elapsed_nanos()),
+            pogo_runtime_world_state::Availability::kError,
+            pogo_runtime::RuntimeInventoryObservation{},
+            "inventory_snapshot_failed"
+        );
         context.main_thread_bridge.pending_token = 0U;
         return false;
     }
@@ -65,6 +77,17 @@ bool request_main_thread_inventory(
         balls.great_ball,
         balls.ultra_ball,
         balls.master_ball
+    );
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    (void)pogo_runtime_world_state::commit_inventory(
+        binding.owner_generation,
+        dirty_generation,
+        static_cast<uint64_t>(now_elapsed_nanos()),
+        observation->items.empty()
+            ? pogo_runtime_world_state::Availability::kEmpty
+            : pogo_runtime_world_state::Availability::kReady,
+        *observation,
+        nullptr
     );
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;

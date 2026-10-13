@@ -6,19 +6,28 @@ Build date: 2026-10-13
 
 | Artifact | Size | SHA-256 |
 |---|---:|---|
-| `app/build/outputs/apk/debug/app-debug.apk` | 6,931,934 bytes | `eb4bc5926df1ad67ce861644added742833ee074f92919ab0bc1b91651f7d42f` |
-| `build/pogo-root-automation-magisk-multiabi.zip` | 3,207,708 bytes | `aa7787a1abbf927671730218f739ddde4c72a749f8960638da5de7e201c71790` |
-| `build/pogo-root-automation-magisk-multiabi.manifest.json` | 787 bytes | `6beb1ccc768e28a13fd877e6d14b13e31aa16cf37f57277982f458c273eb5ce6` |
+| `app/build/outputs/apk/debug/app-debug.apk` | 6,963,598 bytes | `1923001ae1e1c2890ae77c30abcacef3c84e195e1cea36997416aec3c559ee0e` |
+| `build/pogo-root-automation-magisk-multiabi.zip` | 3,241,145 bytes | `c8fac6605c86effdbc2ca8009a6815775b085a313acd70a2c82eb26722c55061` |
+| `build/pogo-root-automation-magisk-multiabi.manifest.json` | 787 bytes | `3184ac904e1d1afe60ea061417b9b11382a13490733f08e1335821bbc473cfa6` |
 
 The APK contains exactly the ZIP and manifest above. The bundled ZIP hash was
 checked against the manifest and the standalone artifact.
+
+These build outputs are ignored and are not carried by Git. On another machine,
+rebuild them with the repository commands in `AGENTS.md`. For the reverse inputs,
+download and verify the files listed in
+[`reverse/artifacts/README.md`](../../../../reverse/artifacts/README.md). The
+failed 30-minute Ghidra probe and its non-persistent cleanup behavior are recorded
+in [`evidence/ghidra-timeout-2026-10-13.md`](evidence/ghidra-timeout-2026-10-13.md).
 
 ## Important limitation
 
 This candidate is safe for installer/lifecycle validation, but gameplay
 mutation is deliberately fail-closed. REA could verify the 0.433.0 artifact
-chain and GNU build ID, but the current environment had no JADX/native deep
-provider. Runtime verification of versionCode and metadata hash is not yet
+chain and GNU build ID; JADX 0.7.1 now also verifies package/version/versionCode
+and Ghidra 12.1.3 accepts the arm64 ELF. No qualifying IL2CPP metadata member or
+native dossier has yet resolved the gameplay contracts. Runtime verification of
+versionCode and metadata hash is not yet
 implemented, so `exact_build_verified` remains false. Direct catch, Virtual GO
 Plus, full-source map scan, transfer and discard are expected to report
 unavailable/unsupported—not execute.

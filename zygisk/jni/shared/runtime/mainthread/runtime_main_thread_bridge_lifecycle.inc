@@ -165,6 +165,11 @@ bool request_main_thread_map_snapshot(
         context.main_thread_bridge.java_vm == nullptr) return false;
     std::unique_lock<std::mutex> lock(context.main_thread_bridge.mutex);
     if (context.main_thread_bridge.pending_token != 0U) return false;
+    const uint64_t dirty_generation = pogo_runtime_world_state::mark_dirty(
+        pogo_runtime_world_state::kPokemonSource |
+        pogo_runtime_world_state::kFortSource |
+        pogo_runtime_world_state::kLocationSource
+    );
     const uint64_t token = context.main_thread_bridge.next_token++;
     context.main_thread_bridge.pending_token = token;
     context.main_thread_bridge.pending_type = MainThreadTaskType::kReadMap;
@@ -214,6 +219,53 @@ bool request_main_thread_map_snapshot(
         *forts = context.main_thread_bridge.pending_forts;
     }
     const bool success = committed && context.main_thread_bridge.pending_success;
+    const RuntimeBinding binding = runtime_binding_snapshot(context);
+    const uint64_t observed_at = static_cast<uint64_t>(now_elapsed_nanos());
+    const auto availability = !success
+        ? pogo_runtime_world_state::Availability::kError
+        : (observation->spawns.empty() && forts->forts.empty()
+            ? pogo_runtime_world_state::Availability::kEmpty
+            : pogo_runtime_world_state::Availability::kReady);
+    const auto completeness = !success
+        ? pogo_runtime_world_state::MapCompleteness::kUnknown
+        : (observation->is_complete
+            ? pogo_runtime_world_state::MapCompleteness::kComplete
+            : pogo_runtime_world_state::MapCompleteness::kPartial);
+    (void)pogo_runtime_world_state::commit_map(
+        binding.owner_generation,
+        dirty_generation,
+        observed_at,
+        availability,
+        completeness,
+        success ? *observation : pogo_runtime::RuntimeNearbyObservation{},
+        success ? *forts : pogo_runtime::RuntimeFortsObservation{},
+        success ? nullptr : "map_snapshot_failed"
+    );
+    if (success && observation->has_player_position) {
+        (void)pogo_runtime_world_state::commit_location(
+            binding.owner_generation,
+            dirty_generation,
+            observed_at,
+            pogo_runtime_world_state::Availability::kReady,
+            true,
+            observation->player_latitude,
+            observation->player_longitude,
+            nullptr
+        );
+    } else {
+        (void)pogo_runtime_world_state::commit_location(
+            binding.owner_generation,
+            dirty_generation,
+            observed_at,
+            success
+                ? pogo_runtime_world_state::Availability::kNotReady
+                : pogo_runtime_world_state::Availability::kError,
+            false,
+            0.0,
+            0.0,
+            success ? nullptr : "map_location_snapshot_failed"
+        );
+    }
     context.main_thread_bridge.pending_token = 0U;
     context.main_thread_bridge.pending_done = false;
     return success;
