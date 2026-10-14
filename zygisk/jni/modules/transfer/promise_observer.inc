@@ -26,6 +26,7 @@ struct PendingRuntimeTransfer {
     uint32_t poll_count = 0U;
     uint64_t owner_generation = 0U;
     Il2CppGcHandle promise_gc_handle = 0U;
+    RuntimePromiseResultSink result_sink;
     std::string command_id;
 };
 
@@ -56,6 +57,7 @@ void finish_runtime_transfer(
     bool blocked
 ) {
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     uint64_t pokemon_id = 0U;
     int32_t species_id = 0;
     std::string command_id;
@@ -65,6 +67,7 @@ void finish_runtime_transfer(
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
         if (!g_runtime_transfer.active) return;
         handle = g_runtime_transfer.promise_gc_handle;
+        sink = g_runtime_transfer.result_sink;
         pokemon_id = g_runtime_transfer.pokemon_id;
         species_id = g_runtime_transfer.species_id;
         command_id = g_runtime_transfer.command_id;
@@ -72,10 +75,12 @@ void finish_runtime_transfer(
         release_invoked = g_runtime_transfer.release_invoked;
         g_runtime_transfer.active = false;
         g_runtime_transfer.promise_gc_handle = 0U;
+        g_runtime_transfer.result_sink = RuntimePromiseResultSink{};
         g_runtime_transfer.command_id.clear();
         g_runtime_transfer.blocked = blocked;
     }
     free_runtime_transfer_handle(context, handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     if (release_attempted) {
         (void)pogo_runtime_world_state::mark_dirty(
             pogo_runtime_world_state::kInventorySource
@@ -124,18 +129,21 @@ void finish_runtime_transfer(
 
 void reset_runtime_transfer_state(ProbeContext &context) {
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     bool active = false;
     bool release_attempted = false;
     std::string command_id;
     {
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
         handle = g_runtime_transfer.promise_gc_handle;
+        sink = g_runtime_transfer.result_sink;
         active = g_runtime_transfer.active;
         release_attempted = g_runtime_transfer.release_attempted;
         command_id = g_runtime_transfer.command_id;
         g_runtime_transfer = PendingRuntimeTransfer{};
     }
     free_runtime_transfer_handle(context, handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     if (release_attempted) {
         (void)pogo_runtime_world_state::mark_dirty(
             pogo_runtime_world_state::kInventorySource
@@ -382,14 +390,30 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         );
         return RuntimeTransferPromisePollResult::kFailed;
     }
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api, promise, "Holoholo.Rpc.ReleasePokemonOutProto", &sink
+        )) {
+        free_runtime_transfer_handle(context, handle);
+        finish_runtime_transfer(
+            context,
+            kCommandPhaseIndeterminate,
+            "transfer_promise_subscription_failed",
+            "ReleasePokemon Promise result callback could not be registered",
+            true
+        );
+        return RuntimeTransferPromisePollResult::kFailed;
+    }
     {
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
         if (!g_runtime_transfer.active || g_runtime_transfer.pokemon_id != pending.pokemon_id) {
             free_runtime_transfer_handle(context, handle);
+            free_runtime_promise_result_sink(api, &sink);
             return RuntimeTransferPromisePollResult::kFailed;
         }
         g_runtime_transfer.phase = RuntimeTransferPendingPhase::kWaitingRelease;
         g_runtime_transfer.promise_gc_handle = handle;
+        g_runtime_transfer.result_sink = sink;
         g_runtime_transfer.release_invoked = true;
         g_runtime_transfer.started_at_ns = static_cast<uint64_t>(now_elapsed_nanos());
         g_runtime_transfer.poll_count = 0U;

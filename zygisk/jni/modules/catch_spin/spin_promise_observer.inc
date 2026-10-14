@@ -1,6 +1,6 @@
 // Owns the Promise returned by PoiItemSpinner.ckko(). The server-side Spin
 // request is asynchronous, so the native observer keeps the Promise and reads
-// its completion fields only from Unity's main thread.
+// its managed callback sink only from Unity's main thread.
 
 namespace {
 constexpr uint64_t kRuntimeSpinPromiseTimeoutNs = 15000000000ULL;
@@ -18,6 +18,7 @@ struct PendingRuntimeSpin {
     int64_t cooldown_complete_ms = 0;
     std::string error_code;
     std::string message;
+    RuntimePromiseResultSink result_sink;
 };
 
 std::mutex g_runtime_spin_mutex;
@@ -149,16 +150,19 @@ void abandon_pending_runtime_spin(ProbeContext &context, const char *reason) {
     mark_runtime_spin_terminal(context, 0, reason, "Spin invocation did not complete", false);
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
+    RuntimePromiseResultSink sink;
     std::string fort_id;
     {
         std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
         if (!g_runtime_spin.active) return;
         promise_handle = g_runtime_spin.promise_gc_handle;
         spinner_handle = g_runtime_spin.spinner_gc_handle;
+        sink = g_runtime_spin.result_sink;
         fort_id = g_runtime_spin.fort_id;
         g_runtime_spin = PendingRuntimeSpin{};
     }
     free_runtime_spin_handles(context, promise_handle, spinner_handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -185,6 +189,13 @@ bool retain_pending_runtime_spin(
         free_runtime_spin_handles(context, 0U, spinner_handle);
         return false;
     }
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api, promise, "Holoholo.Rpc.FortSearchOutProto", &sink
+        )) {
+        free_runtime_spin_handles(context, promise_handle, spinner_handle);
+        return false;
+    }
     bool retained = false;
     {
         std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
@@ -194,11 +205,13 @@ bool retain_pending_runtime_spin(
             g_runtime_spin.spinner_gc_handle == 0U) {
             g_runtime_spin.promise_gc_handle = promise_handle;
             g_runtime_spin.spinner_gc_handle = spinner_handle;
+            g_runtime_spin.result_sink = sink;
             retained = true;
         }
     }
     if (!retained) {
         free_runtime_spin_handles(context, promise_handle, spinner_handle);
+        free_runtime_promise_result_sink(api, &sink);
         return false;
     }
     __android_log_print(
@@ -254,18 +267,9 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         );
         return RuntimeSpinPromisePollResult::kFailed;
     }
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
+    const RuntimePromiseSinkPollResult sink_result =
+        poll_runtime_promise_result_sink(api, pending.result_sink, &completed_value);
     uint32_t poll_count = 0U;
     {
         std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
@@ -275,30 +279,26 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         }
     }
     __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        sink_result == RuntimePromiseSinkPollResult::kFailed
+            ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
         kLogTag,
-        "native spin Promise state fort=%s promise=%p complete=%d error=%d value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
+        "native spin Promise sink fort=%s promise=%p state=%u value=%p poll=%u",
         pending.fort_id.c_str(),
         promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
+        static_cast<uint32_t>(sink_result),
         completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
+        poll_count
     );
-    if (!fields_read) {
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed) {
         mark_runtime_spin_terminal(
             context,
             0,
-            "spin_promise_layout_unavailable",
-            "FortSearch Promise completion fields could not be read"
+            "spin_promise_sink_failed",
+            "FortSearch Promise callback sink could not be read"
         );
         return RuntimeSpinPromisePollResult::kFailed;
     }
-    if (error_called) {
+    if (sink_result == RuntimePromiseSinkPollResult::kError) {
         mark_runtime_spin_terminal(
             context,
             0,
@@ -307,7 +307,9 @@ RuntimeSpinPromisePollResult poll_pending_runtime_spin_on_main_thread(
         );
         return RuntimeSpinPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeSpinPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeSpinPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr || !runtime_object_is_exact_class(
             api, completed_value, "Holoholo.Rpc", "FortSearchOutProto")) {
         mark_runtime_spin_terminal(
@@ -426,6 +428,7 @@ bool consume_terminal_runtime_spin(
     }
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
+    RuntimePromiseResultSink sink;
     {
         std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
         if (!g_runtime_spin.active || !g_runtime_spin.terminal) return false;
@@ -434,25 +437,30 @@ bool consume_terminal_runtime_spin(
         *cooldown_complete_ms = g_runtime_spin.cooldown_complete_ms;
         promise_handle = g_runtime_spin.promise_gc_handle;
         spinner_handle = g_runtime_spin.spinner_gc_handle;
+        sink = g_runtime_spin.result_sink;
         g_runtime_spin = PendingRuntimeSpin{};
     }
     free_runtime_spin_handles(context, promise_handle, spinner_handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     return true;
 }
 
 void reset_runtime_spin_state(ProbeContext &context) {
     Il2CppGcHandle promise_handle = 0U;
     Il2CppGcHandle spinner_handle = 0U;
+    RuntimePromiseResultSink sink;
     std::string fort_id;
     {
         std::lock_guard<std::mutex> lock(g_runtime_spin_mutex);
         if (!g_runtime_spin.active) return;
         promise_handle = g_runtime_spin.promise_gc_handle;
         spinner_handle = g_runtime_spin.spinner_gc_handle;
+        sink = g_runtime_spin.result_sink;
         fort_id = g_runtime_spin.fort_id;
         g_runtime_spin = PendingRuntimeSpin{};
     }
     free_runtime_spin_handles(context, promise_handle, spinner_handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,

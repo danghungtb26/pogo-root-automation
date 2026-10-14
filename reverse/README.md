@@ -9,8 +9,8 @@ bỏ; không tạo lại script tương đương.
   Binary lớn được giữ cục bộ và ignore bởi Git; `SHA256SUMS` cùng README được
   commit để kiểm identity.
 - `rea/rea-evidence-2026-10-13.json`: bundle Evidence deterministic, hiện có
-  33 record, 2 residual-unknown identity và 4 revision record; SHA-256
-  `5eb3c187417c0b05956a46f1fe4819b2bb8ed89247f7838de8eb8cef944aecc0`.
+  35 record, 2 residual-unknown identity và 4 revision record; SHA-256
+  `62249426b6119f4f74a4490e2ba2202704de362fda2f6e1dce837a37efaa55bf`.
 - `rea/pogo-0.433.0-il2cpp-mapping.json`: mapping có provenance từ đúng cặp
   `libil2cpp.so` + `global-metadata.dat` 0.433.0. File giữ managed identity,
   full parameter/return types, token/slot, RVA, file offset và 6 selected type

@@ -35,6 +35,7 @@
 #include "shared/runtime/probe/runtime_method_resolver.inc"
 #include "shared/runtime/probe/runtime_probe_inspection.inc"
 #include "shared/runtime/probe/runtime_probe_owners.inc"
+#include "shared/runtime/promise/runtime_promise_result_sink.inc"
 #include "modules/discard/hash_set_binding.inc"
 #include "modules/discard/inventory_filter_binding.inc"
 #include "modules/discard/inventory_binding_contract.inc"

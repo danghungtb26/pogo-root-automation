@@ -13,7 +13,7 @@ enum class RuntimeEncounterPromisePollResult : uint32_t {
     kTimedOut = 4U,
 };
 
-const void *find_runtime_promise_field(
+const void *find_runtime_field_in_hierarchy(
     const Il2CppApi &api,
     Il2CppClass *klass,
     const char *field_name
@@ -29,40 +29,22 @@ const void *find_runtime_promise_field(
     return nullptr;
 }
 
-template <typename T>
-bool read_runtime_promise_field(
-    const Il2CppApi &api,
-    void *promise,
-    const char *field_name,
-    T *value,
-    int32_t *field_offset = nullptr
-) {
-    if (promise == nullptr || value == nullptr || api.object_get_class == nullptr ||
-        api.field_get_value == nullptr) return false;
-    const void *field = find_runtime_promise_field(
-        api, api.object_get_class(promise), field_name
-    );
-    if (field == nullptr) return false;
-    if (field_offset != nullptr && api.field_get_offset != nullptr) {
-        *field_offset = api.field_get_offset(field);
-    }
-    api.field_get_value(promise, const_cast<void *>(field), value);
-    return true;
-}
-
 void clear_pending_encounter_request(ProbeContext &context, const char *reason) {
     Il2CppGcHandle promise_gc_handle = 0U;
+    RuntimePromiseResultSink sink;
     uint64_t encounter_id = 0U;
     {
         std::lock_guard<std::mutex> lock(context.pending_encounter_request_mutex);
         if (!context.pending_encounter_request.active) return;
         promise_gc_handle = context.pending_encounter_request.promise_gc_handle;
+        sink = context.pending_encounter_request.result_sink;
         encounter_id = context.pending_encounter_request.encounter_id;
         context.pending_encounter_request = PendingEncounterRequest{};
     }
     if (promise_gc_handle != 0U && context.il2cpp_api.gchandle_free != nullptr) {
         context.il2cpp_api.gchandle_free(promise_gc_handle);
     }
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -102,18 +84,32 @@ bool retain_pending_encounter_request(
         );
         return false;
     }
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api,
+            promise,
+            "Niantic.Holoholo.Map.PokemonEncounterResponse",
+            &sink
+        )) {
+        api.gchandle_free(promise_gc_handle);
+        return false;
+    }
     Il2CppGcHandle previous_handle = 0U;
+    RuntimePromiseResultSink previous_sink;
     {
         std::lock_guard<std::mutex> lock(context.pending_encounter_request_mutex);
         previous_handle = context.pending_encounter_request.promise_gc_handle;
+        previous_sink = context.pending_encounter_request.result_sink;
         context.pending_encounter_request = PendingEncounterRequest{};
         context.pending_encounter_request.active = true;
         context.pending_encounter_request.encounter_id = encounter_id;
         context.pending_encounter_request.promise_gc_handle = promise_gc_handle;
+        context.pending_encounter_request.result_sink = sink;
         context.pending_encounter_request.requested_at_ns =
             static_cast<uint64_t>(now_elapsed_nanos());
     }
     if (previous_handle != 0U) api.gchandle_free(previous_handle);
+    free_runtime_promise_result_sink(api, &previous_sink);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -162,27 +158,18 @@ RuntimeEncounterPromisePollResult poll_pending_encounter_request(
         return RuntimeEncounterPromisePollResult::kFailed;
     }
 
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
-    if (!fields_read) {
+    const RuntimePromiseSinkPollResult sink_result =
+        poll_runtime_promise_result_sink(api, pending.result_sink, &completed_value);
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed) {
         __android_log_print(
             ANDROID_LOG_WARN,
             kLogTag,
-            "runtime encounter promise fields unavailable id=%llu promise=%p",
+            "runtime encounter promise sink unavailable id=%llu promise=%p",
             static_cast<unsigned long long>(encounter_id),
             promise
         );
-        clear_pending_encounter_request(context, "promise_layout_unavailable");
+        clear_pending_encounter_request(context, "promise_sink_unavailable");
         return RuntimeEncounterPromisePollResult::kFailed;
     }
 
@@ -197,24 +184,21 @@ RuntimeEncounterPromisePollResult poll_pending_encounter_request(
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "runtime encounter promise state id=%llu promise=%p complete=%d error=%d value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
+        "runtime encounter promise sink id=%llu promise=%p state=%u value=%p poll=%u",
         static_cast<unsigned long long>(encounter_id),
         promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
+        static_cast<uint32_t>(sink_result),
         completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
+        poll_count
     );
 
-    if (error_called) {
+    if (sink_result == RuntimePromiseSinkPollResult::kError) {
         clear_pending_encounter_request(context, "promise_failed");
         return RuntimeEncounterPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeEncounterPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeEncounterPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr) {
         clear_pending_encounter_request(context, "completed_without_value");
         return RuntimeEncounterPromisePollResult::kFailed;

@@ -369,6 +369,18 @@ struct MainThreadBridge {
     bool ready = false;
 };
 
+// Managed queues receive Promise callbacks through Delegate.CreateDelegate.
+// Handles are owned by the pending action that embeds this value.
+struct RuntimePromiseResultSink {
+    Il2CppGcHandle result_queue_gc_handle = 0U;
+    Il2CppGcHandle result_delegate_gc_handle = 0U;
+    Il2CppGcHandle error_queue_gc_handle = 0U;
+    Il2CppGcHandle error_delegate_gc_handle = 0U;
+    const void *queue_get_count = nullptr;
+    const void *queue_peek = nullptr;
+    bool subscribed = false;
+};
+
 struct PendingDirectCatch {
     bool active = false;
     bool initial_result_published = false;
@@ -384,6 +396,7 @@ struct PendingDirectCatch {
     std::string captured_pokemon_id;
     std::string error_code;
     std::string message;
+    RuntimePromiseResultSink result_sink;
 };
 
 struct PendingEncounterRequest {
@@ -394,6 +407,7 @@ struct PendingEncounterRequest {
     void *completed_value = nullptr;
     uint64_t requested_at_ns = 0U;
     uint32_t poll_count = 0U;
+    RuntimePromiseResultSink result_sink;
 };
 
 struct MapDictionaryEntry {

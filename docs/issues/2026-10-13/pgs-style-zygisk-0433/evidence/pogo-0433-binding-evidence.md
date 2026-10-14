@@ -19,12 +19,13 @@ giữ ở trạng thái `UNVERIFIED_DEVICE`.
 | `rea/pogo-0.433.0-il2cpp-mapping.json` | `3323117e8a2902996a6e0e60fc9d652df36f746f0e6e7cbc77dd9eff1f0bb59c` | Inputs linked to `ev_d5331c...`/`ev_9c80a3...`; mapped addresses checked by `ev_51dac350...`, `ev_987116...`, `ev_7f6095...`, `ev_2dfe76...`, `ev_d76804...` | deterministic derived artifact | Schema v2: 672 focused method rows plus 6 type contracts, with full managed parameter/return types and field offsets for the selected contracts. Static identity/RVA aid only; exact native entry, runtime owner/lifetime and outcomes are outside coverage. |
 | `build/rea/pogo-0.433.0-ghidra-analysis.snapshot.json` | `81c4c7a1fea5bf846c7a58ff0a8911168e7e7c18a56b9fac3f8671b56bf4eaab` | Snapshot of the read-only existing-project run | deterministic analysis snapshot | Records exact project/target/profile state; it is not a callable binding. |
 | `build/rea/pogo-0.433.0-ghidra-focused-evidence.json` | `b2201daf2535c8c222d9274248a08b22059df16fa328f8d7b8baaf04a361390e` | 11 focused records, 7 new after canonical merge | deterministic REA export | Covers public IL2CPP API dossiers and the five focused method addresses. Four records duplicate canonical observations. |
-| `rea/rea-evidence-2026-10-13.json` | `5eb3c187417c0b05956a46f1fe4819b2bb8ed89247f7838de8eb8cef944aecc0` | Canonical deterministic bundle | REA retained Evidence | 33 records, 2 residual-unknown identities and 4 immutable unknown revisions after importing the focused bundle. |
+| Auxiliary `build/rea/cpp2il-pogo-0.433.0/Niantic.Promises.dll` | `4016974d423eed712da432f014d51dc6eda27d787ef9073c7fe705329dd77fde` | `ev_0c4a9079...`, `ev_3bdab983...` | deterministic auxiliary reconstruction | Complete PE/CLI member inventory shows the Promise callback/value implementation hypothesis. It is not a shipped DLL; tokens, offsets and behavior do not authorize a target binding. |
+| `rea/rea-evidence-2026-10-13.json` | `62249426b6119f4f74a4490e2ba2202704de362fda2f6e1dce837a37efaa55bf` | Canonical deterministic bundle | REA retained Evidence | 35 records, 2 residual-unknown identities and 4 immutable unknown revisions after adding the auxiliary Promise inspection records. |
 | Package | `com.nianticlabs.pokemongo` | `ev_59ea3043...` | shipped artifact, observed | Decoded from `AndroidManifest.xml` of the pinned base APK by JADX 0.7.1. |
 | Version | `0.433.0` / versionCode `2026100702` | `ev_59ea3043...` | shipped artifact, observed | Decoded from the pinned base APK. Runtime now independently observes versionCode and installed metadata SHA-256, but the device observation itself remains `UNVERIFIED_DEVICE`. |
 
 The canonical bundle `reverse/rea/rea-evidence-2026-10-13.json` now contains
-33 retained records, 2 residual-unknown identities and 4 immutable unknown
+35 retained records, 2 residual-unknown identities and 4 immutable unknown
 revision records. The Android/IL2CPP unknown is `unk_1aaa6e...`; native unknown
 `unk_27690a...` is revision 3/`investigating`, supported by the search and three
 mapped-address dossiers. Provider availability and token-to-RVA mapping are no
@@ -100,8 +101,8 @@ storage/inventory postconditions remain unresolved.
 
 - `shasum -a 256 -c reverse/artifacts/SHA256SUMS`: all 10 entries passed.
 - REA deterministic merge/export after the focused API/address dossiers
-  produced 33 records, 2 unknown identities and 4 immutable revision records;
-  canonical bundle SHA-256 is `5eb3c187...`.
+  and auxiliary Promise inspection produced 35 records, 2 unknown identities
+  and 4 immutable revision records; canonical bundle SHA-256 is `62249426...`.
 - `inspect_android_package(base.apk)`: JADX 0.7.1 returned package
   `com.nianticlabs.pokemongo`, version `0.433.0`, versionCode `2026100702` in
   Evidence `ev_59ea3043...`; it did not decode IL2CPP metadata members.

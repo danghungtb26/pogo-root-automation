@@ -26,6 +26,8 @@ struct PendingRuntimeDiscard {
     uint64_t reconcile_started_at_ns = 0U;
     Il2CppGcHandle reconcile_promise_gc_handle = 0U;
     Il2CppGcHandle promise_gc_handle = 0U;
+    RuntimePromiseResultSink result_sink;
+    RuntimePromiseResultSink reconcile_result_sink;
     std::string command_id;
 };
 
@@ -147,6 +149,7 @@ void finish_runtime_discard(
     bool blocked
 ) {
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     int32_t item_id = 0;
     int32_t amount = 0;
     std::string command_id;
@@ -156,16 +159,19 @@ void finish_runtime_discard(
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
         if (!g_runtime_discard.active) return;
         handle = g_runtime_discard.promise_gc_handle;
+        sink = g_runtime_discard.result_sink;
         item_id = g_runtime_discard.item_id;
         amount = g_runtime_discard.amount;
         owner_generation = g_runtime_discard.owner_generation;
         command_id = g_runtime_discard.command_id;
         g_runtime_discard.active = false;
         g_runtime_discard.promise_gc_handle = 0U;
+        g_runtime_discard.result_sink = RuntimePromiseResultSink{};
         g_runtime_discard.command_id.clear();
         g_runtime_discard.blocked = blocked;
     }
     free_runtime_discard_handle(context, handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     (void)pogo_runtime_world_state::mark_dirty(
         pogo_runtime_world_state::kInventorySource
     );
@@ -240,6 +246,8 @@ void finish_runtime_discard(
 void reset_runtime_discard_state(ProbeContext &context) {
     Il2CppGcHandle handle = 0U;
     Il2CppGcHandle reconcile_handle = 0U;
+    RuntimePromiseResultSink sink;
+    RuntimePromiseResultSink reconcile_sink;
     bool interrupted = false;
     std::string command_id;
     {
@@ -249,10 +257,14 @@ void reset_runtime_discard_state(ProbeContext &context) {
         command_id = g_runtime_discard.command_id;
         handle = g_runtime_discard.promise_gc_handle;
         reconcile_handle = g_runtime_discard.reconcile_promise_gc_handle;
+        sink = g_runtime_discard.result_sink;
+        reconcile_sink = g_runtime_discard.reconcile_result_sink;
         g_runtime_discard = PendingRuntimeDiscard{};
     }
     free_runtime_discard_handle(context, handle);
     free_runtime_discard_handle(context, reconcile_handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
+    free_runtime_promise_result_sink(context.il2cpp_api, &reconcile_sink);
     if (interrupted) {
         (void)pogo_runtime_world_state::mark_dirty(
             pogo_runtime_world_state::kInventorySource
@@ -379,14 +391,30 @@ MainThreadActionOutcome start_runtime_discard_on_main_thread(
         );
         return MainThreadActionOutcome::kIndeterminate;
     }
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api, promise, "Holoholo.Rpc.RecycleItemOutProto", &sink
+        )) {
+        free_runtime_discard_handle(context, handle);
+        finish_runtime_discard(
+            context,
+            kCommandPhaseIndeterminate,
+            "discard_promise_subscription_failed",
+            "RecycleItem Promise result callback could not be registered",
+            true
+        );
+        return MainThreadActionOutcome::kIndeterminate;
+    }
     {
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
         if (!g_runtime_discard.active || g_runtime_discard.item_id != item_id ||
             g_runtime_discard.amount != amount) {
             free_runtime_discard_handle(context, handle);
+            free_runtime_promise_result_sink(api, &sink);
             return MainThreadActionOutcome::kIndeterminate;
         }
         g_runtime_discard.promise_gc_handle = handle;
+        g_runtime_discard.result_sink = sink;
     }
     __android_log_print(
         ANDROID_LOG_INFO,

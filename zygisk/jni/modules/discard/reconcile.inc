@@ -10,18 +10,24 @@ bool clear_runtime_discard_reconcile(
     bool clear_blocked
 ) {
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     bool cleared = false;
     {
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
         if (g_runtime_discard.action_id != action_id ||
             g_runtime_discard.reconcile_promise_gc_handle != expected_handle) return false;
         handle = g_runtime_discard.reconcile_promise_gc_handle;
+        sink = g_runtime_discard.reconcile_result_sink;
         g_runtime_discard.reconcile_promise_gc_handle = 0U;
+        g_runtime_discard.reconcile_result_sink = RuntimePromiseResultSink{};
         g_runtime_discard.awaiting_reconcile = false;
         if (clear_blocked) g_runtime_discard.blocked = false;
         cleared = true;
     }
-    if (cleared) free_runtime_discard_handle(context, handle);
+    if (cleared) {
+        free_runtime_discard_handle(context, handle);
+        free_runtime_promise_result_sink(context.il2cpp_api, &sink);
+    }
     return cleared;
 }
 
@@ -61,18 +67,27 @@ bool begin_runtime_discard_reconcile(ProbeContext &context) {
     }
     const Il2CppGcHandle handle = api.gchandle_new(promise, false);
     if (handle == 0U) return false;
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api, promise, "Holoholo.Rpc.GetHoloholoInventoryOutProto", &sink
+        )) {
+        free_runtime_discard_handle(context, handle);
+        return false;
+    }
     {
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
         if (g_runtime_discard.action_id != pending.action_id ||
             g_runtime_discard.active || !g_runtime_discard.blocked ||
             g_runtime_discard.awaiting_reconcile) {
             free_runtime_discard_handle(context, handle);
+            free_runtime_promise_result_sink(api, &sink);
             return false;
         }
         g_runtime_discard.awaiting_reconcile = true;
         g_runtime_discard.reconcile_started_at_ns =
             static_cast<uint64_t>(now_elapsed_nanos());
         g_runtime_discard.reconcile_promise_gc_handle = handle;
+        g_runtime_discard.reconcile_result_sink = sink;
     }
     __android_log_print(
         ANDROID_LOG_INFO,
@@ -116,31 +131,27 @@ RuntimeDiscardPromisePollResult poll_runtime_discard_reconcile(ProbeContext &con
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
-    if (!fields_read || error_called) {
+    const RuntimePromiseSinkPollResult sink_result = poll_runtime_promise_result_sink(
+        api, pending.reconcile_result_sink, &completed_value
+    );
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed ||
+        sink_result == RuntimePromiseSinkPollResult::kError) {
         (void)clear_runtime_discard_reconcile(
             context, pending.action_id, pending.reconcile_promise_gc_handle, false
         );
         __android_log_print(
             ANDROID_LOG_WARN,
             kLogTag,
-            "native discard reconcile unknown action=%llu fields=%d error=%d error_value=%p",
+            "native discard reconcile callback failed action=%llu state=%u",
             static_cast<unsigned long long>(pending.action_id),
-            fields_read ? 1 : 0,
-            error_called ? 1 : 0,
-            error_value
+            static_cast<uint32_t>(sink_result)
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeDiscardPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeDiscardPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr ||
         !runtime_object_is_exact_class(
             api, completed_value, "Holoholo.Rpc", "GetHoloholoInventoryOutProto"

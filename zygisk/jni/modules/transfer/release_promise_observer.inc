@@ -17,18 +17,9 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
         );
         return RuntimeTransferPromisePollResult::kFailed;
     }
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
+    const RuntimePromiseSinkPollResult sink_result =
+        poll_runtime_promise_result_sink(api, pending.result_sink, &completed_value);
     uint32_t poll_count = 0U;
     {
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
@@ -41,32 +32,27 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
         log_runtime_object(api, promise, "ReleasePokemon Promise", nullptr);
     }
     __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        sink_result == RuntimePromiseSinkPollResult::kFailed
+            ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
         kLogTag,
-        "native transfer promise state id=%llu promise=%p complete=%d error=%d "
-        "value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
+        "native transfer promise sink id=%llu promise=%p state=%u value=%p poll=%u",
         static_cast<unsigned long long>(pending.pokemon_id),
         promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
+        static_cast<uint32_t>(sink_result),
         completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
+        poll_count
     );
-    if (!fields_read) {
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed) {
         finish_runtime_transfer(
             context,
             kCommandPhaseIndeterminate,
-            "transfer_promise_layout_unavailable",
-            "ReleasePokemon Promise completion fields could not be read",
+            "transfer_promise_sink_failed",
+            "ReleasePokemon Promise callback sink could not be read",
             true
         );
         return RuntimeTransferPromisePollResult::kFailed;
     }
-    if (error_called) {
+    if (sink_result == RuntimePromiseSinkPollResult::kError) {
         finish_runtime_transfer(
             context,
             kCommandPhaseCompleted,
@@ -76,7 +62,9 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
         );
         return RuntimeTransferPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeTransferPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeTransferPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr || api.object_get_class == nullptr ||
         !runtime_object_is_exact_class(
             api, completed_value, "Holoholo.Rpc", "ReleasePokemonOutProto"

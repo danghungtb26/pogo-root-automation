@@ -37,18 +37,9 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
+    const RuntimePromiseSinkPollResult sink_result =
+        poll_runtime_promise_result_sink(api, pending.result_sink, &completed_value);
     uint32_t poll_count = 0U;
     {
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
@@ -61,33 +52,29 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
         log_runtime_object(api, promise, "RecycleItem Promise", nullptr);
     }
     __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        sink_result == RuntimePromiseSinkPollResult::kFailed
+            ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
         kLogTag,
-        "native discard promise state item_id=%d amount=%d promise=%p complete=%d error=%d "
-        "value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
+        "native discard promise sink item_id=%d amount=%d promise=%p state=%u "
+        "value=%p poll=%u",
         pending.item_id,
         pending.amount,
         promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
+        static_cast<uint32_t>(sink_result),
         completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
+        poll_count
     );
-    if (!fields_read) {
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed) {
         finish_runtime_discard(
             context,
             kCommandPhaseIndeterminate,
-            "discard_promise_layout_unavailable",
-            "RecycleItem Promise completion fields could not be read",
+            "discard_promise_sink_failed",
+            "RecycleItem Promise callback sink could not be read",
             true
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
-    if (error_called) {
+    if (sink_result == RuntimePromiseSinkPollResult::kError) {
         finish_runtime_discard(
             context,
             kCommandPhaseIndeterminate,
@@ -97,7 +84,9 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
         );
         return RuntimeDiscardPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeDiscardPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeDiscardPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr ||
         !runtime_object_is_exact_class(api, completed_value, "Holoholo.Rpc", "RecycleItemOutProto")) {
         finish_runtime_discard(

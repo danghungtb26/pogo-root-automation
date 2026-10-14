@@ -133,15 +133,18 @@ bool runtime_direct_catch_is_pending(ProbeContext &context) {
 
 void abandon_pending_direct_catch(ProbeContext &context, const char *reason) {
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     uint64_t encounter_id = 0U;
     {
         std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
         if (!context.pending_direct_catch.active) return;
         handle = context.pending_direct_catch.promise_gc_handle;
+        sink = context.pending_direct_catch.result_sink;
         encounter_id = context.pending_direct_catch.encounter_id;
         context.pending_direct_catch = PendingDirectCatch{};
     }
     free_direct_catch_handle(context, handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -161,6 +164,13 @@ bool retain_pending_direct_catch(
         api.gchandle_free == nullptr) return false;
     const Il2CppGcHandle handle = api.gchandle_new(promise, false);
     if (handle == 0U) return false;
+    RuntimePromiseResultSink sink;
+    if (!subscribe_runtime_promise_result(
+            api, promise, "Holoholo.Rpc.CatchPokemonOutProto", &sink
+        )) {
+        free_direct_catch_handle(context, handle);
+        return false;
+    }
     bool retained = false;
     {
         std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
@@ -168,11 +178,13 @@ bool retain_pending_direct_catch(
             context.pending_direct_catch.encounter_id == encounter_id &&
             context.pending_direct_catch.promise_gc_handle == 0U) {
             context.pending_direct_catch.promise_gc_handle = handle;
+            context.pending_direct_catch.result_sink = sink;
             retained = true;
         }
     }
     if (!retained) {
         free_direct_catch_handle(context, handle);
+        free_runtime_promise_result_sink(api, &sink);
         return false;
     }
     __android_log_print(
@@ -236,18 +248,9 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
         );
         return RuntimeDirectCatchPromisePollResult::kFailed;
     }
-    bool complete_called = false;
-    bool error_called = false;
     void *completed_value = nullptr;
-    void *error_value = nullptr;
-    int32_t complete_offset = -1;
-    int32_t error_offset = -1;
-    int32_t value_offset = -1;
-    const bool fields_read =
-        read_runtime_promise_field(api, promise, "completeCalled", &complete_called, &complete_offset) &&
-        read_runtime_promise_field(api, promise, "errorCalled", &error_called, &error_offset) &&
-        read_runtime_promise_field(api, promise, "completedValue", &completed_value, &value_offset) &&
-        read_runtime_promise_field(api, promise, "errorValue", &error_value);
+    const RuntimePromiseSinkPollResult sink_result =
+        poll_runtime_promise_result_sink(api, pending.result_sink, &completed_value);
     uint32_t poll_count = 0U;
     {
         std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
@@ -260,32 +263,28 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
         log_runtime_object(api, promise, "TryCapture Promise", nullptr);
     }
     __android_log_print(
-        fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        sink_result == RuntimePromiseSinkPollResult::kFailed
+            ? ANDROID_LOG_WARN : ANDROID_LOG_INFO,
         kLogTag,
-        "runtime direct catch promise state id=%llu promise=%p complete=%d error=%d value=%p error_value=%p poll=%u offsets=0x%x/0x%x/0x%x",
+        "runtime direct catch promise sink id=%llu promise=%p state=%u value=%p poll=%u",
         static_cast<unsigned long long>(pending.encounter_id),
         promise,
-        complete_called ? 1 : 0,
-        error_called ? 1 : 0,
+        static_cast<uint32_t>(sink_result),
         completed_value,
-        error_value,
-        poll_count,
-        complete_offset,
-        error_offset,
-        value_offset
+        poll_count
     );
-    if (!fields_read) {
+    if (sink_result == RuntimePromiseSinkPollResult::kFailed) {
         set_pending_direct_catch_terminal(
             context,
             kCommandPhaseIndeterminate,
             0U,
             "",
-            "direct_catch_promise_layout_unavailable",
-            "TryCapture Promise completion fields could not be read"
+            "direct_catch_promise_sink_failed",
+            "TryCapture Promise callback sink could not be read"
         );
         return RuntimeDirectCatchPromisePollResult::kFailed;
     }
-    if (error_called) {
+    if (sink_result == RuntimePromiseSinkPollResult::kError) {
         set_pending_direct_catch_terminal(
             context,
             kCommandPhaseIndeterminate,
@@ -296,7 +295,9 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
         );
         return RuntimeDirectCatchPromisePollResult::kFailed;
     }
-    if (!complete_called) return RuntimeDirectCatchPromisePollResult::kWaiting;
+    if (sink_result == RuntimePromiseSinkPollResult::kWaiting) {
+        return RuntimeDirectCatchPromisePollResult::kWaiting;
+    }
     if (completed_value == nullptr || api.object_get_class == nullptr) {
         set_pending_direct_catch_terminal(
             context,
@@ -325,8 +326,8 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
         return RuntimeDirectCatchPromisePollResult::kFailed;
     }
     Il2CppClass *result_class = api.object_get_class(completed_value);
-    const void *status_field = find_runtime_promise_field(api, result_class, "Status");
-    const void *captured_id_field = find_runtime_promise_field(
+    const void *status_field = find_runtime_field_in_hierarchy(api, result_class, "Status");
+    const void *captured_id_field = find_runtime_field_in_hierarchy(
         api, result_class, "CapturedPokemonId"
     );
     if (status_field == nullptr || captured_id_field == nullptr || api.field_get_value == nullptr) {
@@ -400,13 +401,17 @@ bool consume_terminal_pending_direct_catch(
 ) {
     if (terminal == nullptr) return false;
     Il2CppGcHandle handle = 0U;
+    RuntimePromiseResultSink sink;
     {
         std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
         if (!context.pending_direct_catch.active || !context.pending_direct_catch.terminal) return false;
         *terminal = context.pending_direct_catch;
         handle = context.pending_direct_catch.promise_gc_handle;
+        sink = context.pending_direct_catch.result_sink;
         context.pending_direct_catch = PendingDirectCatch{};
     }
+    terminal->result_sink = RuntimePromiseResultSink{};
     free_direct_catch_handle(context, handle);
+    free_runtime_promise_result_sink(context.il2cpp_api, &sink);
     return true;
 }
