@@ -32,9 +32,8 @@ void *find_active_map_tappable_by_id(ProbeContext &context, uint64_t encounter_i
     std::vector<MapDictionaryEntry> cell_entries;
     if (!enumerate_map_dictionary(
             context.il2cpp_api, binding.map_entity_cells, &cell_entries)) return nullptr;
-    size_t wild_count = 0U;
+    size_t map_pokemon_count = 0U;
     size_t tappable_count = 0U;
-    size_t readable_id_count = 0U;
     for (const MapDictionaryEntry &cell_entry : cell_entries) {
         void *cell = cell_entry.value;
         if (cell != nullptr) {
@@ -63,14 +62,11 @@ void *find_active_map_tappable_by_id(ProbeContext &context, uint64_t encounter_i
                     }
                 }
             }
-            const void *get_map_pokemon = find_runtime_method_with_parameter(
-                api,
-                api.object_get_class(cell),
-                "GetMapPokemon",
-                "System.UInt64"
-            );
-            if (get_map_pokemon != nullptr && api.method_is_instance != nullptr &&
-                api.method_is_instance(get_map_pokemon)) {
+            const void *get_map_pokemon =
+                binding.map_entity_get_map_pokemon_descriptor.verified()
+                ? binding.map_entity_get_map_pokemon
+                : nullptr;
+            if (get_map_pokemon != nullptr) {
                 void *arguments[] = {&encounter_id};
                 void *map_pokemon = invoke_runtime_method(
                     api,
@@ -79,6 +75,7 @@ void *find_active_map_tappable_by_id(ProbeContext &context, uint64_t encounter_i
                     arguments,
                     "MapEntityCell.GetMapPokemon"
                 );
+                if (is_probable_managed_pointer(map_pokemon)) ++map_pokemon_count;
                 void *tappable = nullptr;
                 if (is_probable_managed_pointer(map_pokemon) &&
                     read_runtime_field(api, map_pokemon, "egwu", &tappable) &&
@@ -124,50 +121,15 @@ void *find_active_map_tappable_by_id(ProbeContext &context, uint64_t encounter_i
                 }
             }
         }
-        void *wild_dictionary = nullptr;
-        if (!read_runtime_field(
-                context.il2cpp_api, cell_entry.value, "eghw", &wild_dictionary)) continue;
-        std::vector<MapDictionaryEntry> wild_entries;
-        if (!enumerate_map_dictionary(context.il2cpp_api, wild_dictionary, &wild_entries)) continue;
-        for (const MapDictionaryEntry &wild_entry : wild_entries) {
-            ++wild_count;
-            uint64_t candidate_id = 0U;
-            if (!read_map_pokemon_id(context.il2cpp_api, wild_entry.value, &candidate_id)) continue;
-            ++readable_id_count;
-            if (candidate_id != encounter_id) continue;
-            void *tappable = nullptr;
-            if (read_runtime_field(
-                    context.il2cpp_api, wild_entry.value, "egwu", &tappable) &&
-                is_probable_managed_pointer(tappable)) {
-                __android_log_print(
-                    ANDROID_LOG_INFO,
-                    kLogTag,
-                    "runtime action target matched id=%llu cell_key=%llu wild_key=%llu tappable=%p",
-                    static_cast<unsigned long long>(encounter_id),
-                    static_cast<unsigned long long>(cell_entry.key),
-                    static_cast<unsigned long long>(wild_entry.key),
-                    tappable
-                );
-                return tappable;
-            }
-            __android_log_print(
-                ANDROID_LOG_WARN,
-                kLogTag,
-                "runtime action target matched id=%llu but tappable field was unavailable wild=%p",
-                static_cast<unsigned long long>(encounter_id),
-                wild_entry.value
-            );
-        }
     }
     __android_log_print(
         ANDROID_LOG_WARN,
         kLogTag,
-        "runtime action target miss id=%llu cells=%zu wild=%zu tappables=%zu readable_ids=%zu",
+        "runtime action target miss id=%llu cells=%zu map_pokemon=%zu tappables=%zu",
         static_cast<unsigned long long>(encounter_id),
         cell_entries.size(),
-        wild_count,
-        tappable_count,
-        readable_id_count
+        map_pokemon_count,
+        tappable_count
     );
     return nullptr;
 }
@@ -180,29 +142,33 @@ void *find_map_pokemon_from_cells_by_id(ProbeContext &context, uint64_t encounte
     std::vector<MapDictionaryEntry> cell_entries;
     if (!enumerate_map_dictionary(api, binding.map_entity_cells, &cell_entries)) return nullptr;
     for (const MapDictionaryEntry &cell_entry : cell_entries) {
-        void *wild_dictionary = nullptr;
-        if (!read_runtime_field(api, cell_entry.value, "eghw", &wild_dictionary) ||
-            !is_probable_managed_pointer(wild_dictionary)) continue;
-        std::vector<MapDictionaryEntry> wild_entries;
-        if (!enumerate_map_dictionary(api, wild_dictionary, &wild_entries)) continue;
-        for (const MapDictionaryEntry &wild_entry : wild_entries) {
-            void *wild = wild_entry.value;
-            if (!runtime_object_is_exact_class(
-                    api, wild, "Niantic.Holoholo.Map", "WildMapPokemon")) continue;
-            uint64_t candidate_id = 0U;
-            if (read_map_pokemon_id(api, wild, &candidate_id) && candidate_id == encounter_id) {
-                __android_log_print(
-                    ANDROID_LOG_INFO,
-                    kLogTag,
-                    "runtime action target matched via map cells id=%llu cell_key=%llu wild_key=%llu object=%p",
-                    static_cast<unsigned long long>(encounter_id),
-                    static_cast<unsigned long long>(cell_entry.key),
-                    static_cast<unsigned long long>(wild_entry.key),
-                    wild
-                );
-                return wild;
-            }
-        }
+        void *cell = cell_entry.value;
+        if (!runtime_object_is_exact_class(
+                api, cell, "Niantic.Holoholo.Map", "MapEntityCell")) continue;
+        const void *get_map_pokemon = binding.map_entity_get_map_pokemon_descriptor.verified()
+            ? binding.map_entity_get_map_pokemon
+            : nullptr;
+        if (get_map_pokemon == nullptr) continue;
+        void *arguments[] = {&encounter_id};
+        void *map_pokemon = invoke_runtime_method(
+            api, get_map_pokemon, cell, arguments, "MapEntityCell.GetMapPokemon"
+        );
+        const auto source = classify_runtime_map_pokemon_source(api, map_pokemon);
+        if (!pogo_runtime::runtime_nearby_source_known(source)) continue;
+        uint64_t candidate_id = 0U;
+        if (!read_map_pokemon_id(api, map_pokemon, &candidate_id) ||
+            candidate_id != encounter_id) continue;
+        __android_log_print(
+            ANDROID_LOG_INFO,
+            kLogTag,
+            "runtime action target matched via GetMapPokemon id=%llu cell_key=%llu "
+            "source=%s object=%p",
+            static_cast<unsigned long long>(encounter_id),
+            static_cast<unsigned long long>(cell_entry.key),
+            pogo_runtime::runtime_nearby_source_name(source),
+            map_pokemon
+        );
+        return map_pokemon;
     }
     return nullptr;
 }

@@ -62,6 +62,12 @@ bool read_encounter_from_wild_map_pokemon(
     pogo_runtime::RuntimeEncounterObservation *observation
 );
 
+bool read_encounter_from_map_pokemon(
+    const Il2CppApi &api,
+    void *map_pokemon,
+    pogo_runtime::RuntimeEncounterObservation *observation
+);
+
 MainThreadActionOutcome open_runtime_encounter_on_main_thread(
     ProbeContext &context,
     uint64_t encounter_id

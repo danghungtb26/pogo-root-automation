@@ -116,7 +116,9 @@ bool bind_map_entity_service(
     binding->map_entity_service = map_service;
     binding->map_entity_cells = cells;
     binding->map_entity_get_cells = method_verified ? get_cells : nullptr;
-    binding->map_entity_read_verified = method_verified && field_read;
+    binding->map_entity_read_verified = method_verified && field_read && cells != nullptr &&
+        binding->map_entity_get_all_pokemon_descriptor.verified() &&
+        binding->map_entity_get_all_pokemon != nullptr;
     void *dynamic_service = nullptr;
     const bool dynamic_field_read = read_runtime_field(api, map_service, "egiv", &dynamic_service);
     log_runtime_object(
@@ -155,14 +157,77 @@ bool bind_map_entity_service(
     __android_log_print(
         binding->map_entity_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "managed diagnostic: map entity field binding verified=%d cells=%p dynamic=%p dynamic_read=%d tap=%p",
+        "managed diagnostic: map entity binding verified=%d cells=%p get_all=%p "
+        "get_all_reason=%s dynamic=%p dynamic_read=%d tap=%p",
         binding->map_entity_read_verified ? 1 : 0,
         cells,
+        binding->map_entity_get_all_pokemon,
+        pogo_runtime_method::verification_reason_name(
+            binding->map_entity_get_all_pokemon_descriptor.reason
+        ),
         dynamic_service,
         dynamic_field_read ? 1 : 0,
         binding->dynamic_tappables_tap
     );
     return binding->map_entity_read_verified;
+}
+
+void bind_map_source_accessor(
+    const Il2CppApi &api,
+    const Il2CppAssembly **assemblies,
+    size_t assembly_count,
+    RuntimeBinding *binding
+) {
+    if (binding == nullptr || assemblies == nullptr) return;
+    Il2CppClass *map_entity_cell_class = resolve_runtime_method_class(
+        api,
+        assemblies,
+        assembly_count,
+        pogo_runtime_method_profile_0433::kGetAllCellWildPokemon.method
+    );
+    binding->map_entity_get_all_pokemon_descriptor = verify_runtime_method(
+        api,
+        map_entity_cell_class,
+        pogo_runtime_method_profile_0433::kGetAllCellWildPokemon.method
+    );
+    binding->map_entity_get_all_pokemon =
+        binding->map_entity_get_all_pokemon_descriptor.verified()
+        ? binding->map_entity_get_all_pokemon_descriptor.method
+        : nullptr;
+    binding->map_entity_get_map_pokemon_descriptor = verify_runtime_method(
+        api,
+        map_entity_cell_class,
+        pogo_runtime_method_profile_0433::kGetMapPokemonById.method
+    );
+    binding->map_entity_get_map_pokemon =
+        binding->map_entity_get_map_pokemon_descriptor.verified()
+        ? binding->map_entity_get_map_pokemon_descriptor.method
+        : nullptr;
+    binding->map_entity_read_verified = binding->map_entity_service != nullptr &&
+        binding->map_entity_cells != nullptr && binding->map_entity_get_cells != nullptr &&
+        binding->map_entity_get_all_pokemon != nullptr;
+    __android_log_print(
+        binding->map_entity_get_all_pokemon_descriptor.verified()
+            ? ANDROID_LOG_INFO
+            : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: map source accessor verified=%d method=%p token=0x%08x "
+        "reason=%s get_by_id=%p get_by_id_token=0x%08x get_by_id_reason=%s "
+        "map_service=%p cells=%p",
+        binding->map_entity_get_all_pokemon_descriptor.verified() ? 1 : 0,
+        binding->map_entity_get_all_pokemon,
+        binding->map_entity_get_all_pokemon_descriptor.metadata_token,
+        pogo_runtime_method::verification_reason_name(
+            binding->map_entity_get_all_pokemon_descriptor.reason
+        ),
+        binding->map_entity_get_map_pokemon,
+        binding->map_entity_get_map_pokemon_descriptor.metadata_token,
+        pogo_runtime_method::verification_reason_name(
+            binding->map_entity_get_map_pokemon_descriptor.reason
+        ),
+        binding->map_entity_service,
+        binding->map_entity_cells
+    );
 }
 
 void discover_runtime_owners(
@@ -209,6 +274,7 @@ void discover_runtime_owners(
         );
         return;
     }
+    bind_map_source_accessor(api, assemblies, assembly_count, binding);
 
     const Il2CppImage *ignored_image = nullptr;
     Il2CppClass *project_class = find_runtime_class(

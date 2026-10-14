@@ -2,8 +2,8 @@ constexpr size_t kRuntimeObjectArrayDataOffset = sizeof(void *) * 4U;
 
 bool read_map_pokemon_id(const Il2CppApi &api, void *object, uint64_t *encounter_id) {
     if (object == nullptr || encounter_id == nullptr || api.object_get_class == nullptr) return false;
-    const void *method = find_map_method(
-        api, api.object_get_class(object), "get_EncounterId", 0U
+    const void *method = find_runtime_map_getter(
+        api, api.object_get_class(object), "get_EncounterId", "System.UInt64"
     );
     if (method == nullptr || api.runtime_invoke == nullptr) return false;
     void *exception = nullptr;

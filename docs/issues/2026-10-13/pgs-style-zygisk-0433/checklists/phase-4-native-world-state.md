@@ -53,14 +53,31 @@ Plan: [Tổng quan](00-overview.md)
 - [ ] **T-403** **[zygisk]** *(native)* — Thay scanner cũ trong `runtime_map_reader.inc`/`runtime_map_dictionary.inc` bằng collector + typed adapters tách file (đề xuất `runtime_map_sources.inc`) chạy qua `runtime_main_thread_bridge.inc`; resolve owner muộn và enumerate mọi source `SUPPORTED_OFFLINE` từ `T-306`, cùng fort/location. Normalize POD tối thiểu gồm `sourceType`, stable id, encounter id, species, coordinate/distance, expiry, proto/shiny-known flags, observed revision; unknown class không cast thành `WildMapPokemon`. Commit `MapSnapshot` với `READY_COMPLETE`, `READY_PARTIAL`, `EMPTY`, `STALE`, `ERROR`. **AC:** `AC-14`; scanner code không còn đồng nghĩa với đọc `MapEntityCell.eghw`, state chỉ được schedule trên Unity main thread và snapshot không chứa managed reference. **Phụ thuộc:** `T-306`, `T-401`, `T-402`. **Verify:** Native build + existing host checks; audit source registry/normalizer/availability branches và generated diagnostic fields. Đối chiếu live source/fort/revision/scene nằm trong handoff user.
 
   <details>
-  <summary>Bị chặn — T-403</summary>
+  <summary>Đã triển khai collector đa source nền — T-403</summary>
 
-  BLOCKED: T-303/T-304 nay đã có exact managed signatures/token và resolver,
-  nhưng T-306 vẫn chưa có collection owner, create/update/remove signal,
-  stable identity, expiry, generation hoặc snapshot-completeness contract cho
-  các map source. Method identity không thay thế typed collector evidence.
-  Profile 0.433.0 giữ mutation fail-closed; scanner 0.427.0 không phải
-  implementation hợp lệ.
+  Đã thay đường đọc riêng `MapEntityCell.eghw` bằng accessor public
+  `MapEntityCell.get_AllCellWildPokemon()` của đúng build 0.433.0. Accessor được
+  resolve bằng exact image/namespace/class/signature/return type và metadata token
+  `0x0601378f`; mismatch làm `READ_NEARBY` fail-closed. Collector mới nằm trong
+  `runtime_map_sources.inc`, enumerate trên Unity main thread và chỉ copy POD vào
+  snapshot. Registry allowlist phân loại riêng `Wild`, `Incense`, `TroyDisk`,
+  `DailyEncounter`, `Photobomb`, `Incident`, `PokestopSpawn`, `Route`, `Raid` và
+  `Station`; object lạ không bị cast thành Wild. Mỗi object được normalize qua
+  contract chung `get_EncounterId()`/`get_Pokemon()`/`get_Location()` với hierarchy
+  lookup. Unknown/unreadable/capped item làm snapshot partial, có counter và log
+  theo từng source; direct auto-catch hiện chỉ nhận source `Wild` để việc mở rộng
+  read không tự mở mutation chưa chứng minh. Action lookup cũng dùng
+  `MapEntityCell.GetMapPokemon(UInt64)` với exact token `0x0601379e`, không còn
+  fallback `eghw`.
+
+  Source type hiện là metadata nội bộ native và chưa serialize trong nearby payload
+  v2; Kotlin vẫn nhận toàn bộ record normalized mà không có source label. Expiry,
+  create/update/remove signal, membership thực tế của từng concrete source trong
+  collection, owner lifetime và snapshot-completeness vẫn `UNVERIFIED_DEVICE`, nên
+  giữ `[ ]` và capability mutation fail-closed cho tới handoff BlueStacks. Verify
+  host: `./scripts/build-magisk.sh` đạt arm64/x86_64 + package; 6 existing native
+  host checks đạt; `./gradlew test assembleDebug --rerun-tasks` đạt 52 tasks;
+  `git diff --check` sạch.
 
   </details>
 

@@ -104,13 +104,18 @@ bool read_encounter_from_map_pokemon(
     pogo_runtime::RuntimeEncounterObservation *observation
 ) {
     if (observation == nullptr || map_pokemon == nullptr || !has_core_il2cpp_api(api) ||
-        !runtime_object_is_exact_class(api, map_pokemon, "Niantic.Holoholo.Map", "MapPokemon")) {
+        !pogo_runtime::runtime_nearby_source_known(
+            classify_runtime_map_pokemon_source(api, map_pokemon)
+        )) {
         return false;
     }
     uint64_t encounter_id = 0U;
     if (!read_map_pokemon_id(api, map_pokemon, &encounter_id)) return false;
-    const void *get_pokemon = find_map_method(
-        api, api.object_get_class(map_pokemon), "get_Pokemon", 0U
+    const void *get_pokemon = find_runtime_map_getter(
+        api,
+        api.object_get_class(map_pokemon),
+        "get_Pokemon",
+        "Holoholo.Rpc.PokemonProto"
     );
     if (get_pokemon == nullptr) return false;
     void *exception = nullptr;
@@ -131,17 +136,16 @@ bool read_encounter_from_map_pokemon(
             api, pokemon_display, "Shiny", &observation->shiny
         );
     }
-    const void *get_location = find_map_method(
-        api, api.object_get_class(map_pokemon), "get_Location", 0U
+    const void *get_location = find_runtime_map_getter(
+        api, api.object_get_class(map_pokemon), "get_Location", "Niantic.LatLng"
     );
-    if (get_location != nullptr) {
-        exception = nullptr;
-        void *location = api.runtime_invoke(get_location, map_pokemon, nullptr, &exception);
-        if (exception == nullptr && is_probable_managed_pointer(location)) {
-            read_runtime_field(api, location, "Latitude", &observation->latitude);
-            read_runtime_field(api, location, "Longitude", &observation->longitude);
-        }
-    }
+    if (get_location == nullptr) return false;
+    exception = nullptr;
+    void *location = api.runtime_invoke(get_location, map_pokemon, nullptr, &exception);
+    if (exception != nullptr || !runtime_object_is_exact_class(
+            api, location, "Niantic", "LatLng") ||
+        !read_runtime_field(api, location, "Latitude", &observation->latitude) ||
+        !read_runtime_field(api, location, "Longitude", &observation->longitude)) return false;
     return pogo_runtime::valid_runtime_encounter_observation(*observation);
 }
 
@@ -150,8 +154,8 @@ bool read_encounter_from_map_object(
     void *map_object,
     pogo_runtime::RuntimeEncounterObservation *observation
 ) {
-    if (read_encounter_from_wild_map_pokemon(api, map_object, observation)) return true;
-    return read_encounter_from_map_pokemon(api, map_object, observation);
+    if (read_encounter_from_map_pokemon(api, map_object, observation)) return true;
+    return read_encounter_from_wild_map_pokemon(api, map_object, observation);
 }
 
 bool read_active_runtime_encounter(

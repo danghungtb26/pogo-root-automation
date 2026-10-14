@@ -23,6 +23,9 @@ inline constexpr const char *kTryCaptureParameters[] = {
 inline constexpr const char *kGetPokemonParameters[] = {
     "System.UInt64",
 };
+inline constexpr const char *kGetMapPokemonByIdParameters[] = {
+    "System.UInt64",
+};
 inline constexpr const char *kReleasePokemonParameters[] = {
     "Holoholo.Rpc.PokemonProto",
 };
@@ -68,6 +71,21 @@ inline constexpr ProfiledMethodExpectation kRecycleItem{
     0x0a006becU,
     RvaGuardPolicy::kUnavailable,
 };
+inline constexpr ProfiledMethodExpectation kGetAllCellWildPokemon{
+    {"holo-game.dll", "Niantic.Holoholo.Map", "MapEntityCell",
+     "get_AllCellWildPokemon", true, nullptr, 0U,
+     "System.Collections.Generic.IEnumerable<Niantic.Holoholo.Map.IWildMapPokemon>",
+     0x0601378fU},
+    0x09dd35e4U,
+    RvaGuardPolicy::kUnavailable,
+};
+inline constexpr ProfiledMethodExpectation kGetMapPokemonById{
+    {"holo-game.dll", "Niantic.Holoholo.Map", "MapEntityCell", "GetMapPokemon", true,
+     kGetMapPokemonByIdParameters, 1U, "Niantic.Holoholo.Map.IWildMapPokemon",
+     0x0601379eU},
+    0x09dd4b54U,
+    RvaGuardPolicy::kUnavailable,
+};
 
 inline constexpr const ProfiledMethodExpectation *kCriticalMethods[] = {
     &kTryCapture,
@@ -75,6 +93,8 @@ inline constexpr const ProfiledMethodExpectation *kCriticalMethods[] = {
     &kReleasePokemon,
     &kGetItemCount,
     &kRecycleItem,
+    &kGetAllCellWildPokemon,
+    &kGetMapPokemonById,
 };
 
 }  // namespace pogo_runtime_method_profile_0433

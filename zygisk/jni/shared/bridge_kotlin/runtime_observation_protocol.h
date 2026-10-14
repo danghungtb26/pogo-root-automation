@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "runtime_nearby_source.h"
+
 namespace pogo_runtime {
 
 constexpr uint32_t kRuntimeObservationMagic = 0x504F4749U;
@@ -91,6 +93,9 @@ struct RuntimeNearbySpawnObservation {
     int32_t species_id = 0;
     double latitude = 0.0;
     double longitude = 0.0;
+    // Native-only policy metadata for payload v2. It deliberately is not
+    // serialized until the UI protocol performs an explicit version bump.
+    RuntimeNearbySourceType source_type = RuntimeNearbySourceType::kUnknown;
 };
 
 struct RuntimeNearbyObservation {
@@ -187,6 +192,7 @@ inline bool valid_runtime_nearby_observation(const RuntimeNearbyObservation &val
     if (value.spawns.size() > 512U) return false;
     for (const RuntimeNearbySpawnObservation &spawn : value.spawns) {
         if (spawn.spawn_id == 0U || spawn.species_id <= 0 ||
+            !runtime_nearby_source_known(spawn.source_type) ||
             !std::isfinite(spawn.latitude) || spawn.latitude < -90.0 ||
             spawn.latitude > 90.0 || !std::isfinite(spawn.longitude) ||
             spawn.longitude < -180.0 || spawn.longitude > 180.0) return false;

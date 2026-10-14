@@ -56,9 +56,11 @@
 #include "shared/runtime/probe/runtime_probe_inventory.inc"
 #include "shared/runtime/probe/runtime_probe_survey.inc"
 #include "shared/bridge_appproc/runtime_companion.inc"
-#include "shared/runtime/map/runtime_map_reader.inc"
+#include "shared/runtime/map/runtime_map_enumeration.inc"
 #include "shared/runtime/map/runtime_map_dictionary.inc"
+#include "shared/runtime/map/runtime_map_sources.inc"
 #include "shared/runtime/map/runtime_map_forts.inc"
+#include "shared/runtime/map/runtime_map_reader.inc"
 #include "shared/runtime/probe/runtime_probe_map_instance.inc"
 
 // THROW_ASSIST owns throw binding/hooks. Keep this before observation because

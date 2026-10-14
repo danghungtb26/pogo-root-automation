@@ -10,7 +10,9 @@ bool valid_map_coordinate(double latitude, double longitude) {
 namespace pogo_runtime_module {
 bool map_binding_ready(const RuntimeBinding &binding) {
     return binding.map_entity_read_verified && binding.map_entity_service != nullptr &&
-        binding.map_entity_get_cells != nullptr;
+        binding.map_entity_get_cells != nullptr &&
+        binding.map_entity_get_all_pokemon_descriptor.verified() &&
+        binding.map_entity_get_all_pokemon != nullptr;
 }
 
 void reset_map_live_verified(ProbeContext &context) {

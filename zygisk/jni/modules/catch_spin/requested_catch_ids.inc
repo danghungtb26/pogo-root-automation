@@ -9,6 +9,8 @@ const pogo_runtime::RuntimeNearbySpawnObservation *select_catch_target(
     for (const auto &spawn : snapshot.nearby.spawns) {
         if (spawn.spawn_id == 0U || !runtime_catch_spin_valid_coordinate(
                 spawn.latitude, spawn.longitude)) continue;
+        if (!pogo_runtime::runtime_nearby_source_direct_catch_eligible(
+                spawn.source_type)) continue;
         if (requested_catch_ids.find(spawn.spawn_id) != requested_catch_ids.end()) continue;
         if (selected == nullptr || spawn.spawn_id < selected->spawn_id) selected = &spawn;
     }

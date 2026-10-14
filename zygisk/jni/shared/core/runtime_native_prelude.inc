@@ -159,6 +159,10 @@ struct RuntimeBinding {
     void *map_entity_service = nullptr;
     void *map_entity_cells = nullptr;
     const void *map_entity_get_cells = nullptr;
+    pogo_runtime_method::VerifiedRuntimeMethod map_entity_get_all_pokemon_descriptor;
+    const void *map_entity_get_all_pokemon = nullptr;
+    pogo_runtime_method::VerifiedRuntimeMethod map_entity_get_map_pokemon_descriptor;
+    const void *map_entity_get_map_pokemon = nullptr;
     void *map_place_directory_service = nullptr;
     void *map_place_directory_pokestops = nullptr;
     const void *map_place_directory_get_active_pokestops = nullptr;
