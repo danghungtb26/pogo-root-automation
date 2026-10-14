@@ -31,7 +31,10 @@ using Il2CppMethodGetParamCount = uint32_t (*)(const void *);
 using Il2CppMethodGetParam = const Il2CppType *(*)(const void *, uint32_t);
 using Il2CppMethodGetReturnType = const Il2CppType *(*)(const void *);
 using Il2CppMethodIsInstance = bool (*)(const void *);
-using Il2CppTypeGetName = const char *(*)(const Il2CppType *);
+using Il2CppMethodGetToken = uint32_t (*)(const void *);
+// Unity 6000.3.22f1 returns a caller-owned allocation from this export.
+using Il2CppTypeGetName = char *(*)(const Il2CppType *);
+using Il2CppFree = void (*)(void *);
 using Il2CppClassGetFields = const void *(*)(Il2CppClass *, void **);
 using Il2CppFieldGetFlags = uint32_t (*)(const void *);
 using Il2CppFieldGetName = const char *(*)(const void *);
@@ -83,7 +86,9 @@ struct Il2CppApi {
     Il2CppMethodGetParam method_get_param = nullptr;
     Il2CppMethodGetReturnType method_get_return_type = nullptr;
     Il2CppMethodIsInstance method_is_instance = nullptr;
+    Il2CppMethodGetToken method_get_token = nullptr;
     Il2CppTypeGetName type_get_name = nullptr;
+    Il2CppFree free = nullptr;
     Il2CppClassGetFields class_get_fields = nullptr;
     Il2CppFieldGetFlags field_get_flags = nullptr;
     Il2CppFieldGetName field_get_name = nullptr;
@@ -103,3 +108,41 @@ struct Il2CppApi {
     Il2CppGcHandleGetTarget gchandle_get_target = nullptr;
     Il2CppGcHandleFree gchandle_free = nullptr;
 };
+
+struct OwnedIl2CppTypeName {
+    char *value = nullptr;
+    Il2CppFree release = nullptr;
+
+    OwnedIl2CppTypeName() = default;
+    OwnedIl2CppTypeName(char *owned_value, Il2CppFree free_function)
+        : value(owned_value), release(free_function) {}
+    ~OwnedIl2CppTypeName() {
+        if (value != nullptr && release != nullptr) release(value);
+    }
+    OwnedIl2CppTypeName(const OwnedIl2CppTypeName &) = delete;
+    OwnedIl2CppTypeName &operator=(const OwnedIl2CppTypeName &) = delete;
+    OwnedIl2CppTypeName(OwnedIl2CppTypeName &&other) noexcept
+        : value(other.value), release(other.release) {
+        other.value = nullptr;
+        other.release = nullptr;
+    }
+    OwnedIl2CppTypeName &operator=(OwnedIl2CppTypeName &&other) noexcept {
+        if (this == &other) return *this;
+        if (value != nullptr && release != nullptr) release(value);
+        value = other.value;
+        release = other.release;
+        other.value = nullptr;
+        other.release = nullptr;
+        return *this;
+    }
+
+    const char *get() const { return value; }
+};
+
+OwnedIl2CppTypeName owned_il2cpp_type_name(
+    const Il2CppApi &api,
+    const Il2CppType *type
+) {
+    if (type == nullptr || api.type_get_name == nullptr || api.free == nullptr) return {};
+    return OwnedIl2CppTypeName(api.type_get_name(type), api.free);
+}

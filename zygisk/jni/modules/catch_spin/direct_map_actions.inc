@@ -14,58 +14,6 @@ static_assert(offsetof(DirectMapPokeballThrow, spinning) == 9U);
 static_assert(offsetof(DirectMapPokeballThrow, missed) == 10U);
 static_assert(sizeof(DirectMapPokeballThrow) == 12U);
 
-// This is the stable prefix of IL2CPP's MethodInfo layout from the verified
-// reverse dump. Keep this local to the direct-catch diagnostic path so the
-// shared native prelude stays below the repository's 500-line limit.
-struct DirectRuntimeMethodInfoView {
-    const void *method_pointer = nullptr;
-    const void *virtual_method_pointer = nullptr;
-    const void *invoker_method = nullptr;
-    const char *name = nullptr;
-    Il2CppClass *klass = nullptr;
-    const void *return_type = nullptr;
-    const void *parameters = nullptr;
-    const void *rgctx_data = nullptr;
-    const void *generic_method = nullptr;
-    uint32_t token = 0U;
-    uint16_t flags = 0U;
-    uint16_t iflags = 0U;
-    uint16_t slot = 0U;
-    uint8_t parameters_count = 0U;
-    uint8_t bitflags = 0U;
-};
-
-static_assert(offsetof(DirectRuntimeMethodInfoView, method_pointer) == 0U);
-static_assert(offsetof(DirectRuntimeMethodInfoView, rgctx_data) == 56U);
-static_assert(offsetof(DirectRuntimeMethodInfoView, generic_method) == 64U);
-static_assert(offsetof(DirectRuntimeMethodInfoView, token) == 72U);
-
-void log_direct_capture_method_metadata(const void *method) {
-    if (method == nullptr) return;
-    const auto *view = reinterpret_cast<const DirectRuntimeMethodInfoView *>(method);
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        kLogTag,
-        "direct map catch method metadata method=%p code=%p virtual=%p invoker=%p name=%p klass=%p return=%p params=%p rgctx=%p generic=%p token=0x%08x flags=0x%04x iflags=0x%04x slot=%u params_count=%u bits=0x%02x",
-        method,
-        view->method_pointer,
-        view->virtual_method_pointer,
-        view->invoker_method,
-        view->name,
-        view->klass,
-        view->return_type,
-        view->parameters,
-        view->rgctx_data,
-        view->generic_method,
-        view->token,
-        view->flags,
-        view->iflags,
-        view->slot,
-        view->parameters_count,
-        view->bitflags
-    );
-}
-
 // G1 Step 1 (read-only device diagnostic). TryCapture returns
 // RpcPromise<CatchPokemonOutProto> : Promise<CatchPokemonOutProto>. The dump has
 // no reliable field offsets for the generic promise, so log the runtime class +
@@ -88,8 +36,9 @@ void log_direct_catch_promise_layout(const Il2CppApi &api, void *promise) {
             const int32_t offset = api.field_get_offset(field);
             const Il2CppType *field_type = api.field_get_type == nullptr
                 ? nullptr : api.field_get_type(field);
-            const char *type_name = (field_type == nullptr || api.type_get_name == nullptr)
-                ? "<unknown>" : api.type_get_name(field_type);
+            OwnedIl2CppTypeName owned_type_name = owned_il2cpp_type_name(api, field_type);
+            const char *type_name = owned_type_name.get() == nullptr
+                ? "<unknown>" : owned_type_name.get();
             __android_log_print(
                 ANDROID_LOG_INFO,
                 kLogTag,
@@ -353,15 +302,12 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
     throw_data.reticle_size = 0.05F;
     throw_data.hit_bullseye = 1U;
     throw_data.spinning = 1U;
-    const auto *method_view = reinterpret_cast<const DirectRuntimeMethodInfoView *>(
-        binding.map_pokemon_try_capture
-    );
     void *arguments[] = {&throw_data, nullptr};
     void *exception = nullptr;
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
-        "runtime action invoking action=DIRECT_MAP_CATCH_DIRECT id=%llu object=%p ar_plus=null ball=%d reticle=%.3f hit=%d spinning=%d missed=%d method=%p code=%p",
+        "runtime action invoking action=DIRECT_MAP_CATCH_DIRECT id=%llu object=%p ar_plus=null ball=%d reticle=%.3f hit=%d spinning=%d missed=%d method=%p",
         static_cast<unsigned long long>(encounter_id),
         map_pokemon,
         throw_data.ball_type,
@@ -369,10 +315,8 @@ MainThreadActionOutcome direct_catch_runtime_on_main_thread(
         throw_data.hit_bullseye,
         throw_data.spinning,
         throw_data.missed,
-        binding.map_pokemon_try_capture,
-        method_view == nullptr ? nullptr : method_view->method_pointer
+        binding.map_pokemon_try_capture
     );
-    log_direct_capture_method_metadata(binding.map_pokemon_try_capture);
     void *promise = api.runtime_invoke(
         binding.map_pokemon_try_capture,
         map_pokemon,

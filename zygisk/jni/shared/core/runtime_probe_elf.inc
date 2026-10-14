@@ -201,6 +201,12 @@ bool has_runtime_inspection_api(const Il2CppApi &api) {
         api.method_get_return_type != nullptr && api.method_is_instance != nullptr;
 }
 
+bool has_verified_method_api(const Il2CppApi &api) {
+    return has_runtime_inspection_api(api) && has_method_survey_api(api) &&
+        api.method_get_token != nullptr && api.type_get_name != nullptr &&
+        api.free != nullptr;
+}
+
 bool has_field_inspection_api(const Il2CppApi &api) {
     return api.class_get_fields != nullptr && api.field_get_flags != nullptr &&
         api.field_get_name != nullptr;
@@ -251,7 +257,9 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
     RESOLVE(method_get_param, Il2CppMethodGetParam, "il2cpp_method_get_param");
     RESOLVE(method_get_return_type, Il2CppMethodGetReturnType, "il2cpp_method_get_return_type");
     RESOLVE(method_is_instance, Il2CppMethodIsInstance, "il2cpp_method_is_instance");
+    RESOLVE(method_get_token, Il2CppMethodGetToken, "il2cpp_method_get_token");
     RESOLVE(type_get_name, Il2CppTypeGetName, "il2cpp_type_get_name");
+    RESOLVE(free, Il2CppFree, "il2cpp_free");
     RESOLVE(class_get_fields, Il2CppClassGetFields, "il2cpp_class_get_fields");
     RESOLVE(field_get_flags, Il2CppFieldGetFlags, "il2cpp_field_get_flags");
     RESOLVE(field_get_name, Il2CppFieldGetName, "il2cpp_field_get_name");
@@ -273,6 +281,14 @@ bool resolve_il2cpp_api(const char *il2cpp_path, Il2CppApi *api) {
 #undef RESOLVE
 
     const bool available = has_core_il2cpp_api(*api);
+    __android_log_print(
+        has_verified_method_api(*api) ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "IL2CPP optional APIs class_survey=%d method_survey=%d verified_method=%d",
+        has_class_survey_api(*api) ? 1 : 0,
+        has_method_survey_api(*api) ? 1 : 0,
+        has_verified_method_api(*api) ? 1 : 0
+    );
     if (!available) {
         const char *lookup_error = dlerror();
         __android_log_print(

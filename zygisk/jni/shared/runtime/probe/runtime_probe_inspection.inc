@@ -144,9 +144,9 @@ void log_runtime_method_signature(
 
     const uint32_t parameter_count = api.method_get_param_count(method);
     const Il2CppType *return_type = api.method_get_return_type(method);
-    const char *return_name = (return_type == nullptr || api.type_get_name == nullptr)
-        ? "<unknown>"
-        : api.type_get_name(return_type);
+    OwnedIl2CppTypeName owned_return_name = owned_il2cpp_type_name(api, return_type);
+    const char *return_name = owned_return_name.get() == nullptr
+        ? "<unknown>" : owned_return_name.get();
     __android_log_print(
         ANDROID_LOG_INFO,
         kLogTag,
@@ -160,9 +160,10 @@ void log_runtime_method_signature(
     );
     for (uint32_t index = 0U; index < parameter_count && index < 16U; ++index) {
         const Il2CppType *parameter_type = api.method_get_param(method, index);
-        const char *parameter_name = (parameter_type == nullptr || api.type_get_name == nullptr)
-            ? "<unknown>"
-            : api.type_get_name(parameter_type);
+        OwnedIl2CppTypeName owned_parameter_name =
+            owned_il2cpp_type_name(api, parameter_type);
+        const char *parameter_name = owned_parameter_name.get() == nullptr
+            ? "<unknown>" : owned_parameter_name.get();
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
@@ -203,9 +204,9 @@ void log_runtime_method_overloads(
         if (!wanted) continue;
         const uint32_t parameter_count = api.method_get_param_count(method);
         const Il2CppType *return_type = api.method_get_return_type(method);
-        const char *return_name = (return_type == nullptr || api.type_get_name == nullptr)
-            ? "<unknown>"
-            : api.type_get_name(return_type);
+        OwnedIl2CppTypeName owned_return_name = owned_il2cpp_type_name(api, return_type);
+        const char *return_name = owned_return_name.get() == nullptr
+            ? "<unknown>" : owned_return_name.get();
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
@@ -218,9 +219,10 @@ void log_runtime_method_overloads(
         );
         for (uint32_t index = 0U; index < parameter_count && index < 16U; ++index) {
             const Il2CppType *parameter_type = api.method_get_param(method, index);
-            const char *parameter_name = (parameter_type == nullptr || api.type_get_name == nullptr)
-                ? "<unknown>"
-                : api.type_get_name(parameter_type);
+            OwnedIl2CppTypeName owned_parameter_name =
+                owned_il2cpp_type_name(api, parameter_type);
+            const char *parameter_name = owned_parameter_name.get() == nullptr
+                ? "<unknown>" : owned_parameter_name.get();
             __android_log_print(
                 ANDROID_LOG_INFO,
                 kLogTag,
@@ -252,9 +254,9 @@ void log_runtime_class_fields(
         const Il2CppType *field_type = api.field_get_type == nullptr
             ? nullptr
             : api.field_get_type(field);
-        const char *type_name = (field_type == nullptr || api.type_get_name == nullptr)
-            ? "<unknown>"
-            : api.type_get_name(field_type);
+        OwnedIl2CppTypeName owned_type_name = owned_il2cpp_type_name(api, field_type);
+        const char *type_name = owned_type_name.get() == nullptr
+            ? "<unknown>" : owned_type_name.get();
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
@@ -298,9 +300,9 @@ void log_runtime_class_fields(
         const char *method_name = api.method_get_name(method);
         const uint32_t parameter_count = api.method_get_param_count(method);
         const Il2CppType *return_type = api.method_get_return_type(method);
-        const char *return_name = return_type == nullptr || api.type_get_name == nullptr
-            ? "<unknown>"
-            : api.type_get_name(return_type);
+        OwnedIl2CppTypeName owned_return_name = owned_il2cpp_type_name(api, return_type);
+        const char *return_name = owned_return_name.get() == nullptr
+            ? "<unknown>" : owned_return_name.get();
         __android_log_print(
             ANDROID_LOG_INFO,
             kLogTag,
@@ -313,9 +315,10 @@ void log_runtime_class_fields(
         );
         for (uint32_t index = 0U; index < parameter_count && index < 16U; ++index) {
             const Il2CppType *parameter_type = api.method_get_param(method, index);
-            const char *parameter_name = parameter_type == nullptr || api.type_get_name == nullptr
-                ? "<unknown>"
-                : api.type_get_name(parameter_type);
+            OwnedIl2CppTypeName owned_parameter_name =
+                owned_il2cpp_type_name(api, parameter_type);
+            const char *parameter_name = owned_parameter_name.get() == nullptr
+                ? "<unknown>" : owned_parameter_name.get();
             __android_log_print(
                 ANDROID_LOG_INFO,
                 kLogTag,

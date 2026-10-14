@@ -11,6 +11,13 @@ Plan: [Tổng quan](00-overview.md)
   `SUPPORTED` hoặc giữ fallback capability `UNAVAILABLE` với blocker rõ.
 - Build fingerprint 0.433.0 và action arbiter đang fail closed.
 
+> Cập nhật reverse 2026-10-14: metadata map đã resolve
+> `MapPokemon.TryCapture` token `0x06013ab5`, slot 44, arity 2, RVA
+> `0x9e1caa4`; REA dossier `ev_51dac350...` xác nhận RVA nằm trong analyzed
+> code. Exact function boundary/signature/ABI, Promise/result, captured ID,
+> map postcondition và source eligibility vẫn thiếu; `VirtualGoPlus` chưa có
+> qualifying contract. T-303/T-307 và T-501–T-506 do đó vẫn fail-closed.
+
 ## Task
 
 - [ ] **T-501** **[zygisk]** *(native)* — Port direct binding/target resolver 0.433.0 trong `direct_map_bindings.inc`, `direct_map_actions.inc`, `map_actions.inc` và `runtime_catch_range.inc`: consume normalized targets từ mọi source `SUPPORTED_OFFLINE` của `T-403`, resolve lại live `MapPokemon`/subclass theo source + stable id trên main thread, validate encounter/species/coordinate/generation/expiry; source không hỗ trợ direct `TryCapture` phải có eligibility reason riêng, không ép cast. **AC:** `AC-13`, `AC-14`; candidate code chỉ chấp nhận type/session/freshness hợp lệ và live status giữ `UNVERIFIED_DEVICE` khi chưa có runtime proof. **Phụ thuộc:** `T-303`, `T-306`, `T-403`, `T-408`. **Verify:** Native build + existing host checks; audit source→resolver table và invalid/unknown/expired rejection paths. Live target/object match nằm trong handoff user.
@@ -18,7 +25,12 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-501</summary>
 
-  BLOCKED: exact direct-catch và Virtual GO Plus contracts T-303/T-307 chưa được chứng minh, đồng thời typed world-state T-403/T-406 chưa tồn tại. `DIRECT_CATCH`/fallback vẫn unavailable dưới profile fail-closed; không port method/layout cũ hoặc tạo success giả.
+  PARTIAL/BLOCKED: exact managed `TryCapture` descriptor, token, request value
+  layout và result fields đã được chứng minh statically và implement bằng
+  hybrid resolver. T-303 vẫn thiếu live owner/source eligibility, concrete
+  Promise lifecycle và authoritative postcondition; T-307 cùng typed
+  world-state T-403/T-406 vẫn chưa có. `DIRECT_CATCH`/fallback giữ unavailable;
+  không tạo success từ dispatch hoặc Promise-only result.
 
   </details>
 

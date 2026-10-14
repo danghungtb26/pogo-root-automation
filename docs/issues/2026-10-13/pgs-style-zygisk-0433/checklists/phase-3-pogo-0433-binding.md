@@ -27,25 +27,52 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Đã thực hiện — T-302</summary>
 
-  Ledger đã liệt kê đủ 10 candidate source, `MapEntityCell`, fort và location. Mỗi hàng có verdict `UNRESOLVED`, residual Evidence/limitation và owner/lifetime `UNVERIFIED_DEVICE`. JADX chỉ chứng minh DEX/manifest, còn Ghidra chưa trả dossier IL2CPP; không class/field/layout nào từ 0.427.0 được promote và runtime source tương ứng vẫn bị loại khỏi capability.
+  Ledger đã liệt kê đủ 10 candidate source, `MapEntityCell`, fort và location.
+  Mapping metadata v39 từ đúng cặp artifact xác nhận cả 10 source type và cung
+  cấp RVA cho các method được lọc; ví dụ `MapEntityCell.GetMapPokemon` ở
+  `0x9dd4b54`. Owner/lifetime/field/event/snapshot semantics vẫn
+  `UNVERIFIED_DEVICE`/`UNRESOLVED`; không layout 0.427.0 nào được promote và
+  runtime source tương ứng vẫn bị loại khỏi capability.
 
   </details>
 
 - [ ] **T-303** **[reverse]** *(native/reverse)* — Trích bằng REA contract catch trực tiếp 0.433.0: owner/service, method resolve tuple (assembly/namespace/class/name/arity/param types/return type), request/ball fields, Promise/result type, captured storage ID, server status và map-removal/postcondition. Với từng source type ở `T-302`, ghi khả năng resolve về live `MapPokemon`/subclass và direct-catch eligibility; source không hỗ trợ phải có reason. **AC:** `T-501`–`T-503` không cần đoán method/field/Promise và biết terminal success/failure/indeterminate cho mọi source được quảng bá. **Phụ thuộc:** `T-301`, `T-302`. **Verify:** Android method/reference Evidence kết hợp native `analyze_function`/call-path Evidence cùng exact artifact/profile; compile diagnostic guards. Phần owner/return/source eligibility chưa có runtime evidence ghi `UNVERIFIED_DEVICE`.
 
   <details>
-  <summary>Bị chặn — T-303</summary>
+  <summary>Đang điều tra — T-303</summary>
 
-  BLOCKED bởi residual unknown `unk_1aaa6e...`/`unk_27690a...`: provider hiện hoạt động cho manifest/ELF, nhưng chưa có qualifying IL2CPP metadata member/native dossier để chứng minh exact method tuple, request/result/Promise, captured storage ID và postcondition. Ledger giữ `DIRECT_CATCH=UNAVAILABLE`; không triển khai binding đoán.
+  Cập nhật 2026-10-14: mapping metadata v39 schema v2 xác nhận exact instance
+  signature `MapPokemon.TryCapture(PokeballThrow,
+  ARPlusEncounterValuesProto) -> IPromise<CatchPokemonOutProto>`, token
+  `0x06013ab5`, slot 44 và RVA `0x9e1caa4`. Type contracts ghi layout value-type
+  `PokeballThrow` cùng `CatchPokemonOutProto.Status`/
+  `CapturedPokemonId`. Hybrid resolver đã enforce image/class/full signature,
+  instance flag, unique match và token; `runtime_invoke` vẫn là call path.
+  REA dossier `ev_51dac350...` chỉ chứng minh RVA nằm trong coarse function
+  `FUN_09e1c6cc`, nên RVA equality/direct-call bị vô hiệu. Live owner lifetime,
+  concrete Promise lifecycle, source eligibility và authoritative map/storage
+  postcondition vẫn `UNVERIFIED_DEVICE`; `DIRECT_CATCH` giữ `UNAVAILABLE` và
+  task chưa đạt AC.
 
   </details>
 
 - [ ] **T-304** **[reverse]** *(native/reverse)* — Hoàn thiện bằng REA contract storage cho transfer/discard: xác nhận `IPokemonBag`/`PokemonBagImpl.GetPokemon` và `ReleasePokemon`, `IItemBag`/`ItemBagImpl.GetItemCount` và `RecycleItem`; trích `ItemData` layout/constructor, `ExpiringItemsCopy` source/owner, Promise/result type, bag refresh event và postcondition. Token trong overview chỉ dùng làm identity, tuyệt đối không dùng làm RVA. **AC:** Transfer/discard có danh sách binding offline đã chứng minh và blocker runtime tách biệt; không bật mutation chỉ vì tìm thấy token/report. **Phụ thuộc:** `T-301`. **Verify:** Mỗi signature/slot/token/layout có artifact hash + REA Evidence ID từ class/method/reference hoặc native dossier; owner/lifetime/postcondition cần device ghi `UNVERIFIED_DEVICE` và capability live-ready giữ đóng.
 
   <details>
-  <summary>Bị chặn — T-304</summary>
+  <summary>Đang điều tra — T-304</summary>
 
-  BLOCKED vì chưa có qualifying IL2CPP metadata member/native dossier dù JADX/Ghidra đã khả dụng. Bảng token/slot chỉ được giữ làm search identity; mọi storage tuple, `ItemData`, expiring items, Promise/result và refresh signal vẫn `UNRESOLVED`. Transfer/discard mutation không được mở.
+  Cập nhật 2026-10-14: metadata mapping schema v2 đã resolve exact full
+  signatures/return types cho `PokemonBagImpl.GetPokemon` `0xa04bd58`,
+  `ReleasePokemon` `0xa04cf68`, `ItemBagImpl.GetItemCount` `0x9ffe438` và
+  `RecycleItem` `0xa006bec`. Mapping cũng ghi `ItemData` typeDef 2769,
+  fields/offsets, constructor 10 tham số và
+  `ItemInventoryService.get_ExpiringItemsCopy()`. Hybrid resolver enforce
+  image/class/signature/token và giữ RVA ở mức evidence-only vì dossiers
+  `ev_987116...`, `ev_7f6095...`, `ev_2dfe76...`, `ev_d76804...` chưa chứng
+  minh exact native entry. Live service owner/lifetime, concrete Promise
+  lifecycle, refresh signal và authoritative storage/inventory postcondition
+  vẫn `UNVERIFIED_DEVICE`. Transfer/discard mutation không được mở và task
+  chưa đạt AC.
 
   </details>
 
@@ -54,16 +81,28 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Đã thực hiện — T-306</summary>
 
-  Ledger có một verdict cho từng source và ghi rõ toàn bộ collection owner/event/stable-id/expiry/accessor/generation/snapshot semantics còn thiếu. Vì không source nào có Evidence 0.433.0, scan contract hợp lệ duy nhất hiện tại là `UNRESOLVED`; runtime không được quảng bá READY/partial từ dictionary cũ.
+  Ledger có một verdict cho từng source. Metadata map xác nhận cả 10 type tồn
+  tại trong 0.433.0, nhưng collection owner/event/stable-id/expiry/accessor/
+  generation/snapshot semantics vẫn thiếu. Scan contract runtime hợp lệ duy
+  nhất hiện tại là `UNRESOLVED`; runtime không được quảng bá READY/partial từ
+  dictionary cũ.
 
   </details>
 
 - [ ] **T-307** **[reverse]** *(native/reverse)* — Discovery riêng bằng REA cho Virtual GO Plus fallback trong 0.433.0: tìm accessory/session owner, connect/disconnect state, nearby notification/select/catch request, Poké Ball item 1 rule, result callback/Promise, captured storage ID và cooldown/rate semantics. Không giả định tên protocol từ bản cũ và không tái sử dụng `TryCapture` outcome làm bằng chứng cho fallback. **AC:** `AC-13`; có contract offline đủ để phân biệt fallback thật với direct catch và để capability giữ `UNAVAILABLE` nếu thiếu evidence. **Phụ thuộc:** `T-301`, `T-303`. **Verify:** REA class/method/reference/native dossier ghi exact class/method/params/result/Evidence ID hoặc residual unknown; owner/lifetime runtime được instrument thành diagnostic và ghi `UNVERIFIED_DEVICE`, không dispatch catch.
 
   <details>
-  <summary>Bị chặn — T-307</summary>
+  <summary>Đang điều tra — T-307</summary>
 
-  BLOCKED bởi provider gap: chưa có Evidence cho accessory/session owner, nearby/select/catch request, ball rule, result ID hoặc cooldown. Ledger tách riêng fallback và giữ capability `UNAVAILABLE`; không tái sử dụng `TryCapture` lịch sử.
+  Chưa có Evidence cho accessory/session owner, nearby/select/catch request,
+  ball rule, result ID hoặc cooldown. Ledger tách riêng fallback và giữ
+  capability `UNAVAILABLE`; không tái sử dụng `TryCapture` làm bằng chứng.
+
+  Cập nhật 2026-10-14: focused metadata map cũng không có row chứa exact key
+  `VirtualGoPlus`; điều này chỉ phủ regex đã chọn, không chứng minh accessory
+  protocol/type vắng mặt hoặc tên khác. Owner/session/request/result/cooldown
+  vẫn chưa có qualifying Evidence. Fallback tiếp tục `UNAVAILABLE` và task
+  chưa đạt AC.
 
   </details>
 
@@ -72,7 +111,12 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Đã thực hiện — T-305</summary>
 
-  Đã thêm `runtime_build_profile.h` pin package/version/ABI/build-id/metadata/base APK của 0.433.0, thay hoàn toàn fingerprint 0.427.0 và wire vào probe. Runtime hiện xác minh package + GNU build-id nhưng cố ý để versionCode/metadata chưa chứng minh là false; mutation chỉ cho phép khi cả bốn true, nên build hiện diagnostic-only với reason rõ. Native arm64/x86_64 build và package đạt; live status `UNVERIFIED_DEVICE`.
+  Đã thêm `runtime_build_profile.h` pin package/version/ABI/build-id/metadata/
+  base APK của 0.433.0. Runtime tự quan sát package + versionCode qua JNI,
+  GNU build-id từ loaded ELF và SHA-256 của installed `global-metadata.dat`;
+  controller không cấp fingerprint. Mismatch trả reason riêng và fail closed.
+  Native arm64/x86_64 build/package đạt; execution/outcome gates vẫn tách khỏi
+  build identity, nên live status giữ `UNVERIFIED_DEVICE` tới handoff device.
 
   </details>
 

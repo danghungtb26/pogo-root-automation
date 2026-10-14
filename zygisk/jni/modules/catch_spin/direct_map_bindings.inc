@@ -26,24 +26,6 @@ const void *find_direct_map_instance_method_with_parameter(
         api.method_is_instance(method) ? method : nullptr;
 }
 
-const void *find_direct_map_instance_method_with_two_parameters(
-    const Il2CppApi &api,
-    Il2CppClass *klass,
-    const char *name,
-    const char *first_parameter_type_name,
-    const char *second_parameter_type_name
-) {
-    const void *method = find_runtime_method_with_two_parameters(
-        api,
-        klass,
-        name,
-        first_parameter_type_name,
-        second_parameter_type_name
-    );
-    return method != nullptr && api.method_is_instance != nullptr &&
-        api.method_is_instance(method) ? method : nullptr;
-}
-
 void update_direct_map_fort_capabilities(RuntimeBinding *binding) {
     if (binding == nullptr) return;
     binding->forts_read_verified = binding->map_place_directory_service != nullptr &&
@@ -147,16 +129,18 @@ void discover_direct_map_bindings(
 ) {
     if (binding == nullptr || assemblies == nullptr || !has_runtime_inspection_api(api)) return;
 
-    Il2CppClass *map_pokemon_class = find_runtime_class(
-        api, assemblies, assembly_count, "Niantic.Holoholo.Map", "MapPokemon", nullptr
+    const auto &try_capture_profile =
+        pogo_runtime_method_profile_0433::kTryCapture;
+    Il2CppClass *map_pokemon_class = resolve_runtime_method_class(
+        api, assemblies, assembly_count, try_capture_profile.method
     );
-    binding->map_pokemon_try_capture = find_direct_map_instance_method_with_two_parameters(
-        api,
-        map_pokemon_class,
-        "TryCapture",
-        "Niantic.Holoholo.Encounter.PokeballThrow",
-        "Holoholo.Rpc.ARPlusEncounterValuesProto"
+    binding->map_pokemon_try_capture_descriptor = verify_runtime_method(
+        api, map_pokemon_class, try_capture_profile.method
     );
+    binding->map_pokemon_try_capture =
+        binding->map_pokemon_try_capture_descriptor.verified()
+            ? binding->map_pokemon_try_capture_descriptor.method
+            : nullptr;
     binding->ar_plus_encounter_values_class = find_runtime_class(
         api,
         assemblies,
@@ -187,8 +171,31 @@ void discover_direct_map_bindings(
     binding->map_pokemon_get_spawn_point_id = find_direct_map_instance_method(
         api, wild_map_pokemon_class, "get_SpawnPointId", 0U
     );
-    binding->direct_catch_verified = binding->map_pokemon_try_capture != nullptr &&
-        binding->map_pokemon_get_spawn_point_id != nullptr;
+    binding->direct_catch_method_identity_verified =
+        binding->map_pokemon_try_capture_descriptor.verified();
+    binding->direct_catch_owner_session_verified = map_pokemon_class != nullptr &&
+        binding->owner_generation > 0U &&
+        binding->map_pokemon_get_spawn_point_id != nullptr &&
+        binding->ar_plus_encounter_values_class != nullptr &&
+        binding->catch_pokemon_proto_class != nullptr;
+    binding->direct_catch_invocation_available = binding->exact_build_verified &&
+        binding->direct_catch_method_identity_verified &&
+        binding->direct_catch_owner_session_verified && api.runtime_invoke != nullptr;
+    binding->direct_catch_verified = binding->direct_catch_invocation_available;
+    __android_log_print(
+        binding->map_pokemon_try_capture_descriptor.verified()
+            ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+        kLogTag,
+        "managed diagnostic: TryCapture method verified=%d reason=%s token=0x%08x inspected=%u signatures=%u matches=%u",
+        binding->map_pokemon_try_capture_descriptor.verified() ? 1 : 0,
+        pogo_runtime_method::verification_reason_name(
+            binding->map_pokemon_try_capture_descriptor.reason
+        ),
+        binding->map_pokemon_try_capture_descriptor.metadata_token,
+        binding->map_pokemon_try_capture_descriptor.inspected_count,
+        binding->map_pokemon_try_capture_descriptor.signature_match_count,
+        binding->map_pokemon_try_capture_descriptor.verified_match_count
+    );
     // Background encounter: SendEncounterRequest (RPC Encounter=102) on WildMapPokemon.
     // Overrides MapPokemon.SendEncounterRequest (Slot 41), zero managed parameters.
     binding->map_pokemon_send_encounter_request = find_direct_map_instance_method(

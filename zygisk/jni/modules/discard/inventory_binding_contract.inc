@@ -15,8 +15,8 @@ bool discard_method_has_parameter_type(
     if (method == nullptr || fragment == nullptr || api.method_get_param == nullptr ||
         api.type_get_name == nullptr) return false;
     const Il2CppType *parameter = api.method_get_param(method, index);
-    const char *type_name = parameter == nullptr ? nullptr : api.type_get_name(parameter);
-    return discard_type_contains(type_name, fragment);
+    OwnedIl2CppTypeName type_name = owned_il2cpp_type_name(api, parameter);
+    return discard_type_contains(type_name.get(), fragment);
 }
 
 bool discard_list_sorted_signature(const Il2CppApi &api, const void *method) {
@@ -25,9 +25,9 @@ bool discard_list_sorted_signature(const Il2CppApi &api, const void *method) {
         !api.method_is_instance(method) || api.method_get_return_type == nullptr ||
         api.type_get_name == nullptr) return false;
     const Il2CppType *return_type = api.method_get_return_type(method);
-    const char *return_name = return_type == nullptr ? nullptr : api.type_get_name(return_type);
-    if (!discard_type_contains(return_name, "System.Collections.Generic.List") ||
-        !discard_type_contains(return_name, "ItemInventoryItemWidget.ItemData")) return false;
+    OwnedIl2CppTypeName return_name = owned_il2cpp_type_name(api, return_type);
+    if (!discard_type_contains(return_name.get(), "System.Collections.Generic.List") ||
+        !discard_type_contains(return_name.get(), "ItemInventoryItemWidget.ItemData")) return false;
     if (!discard_method_has_parameter_type(api, method, 0U, "System.Func") ||
         !discard_method_has_parameter_type(api, method, 0U, "HoloItemType") ||
         !discard_method_has_parameter_type(api, method, 1U, "System.Boolean") ||
@@ -76,9 +76,9 @@ bool discard_recycle_item_signature(
         api.type_get_class_or_element_class == nullptr || api.type_get_name == nullptr ||
         api.method_get_return_type == nullptr) return false;
     const Il2CppType *return_type = api.method_get_return_type(method);
-    const char *return_name = return_type == nullptr ? nullptr : api.type_get_name(return_type);
-    if (!discard_type_contains(return_name, "IPromise") ||
-        !discard_type_contains(return_name, "RecycleItemOutProto") ||
+    OwnedIl2CppTypeName return_name = owned_il2cpp_type_name(api, return_type);
+    if (!discard_type_contains(return_name.get(), "IPromise") ||
+        !discard_type_contains(return_name.get(), "RecycleItemOutProto") ||
         !discard_method_has_parameter_type(api, method, 1U, "System.Int32") ||
         !discard_method_has_parameter_type(api, method, 2U, "System.Collections.Generic.ISet") ||
         !discard_method_has_parameter_type(api, method, 2U, "Holoholo.Rpc.Item")) return false;
@@ -99,8 +99,8 @@ bool discard_inventory_cache_timestamp_signature(
         !api.method_is_instance(method) || api.method_get_return_type == nullptr ||
         api.type_get_name == nullptr) return false;
     const Il2CppType *return_type = api.method_get_return_type(method);
-    const char *return_name = return_type == nullptr ? nullptr : api.type_get_name(return_type);
-    return return_name != nullptr && strcmp(return_name, "System.Int64") == 0;
+    OwnedIl2CppTypeName return_name = owned_il2cpp_type_name(api, return_type);
+    return return_name.get() != nullptr && strcmp(return_name.get(), "System.Int64") == 0;
 }
 
 bool discard_inventory_cache_update_signature(
@@ -112,7 +112,7 @@ bool discard_inventory_cache_update_signature(
         !api.method_is_instance(method) || api.method_get_return_type == nullptr ||
         api.type_get_name == nullptr) return false;
     const Il2CppType *return_type = api.method_get_return_type(method);
-    const char *return_name = return_type == nullptr ? nullptr : api.type_get_name(return_type);
-    return discard_type_contains(return_name, "IPromise") &&
-        discard_type_contains(return_name, "GetHoloholoInventoryOutProto");
+    OwnedIl2CppTypeName return_name = owned_il2cpp_type_name(api, return_type);
+    return discard_type_contains(return_name.get(), "IPromise") &&
+        discard_type_contains(return_name.get(), "GetHoloholoInventoryOutProto");
 }

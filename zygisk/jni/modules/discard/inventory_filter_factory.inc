@@ -1,9 +1,26 @@
 // 0.427.0: ItemInventoryGuiService.<>c.chvt is the inventory's usable filter.
 // Its compiler-generated delegate cache is lazy: class initialization alone
 // never populates <>9__14_1. Bind the method without opening inventory UI.
+#include <type_traits>
+#include <utility>
+
 Il2CppGcHandle g_discard_owned_filter_handle = 0U;
 uint64_t g_discard_owned_filter_owner_generation = 0U;
 bool is_probable_managed_pointer(const void *value);
+
+template <typename Api, typename = void>
+struct DiscardApiHasFree : std::false_type {};
+
+template <typename Api>
+struct DiscardApiHasFree<Api, std::void_t<decltype(std::declval<Api>().free)>>
+    : std::true_type {};
+
+template <typename Api>
+void release_discard_type_name(const Api &api, const char *name) {
+    if constexpr (DiscardApiHasFree<Api>::value) {
+        if (name != nullptr && api.free != nullptr) api.free(const_cast<char *>(name));
+    }
+}
 
 void *create_discard_inventory_filter(
     const Il2CppApi &api, Il2CppClass *host_class, const void *filter_field
@@ -50,6 +67,7 @@ void *create_discard_inventory_filter(
             const auto *parameter = api.method_get_param(method, index);
             const char *type = parameter == nullptr ? nullptr : api.type_get_name(parameter);
             matches = matches && type != nullptr && strcmp(type, expected[index]) == 0;
+            release_discard_type_name(api, type);
         }
         if (matches) { factory = method; break; }
     }

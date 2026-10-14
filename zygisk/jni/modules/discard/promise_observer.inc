@@ -57,6 +57,9 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
             poll_count = ++g_runtime_discard.poll_count;
         }
     }
+    if (poll_count == 1U) {
+        log_runtime_object(api, promise, "RecycleItem Promise", nullptr);
+    }
     __android_log_print(
         fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
@@ -131,10 +134,10 @@ RuntimeDiscardPromisePollResult poll_pending_runtime_discard_on_main_thread(
     if (result == 1) {
         finish_runtime_discard(
             context,
-            kCommandPhaseCompleted,
-            "",
-            "RecycleItem completed with SUCCESS",
-            false
+            kCommandPhaseIndeterminate,
+            "discard_postcondition_unverified",
+            "RecycleItem returned SUCCESS but authoritative inventory refresh is unverified",
+            true
         );
     } else if (result == 2) {
         finish_runtime_discard(

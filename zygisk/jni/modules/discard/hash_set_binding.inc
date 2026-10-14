@@ -13,7 +13,8 @@ bool discard_type_name_references_item(const Il2CppApi &api, Il2CppClass *klass)
         return false;
     }
     const Il2CppType *type = api.class_get_type(klass);
-    const char *type_name = type == nullptr ? nullptr : api.type_get_name(type);
+    OwnedIl2CppTypeName owned_type_name = owned_il2cpp_type_name(api, type);
+    const char *type_name = owned_type_name.get();
     if (type_name == nullptr) return false;
     return strstr(type_name, "Holoholo.Rpc.Item") != nullptr ||
         strstr(type_name, "HashSet<Item>") != nullptr ||

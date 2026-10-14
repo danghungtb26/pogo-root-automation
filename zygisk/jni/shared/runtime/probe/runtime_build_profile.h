@@ -13,6 +13,7 @@ constexpr const char *kIl2cppBuildIdHex =
     "da59ce3024c4ccfe16fa6616281a4d111de67aa2";
 constexpr const char *kMetadataSha256 =
     "f5961a8548256da287b4f79466a169c302b90ec59be7f6461e8e58b482c0fb0d";
+constexpr uint64_t kMetadataBytes = 35873276ULL;
 constexpr const char *kBaseApkSha256 =
     "1c8f198cd212e7303e5a5e38e34857f4ced42eb432ac62b07807bfd286503690";
 constexpr uint8_t kIl2cppBuildId[] = {
@@ -47,6 +48,19 @@ struct Verification {
         if (!metadata_sha256) return "metadata_hash_unverified";
         return "verified";
     }
+};
+
+struct IdentityObservation {
+    bool attempted = false;
+    bool version_code_read = false;
+    bool version_code_verified = false;
+    bool metadata_read = false;
+    bool metadata_sha256_verified = false;
+    uint64_t observed_version_code = 0U;
+    uint64_t observed_metadata_bytes = 0U;
+    char observed_metadata_sha256[65]{};
+    char version_reason[64]{};
+    char metadata_reason[64]{};
 };
 
 }  // namespace pogo_runtime_profile

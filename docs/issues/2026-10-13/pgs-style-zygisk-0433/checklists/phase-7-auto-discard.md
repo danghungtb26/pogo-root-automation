@@ -16,7 +16,12 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-701</summary>
 
-  BLOCKED: `ItemData`, `ExpiringItemsCopy`, `RecycleItem` overload/result/refresh contract T-304 chưa có Evidence 0.433.0. Discard capability giữ đóng; không dùng factory/layout cũ để recycle.
+  PARTIAL/BLOCKED: schema v2 đã chứng minh `ItemData` typeDef 2769,
+  fields/constructor, exact `RecycleItem` signature/result và
+  `ItemInventoryService.get_ExpiringItemsCopy`. Hybrid resolver/action wiring
+  đã dùng exact descriptor nhưng execution bị khóa. Live service owner/
+  generation, concrete Promise semantics, refresh signal và authoritative
+  inventory postcondition vẫn thiếu; discard capability giữ đóng.
 
   </details>
 

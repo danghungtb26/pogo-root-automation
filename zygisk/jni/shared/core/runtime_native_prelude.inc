@@ -194,6 +194,7 @@ struct RuntimeBinding {
     const void *unity_transform_get_position = nullptr;
     bool spin_item_bubbles_verified = false;
     bool transfer_candy_bubbles_verified = false;
+    pogo_runtime_method::VerifiedRuntimeMethod map_pokemon_try_capture_descriptor;
     const void *map_pokemon_try_capture = nullptr;
     const void *map_pokemon_get_spawn_point_id = nullptr;
     // WildMapPokemon.SendEncounterRequest (RPC Encounter=102). Fired in the
@@ -223,6 +224,9 @@ struct RuntimeBinding {
     bool map_entity_read_verified = false;
     bool encounter_read_verified = false;
     bool catch_throw_verified = false;
+    bool direct_catch_method_identity_verified = false;
+    bool direct_catch_owner_session_verified = false;
+    bool direct_catch_invocation_available = false;
     bool direct_catch_verified = false;
     bool direct_catch_outcome_verified = false;
     bool forts_read_verified = false;
@@ -239,6 +243,7 @@ struct RuntimeBinding {
     // Inventory read (Niantic.Holoholo.IItemBag -> ItemBagImpl.GetItemCount(Item)).
     // item_bag is resolved in the IItemBag service block. Enables READ_INVENTORY
     // and populates AutomationSnapshot.inventory for auto-discard / ball gating.
+    pogo_runtime_method::VerifiedRuntimeMethod item_bag_get_item_count_descriptor;
     const void *item_bag_get_item_count = nullptr;
     const void *item_bag_get_total_items = nullptr;
     bool inventory_read_verified = false;
@@ -255,6 +260,7 @@ struct RuntimeBinding {
     bool inventory_full_read_verified = false;
     // Discard executor (IItemBag.RecycleItem(ItemData, int, ISet<Item>)). ItemData
     // is populated on the main thread; expiringItemsCopy comes from IItemInventoryService.
+    pogo_runtime_method::VerifiedRuntimeMethod item_bag_recycle_item_descriptor;
     const void *item_bag_recycle_item = nullptr;
     Il2CppClass *item_data_class = nullptr;
     const void *item_data_ctor = nullptr;
@@ -272,6 +278,10 @@ struct RuntimeBinding {
     Il2CppClass *hash_set_item_class = nullptr;
     const void *hash_set_item_ctor = nullptr;
     const void *hash_set_item_supplier = nullptr;
+    bool discard_method_identity_verified = false;
+    bool discard_owner_session_verified = false;
+    bool discard_invocation_available = false;
+    bool discard_outcome_verified = false;
     bool discard_verified = false;
     // Transfer executor. Per the 0.427.0 dump, Niantic.Holoholo.Internal
     // .PokemonBagImpl (IPokemonBag) exposes:
@@ -282,8 +292,14 @@ struct RuntimeBinding {
     // until the promise post-condition is verified on device, like the discard
     // path.
     void *pokemon_inventory = nullptr;
+    pogo_runtime_method::VerifiedRuntimeMethod pokemon_inventory_get_pokemon_descriptor;
     const void *pokemon_inventory_get_pokemon = nullptr;
+    pogo_runtime_method::VerifiedRuntimeMethod pokemon_inventory_release_descriptor;
     const void *pokemon_inventory_release = nullptr;
+    bool transfer_method_identity_verified = false;
+    bool transfer_owner_session_verified = false;
+    bool transfer_invocation_available = false;
+    bool transfer_outcome_verified = false;
     bool transfer_verified = false;
     void *game_master_data = nullptr;
     const void *game_master_get_item_settings = nullptr;
@@ -361,6 +377,7 @@ struct PendingDirectCatch {
     std::string command_id;
     Il2CppGcHandle promise_gc_handle = 0U;
     uint64_t requested_at_ns = 0U;
+    uint64_t owner_generation = 0U;
     uint32_t poll_count = 0U;
     uint32_t phase = 0U;
     uint32_t catch_outcome_wire = 0U;
@@ -406,6 +423,8 @@ struct ProbeContext {
     Il2CppApi il2cpp_api;
     RuntimeBinding binding;
     std::mutex binding_mutex;
+    std::mutex identity_mutex;
+    pogo_runtime_profile::IdentityObservation identity;
     RuntimeThrowEventQueue throw_events;
     std::atomic<uint64_t> active_encounter_id{0U};
     bool il2cpp_api_ready = false;

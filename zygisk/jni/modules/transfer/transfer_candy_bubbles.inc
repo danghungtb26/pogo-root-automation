@@ -154,7 +154,7 @@ bool resolve_map_avatar_canvas_position(
         read_runtime_boxed_vector2(api, canvas_boxed, canvas_position);
 }
 
-bool spawn_runtime_transfer_candy_bubbles_on_main_thread(
+[[maybe_unused]] bool spawn_runtime_transfer_candy_bubbles_on_main_thread(
     ProbeContext &context,
     uint64_t pokemon_id,
     int32_t species_id,

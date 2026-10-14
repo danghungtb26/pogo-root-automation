@@ -119,7 +119,9 @@ void runtime_catch_spin_execute_catch(
     const RuntimeBinding &binding,
     const pogo_runtime::RuntimeNearbySpawnObservation &target
 ) {
-    if (!binding.direct_catch_verified || binding.map_pokemon_try_capture == nullptr) {
+    if (!kDirectCatchExecutionEnabled || !binding.direct_catch_verified ||
+        !binding.direct_catch_outcome_verified ||
+        binding.map_pokemon_try_capture == nullptr) {
         runtime_catch_spin_log_rejected("catch", "direct_catch_binding_unavailable");
         return;
     }

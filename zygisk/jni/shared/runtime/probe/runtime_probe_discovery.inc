@@ -171,6 +171,7 @@ void discover_runtime_owners(
     size_t assembly_count,
     const char *process_name,
     const char *il2cpp_path,
+    const pogo_runtime_profile::IdentityObservation &identity,
     RuntimeBinding *binding
 ) {
     if (binding == nullptr) return;
@@ -181,22 +182,23 @@ void discover_runtime_owners(
     profile.package_name = process_name != nullptr &&
         strcmp(process_name, pogo_runtime_profile::kPackageName) == 0;
     profile.il2cpp_build_id = verify_expected_il2cpp_build_id(il2cpp_path);
-    // The current injected API cannot independently prove PackageManager's
-    // versionCode or hash global-metadata.dat. Keep mutation fail-closed until
-    // those exact runtime observations are implemented and device-verified.
-    profile.version_code = false;
-    profile.metadata_sha256 = false;
+    profile.version_code = identity.version_code_verified;
+    profile.metadata_sha256 = identity.metadata_sha256_verified;
     binding->exact_build_verified = profile.mutation_allowed();
     __android_log_print(
         binding->exact_build_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
-        "managed diagnostic: profile package=%d build_id=%d version=%d metadata=%d mutation=%d reason=%s",
+        "managed diagnostic: profile package=%d build_id=%d version=%d metadata=%d mutation=%d reason=%s version_reason=%s metadata_reason=%s observed_version=%llu metadata_bytes=%llu",
         profile.package_name ? 1 : 0,
         profile.il2cpp_build_id ? 1 : 0,
         profile.version_code ? 1 : 0,
         profile.metadata_sha256 ? 1 : 0,
         binding->exact_build_verified ? 1 : 0,
-        profile.reason()
+        profile.reason(),
+        identity.version_reason[0] == '\0' ? "unavailable" : identity.version_reason,
+        identity.metadata_reason[0] == '\0' ? "unavailable" : identity.metadata_reason,
+        static_cast<unsigned long long>(identity.observed_version_code),
+        static_cast<unsigned long long>(identity.observed_metadata_bytes)
     );
     if (api.runtime_invoke == nullptr || api.class_get_type == nullptr ||
         api.type_get_object == nullptr || assemblies == nullptr) {

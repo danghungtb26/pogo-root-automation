@@ -1,5 +1,7 @@
 constexpr bool kCatchExecutionEnabled = true;
-constexpr bool kDirectCatchExecutionEnabled = true;
+// Direct catch remains read-only/unavailable until the controlled device pass
+// verifies the owner lifetime and Promise/result postcondition for this build.
+constexpr bool kDirectCatchExecutionEnabled = false;
 
 bool parse_runtime_catch_command(
     const std::vector<uint8_t> &command,

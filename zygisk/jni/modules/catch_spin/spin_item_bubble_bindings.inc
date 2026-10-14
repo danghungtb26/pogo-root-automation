@@ -27,9 +27,9 @@ const void *find_spin_instance_method_with_param_substring(
             api.method_get_param_count(method) != parameter_count ||
             !api.method_is_instance(method)) continue;
         const Il2CppType *parameter_type = api.method_get_param(method, parameter_index);
-        const char *parameter_name = parameter_type == nullptr || api.type_get_name == nullptr
-            ? nullptr
-            : api.type_get_name(parameter_type);
+        OwnedIl2CppTypeName owned_parameter_name =
+            owned_il2cpp_type_name(api, parameter_type);
+        const char *parameter_name = owned_parameter_name.get();
         if (parameter_name != nullptr && strstr(parameter_name, parameter_substring) != nullptr) {
             return method;
         }
@@ -42,7 +42,8 @@ bool award_bubble_list_class_references_data(const Il2CppApi &api, Il2CppClass *
         return false;
     }
     const Il2CppType *type = api.class_get_type(klass);
-    const char *type_name = type == nullptr ? nullptr : api.type_get_name(type);
+    OwnedIl2CppTypeName owned_type_name = owned_il2cpp_type_name(api, type);
+    const char *type_name = owned_type_name.get();
     if (type_name == nullptr) return false;
     return strstr(type_name, "AwardBubbleData") != nullptr;
 }

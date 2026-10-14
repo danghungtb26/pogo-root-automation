@@ -37,6 +37,9 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
             poll_count = ++g_runtime_transfer.poll_count;
         }
     }
+    if (poll_count == 1U) {
+        log_runtime_object(api, promise, "ReleasePokemon Promise", nullptr);
+    }
     __android_log_print(
         fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
         kLogTag,
@@ -106,18 +109,12 @@ RuntimeTransferPromisePollResult poll_release_promise_on_main_thread(
         status
     );
     if (status == 1) {
-        (void)spawn_runtime_transfer_candy_bubbles_on_main_thread(
-            context,
-            pending.pokemon_id,
-            pending.species_id,
-            completed_value
-        );
         finish_runtime_transfer(
             context,
-            kCommandPhaseCompleted,
-            "",
-            "ReleasePokemon completed with SUCCESS",
-            false
+            kCommandPhaseIndeterminate,
+            "transfer_postcondition_unverified",
+            "ReleasePokemon returned SUCCESS but authoritative storage refresh is unverified",
+            true
         );
     } else {
         finish_runtime_transfer(

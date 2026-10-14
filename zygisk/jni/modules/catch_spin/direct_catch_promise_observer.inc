@@ -43,11 +43,6 @@ void free_direct_catch_handle(ProbeContext &context, Il2CppGcHandle handle) {
     }
 }
 
-void mark_direct_catch_outcome_verified(ProbeContext &context) {
-    std::lock_guard<std::mutex> lock(context.binding_mutex);
-    context.binding.direct_catch_outcome_verified = true;
-}
-
 void set_pending_direct_catch_terminal(
     ProbeContext &context,
     uint32_t phase,
@@ -111,12 +106,14 @@ bool begin_pending_direct_catch(
     uint64_t encounter_id
 ) {
     if (encounter_id == 0U) return false;
+    const uint64_t owner_generation = runtime_binding_snapshot(context).owner_generation;
     std::lock_guard<std::mutex> lock(context.pending_direct_catch_mutex);
     if (context.pending_direct_catch.active) return false;
     context.pending_direct_catch = PendingDirectCatch{};
     context.pending_direct_catch.active = true;
     context.pending_direct_catch.encounter_id = encounter_id;
     context.pending_direct_catch.command_id = command_id;
+    context.pending_direct_catch.owner_generation = owner_generation;
     context.pending_direct_catch.requested_at_ns =
         static_cast<uint64_t>(now_elapsed_nanos());
     __android_log_print(
@@ -199,6 +196,10 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
     }
     if (!pending.active) return RuntimeDirectCatchPromisePollResult::kNoPending;
     if (pending.terminal) return RuntimeDirectCatchPromisePollResult::kCompleted;
+    if (pending.owner_generation != runtime_binding_snapshot(context).owner_generation) {
+        abandon_pending_direct_catch(context, "owner_generation_changed");
+        return RuntimeDirectCatchPromisePollResult::kFailed;
+    }
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
     if (pending.requested_at_ns != 0U && now >= pending.requested_at_ns &&
         now - pending.requested_at_ns > kDirectCatchPromiseTimeoutNs) {
@@ -254,6 +255,9 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
             context.pending_direct_catch.promise_gc_handle == pending.promise_gc_handle) {
             poll_count = ++context.pending_direct_catch.poll_count;
         }
+    }
+    if (poll_count == 1U) {
+        log_runtime_object(api, promise, "TryCapture Promise", nullptr);
     }
     __android_log_print(
         fields_read ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
@@ -359,7 +363,6 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
         status_offset,
         captured_offset
     );
-    mark_direct_catch_outcome_verified(context);
     if (outcome_wire == 0U) {
         set_pending_direct_catch_terminal(
             context,
@@ -374,40 +377,13 @@ RuntimeDirectCatchPromisePollResult poll_pending_direct_catch_on_main_thread(
     if (direct_catch_status_removes_map_entity(status)) {
         refresh_map_after_direct_catch(context, pending.encounter_id, status);
     }
-    // Native auto-catch has no Kotlin command id, so publish a dedicated
-    // telemetry event for the app-owned custom toast. Manual command catches
-    // already produce their normal controller result and must not duplicate it.
-    if (pending.command_id.empty()) {
-        if (status == 1U) {
-            (void)send_runtime_automation_event(
-                context,
-                pogo_runtime::RuntimeAutomationEventType::kPokemonCaught,
-                pending.encounter_id,
-                captured_pokemon_id
-            );
-        } else if (status == 3U) {
-            (void)send_runtime_automation_event(
-                context,
-                pogo_runtime::RuntimeAutomationEventType::kPokemonFled,
-                pending.encounter_id
-            );
-        }
-    }
-    if (status == 1U && captured_pokemon_id != 0U) {
-        // The native transfer module consumes the same authoritative catch
-        // result before this Promise is released. Kotlin is not involved in
-        // the auto-transfer decision or trigger.
-        on_runtime_catch_succeeded_on_main_thread(context, captured_pokemon_id);
-    }
     set_pending_direct_catch_terminal(
         context,
-        kCommandPhaseCompleted,
+        kCommandPhaseIndeterminate,
         outcome_wire,
         captured_id,
-        "",
-        captured_id.empty()
-            ? "TryCapture Promise completed and map sync was requested"
-            : "TryCapture Promise completed with a captured Pokémon id"
+        "direct_catch_postcondition_unverified",
+        "TryCapture returned a terminal result but authoritative map/storage refresh is unverified"
     );
     PendingDirectCatch terminal;
     {

@@ -84,17 +84,19 @@ Method metadata search identities supplied by the plan (not binding evidence):
 | `Niantic.Holoholo.IItemBag` | `RecycleItem(itemProto, numToRecycle, expiringItemsCopy)` | 19 | `0x06000f93` |
 | `Niantic.Holoholo.Internal.ItemBagImpl` | `RecycleItem(itemData, numToRecycle, expiringItemsCopy)` | 23 | `0x06002971` |
 
-Token/slot chỉ là search identity, không phải RVA hay địa chỉ runtime. REA
-providers hiện thiếu nên các tuple này vẫn `UNRESOLVED`; native không được
-resolve/call chúng cho 0.433.0 tới khi ledger có Evidence tương ứng.
+Token/slot vẫn chỉ là managed identity, không phải RVA. Focused metadata map đã
+resolve các implementation RVA tương ứng, nhưng exact signature/ABI,
+owner/lifetime, Promise/result và postcondition còn `UNRESOLVED`; native không
+được call chúng cho 0.433.0 chỉ dựa trên mapping.
 
 ## Trạng thái implementation hiện tại
 
 Phase 0–2 và cleanup/build Phase 8 đã hoàn tất. Phase 3 chốt artifact/profile
-fail-closed nhưng direct-catch, storage và Virtual GO Plus contracts còn bị chặn
-bởi REA provider gap. Vì vậy Phase 4–7 không được port bằng layout 0.427.0 và
-vẫn để mở với blocker chi tiết. Artifact hiện tại dùng để kiểm installer,
-lifecycle và manual session arm; gameplay mutation không `LIVE_READY`.
+fail-closed và đã có focused metadata-to-RVA mapping, nhưng direct-catch,
+storage và Virtual GO Plus contracts vẫn thiếu exact ABI, owner/lifetime và
+outcome/postcondition evidence. Vì vậy Phase 4–7 không được port bằng layout
+0.427.0 và vẫn để mở với blocker chi tiết. Gameplay mutation không
+`LIVE_READY`.
 
 ## Acceptance criteria
 

@@ -2,7 +2,9 @@
 // command path enter here; GetPokemon, ReleasePokemon and Promise polling all
 // run on Unity's main thread.
 
-constexpr bool kTransferExecutionEnabled = true;
+// Static method identity is verified for 0.433.0, but owner lifetime and the
+// Promise/result postcondition still require the Phase 4 device evidence pass.
+constexpr bool kTransferExecutionEnabled = false;
 constexpr uint64_t kRuntimeTransferMetadataTimeoutNs = 5000000000ULL;
 constexpr uint64_t kRuntimeTransferPromiseTimeoutNs = 15000000000ULL;
 
@@ -22,6 +24,7 @@ struct PendingRuntimeTransfer {
     int32_t species_id = 0;
     uint64_t started_at_ns = 0U;
     uint32_t poll_count = 0U;
+    uint64_t owner_generation = 0U;
     Il2CppGcHandle promise_gc_handle = 0U;
     std::string command_id;
 };
@@ -121,12 +124,32 @@ void finish_runtime_transfer(
 
 void reset_runtime_transfer_state(ProbeContext &context) {
     Il2CppGcHandle handle = 0U;
+    bool active = false;
+    bool release_attempted = false;
+    std::string command_id;
     {
         std::lock_guard<std::mutex> lock(g_runtime_transfer_mutex);
         handle = g_runtime_transfer.promise_gc_handle;
+        active = g_runtime_transfer.active;
+        release_attempted = g_runtime_transfer.release_attempted;
+        command_id = g_runtime_transfer.command_id;
         g_runtime_transfer = PendingRuntimeTransfer{};
     }
     free_runtime_transfer_handle(context, handle);
+    if (release_attempted) {
+        (void)pogo_runtime_world_state::mark_dirty(
+            pogo_runtime_world_state::kInventorySource
+        );
+    }
+    if (active && !command_id.empty()) {
+        (void)send_runtime_result(
+            context.fd,
+            command_id.c_str(),
+            kCommandPhaseIndeterminate,
+            "transfer_reset_indeterminate",
+            "transfer tracking reset before authoritative completion"
+        );
+    }
 }
 
 void *get_runtime_pokemon_on_main_thread(
@@ -181,6 +204,16 @@ RuntimeTransferPromisePollResult poll_pending_runtime_transfer_on_main_thread(
         pending = g_runtime_transfer;
     }
     if (!pending.active) return RuntimeTransferPromisePollResult::kNoPending;
+    if (pending.owner_generation != runtime_binding_snapshot(context).owner_generation) {
+        finish_runtime_transfer(
+            context,
+            kCommandPhaseIndeterminate,
+            "owner_generation_changed",
+            "runtime owner changed while transfer was pending",
+            true
+        );
+        return RuntimeTransferPromisePollResult::kFailed;
+    }
     const uint64_t now = static_cast<uint64_t>(now_elapsed_nanos());
     const uint64_t timeout = pending.phase == RuntimeTransferPendingPhase::kWaitingRelease
         ? kRuntimeTransferPromiseTimeoutNs : kRuntimeTransferMetadataTimeoutNs;
@@ -393,6 +426,7 @@ MainThreadActionOutcome start_runtime_transfer_on_main_thread(
         g_runtime_transfer.pokemon_id = pokemon_id;
         g_runtime_transfer.command_id = command_id == nullptr ? "" : command_id;
         g_runtime_transfer.started_at_ns = static_cast<uint64_t>(now_elapsed_nanos());
+        g_runtime_transfer.owner_generation = binding.owner_generation;
     }
     __android_log_print(
         ANDROID_LOG_INFO,

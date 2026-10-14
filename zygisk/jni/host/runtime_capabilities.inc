@@ -26,11 +26,13 @@ bool send_runtime_capability_update(
     if (kCatchExecutionEnabled && binding.catch_throw_verified) {
         capabilities.emplace_back("CATCH");
     }
-    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified) {
+    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified &&
+        binding.direct_catch_outcome_verified) {
         capabilities.emplace_back("DIRECT_CATCH");
     }
     if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
-    if (kTransferExecutionEnabled && binding.transfer_verified) {
+    if (kTransferExecutionEnabled && binding.transfer_verified &&
+        binding.transfer_outcome_verified) {
         capabilities.emplace_back("TRANSFER_POKEMON");
     }
     if (binding.throw_hooks_installed) capabilities.emplace_back("OBSERVE_THROW_EVENTS");

@@ -12,7 +12,8 @@ public:
         return binding.exact_build_verified &&
             binding.inventory_read_verified && kDiscardExecutionEnabled &&
             binding.inventory_cache_read_verified &&
-            binding.discard_verified && binding.item_inventory_list_sorted != nullptr &&
+            binding.discard_verified && binding.discard_outcome_verified &&
+            binding.item_inventory_list_sorted != nullptr &&
             binding.item_inventory_get_expiring_items != nullptr;
     }
 

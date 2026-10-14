@@ -53,9 +53,10 @@ bool is_runtime_owner_candidate(const char *field_name, const char *type_name) {
                 const Il2CppType *field_type = api.field_get_type == nullptr
                     ? nullptr
                     : api.field_get_type(field);
-                const char *type_name = (field_type == nullptr || api.type_get_name == nullptr)
-                    ? "<unknown>"
-                    : api.type_get_name(field_type);
+                OwnedIl2CppTypeName owned_type_name =
+                    owned_il2cpp_type_name(api, field_type);
+                const char *type_name = owned_type_name.get() == nullptr
+                    ? "<unknown>" : owned_type_name.get();
                 if (!is_runtime_owner_candidate(field_name, type_name)) continue;
                 ++matched_fields;
                 const char *image_name = api.image_get_name == nullptr
@@ -246,10 +247,9 @@ const void *find_runtime_method_with_parameter(
         if (candidate_name == nullptr || strcmp(candidate_name, method_name) != 0 ||
             api.method_get_param_count(method) != 1U) continue;
         const Il2CppType *parameter_type = api.method_get_param(method, 0U);
-        const char *candidate_type = parameter_type == nullptr || api.type_get_name == nullptr
-            ? nullptr
-            : api.type_get_name(parameter_type);
-        if (candidate_type != nullptr && strcmp(candidate_type, parameter_type_name) == 0) {
+        OwnedIl2CppTypeName candidate_type = owned_il2cpp_type_name(api, parameter_type);
+        if (candidate_type.get() != nullptr &&
+            strcmp(candidate_type.get(), parameter_type_name) == 0) {
             return method;
         }
     }
@@ -278,15 +278,11 @@ const void *find_runtime_method_with_two_parameters(
             api.method_get_param_count(method) != 2U) continue;
         const Il2CppType *first_type = api.method_get_param(method, 0U);
         const Il2CppType *second_type = api.method_get_param(method, 1U);
-        const char *first_name = first_type == nullptr || api.type_get_name == nullptr
-            ? nullptr
-            : api.type_get_name(first_type);
-        const char *second_name = second_type == nullptr || api.type_get_name == nullptr
-            ? nullptr
-            : api.type_get_name(second_type);
-        if (first_name != nullptr && second_name != nullptr &&
-            strcmp(first_name, first_parameter_type_name) == 0 &&
-            strcmp(second_name, second_parameter_type_name) == 0) return method;
+        OwnedIl2CppTypeName first_name = owned_il2cpp_type_name(api, first_type);
+        OwnedIl2CppTypeName second_name = owned_il2cpp_type_name(api, second_type);
+        if (first_name.get() != nullptr && second_name.get() != nullptr &&
+            strcmp(first_name.get(), first_parameter_type_name) == 0 &&
+            strcmp(second_name.get(), second_parameter_type_name) == 0) return method;
     }
     return nullptr;
 }

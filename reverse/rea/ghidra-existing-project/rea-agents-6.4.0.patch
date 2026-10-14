@@ -1,0 +1,338 @@
+--- a/dist/ghidra/GhidraLauncher.js
++++ b/dist/ghidra/GhidraLauncher.js
+@@ -41,6 +41,11 @@
+         const platform = this.options.platform ?? process.platform;
+         let started;
+         try {
++            const existingProject = existingGhidraProject(this.options.environment, platform);
++            if (existingProject !== undefined &&
++                (this.options.analysisSeeds !== undefined ||
++                    (this.options.analysisExtensions?.length ?? 0) > 0))
++                throw new GhidraLaunchError("Existing Ghidra project mode does not admit analysis seeds or extensions");
+             await createGhidraRuntimeDirectories(paths, platform);
+             const seedPath = this.options.analysisSeeds === undefined
+                 ? undefined
+@@ -54,6 +59,8 @@
+                 target_sha256: session.targetSha256,
+                 provider_version: session.providerVersion,
+                 profile_digest: session.profileDigest,
++                read_only: existingProject !== undefined || session.transport === "authenticated-loopback-tcp",
++                project_ephemeral: existingProject === undefined,
+                 ...(extensions.length === 0
+                     ? {}
+                     : { analysis_extensions: extensions }),
+@@ -78,6 +85,7 @@
+                     ? {}
+                     : { languageOverride: this.options.languageOverride }),
+                 ...(seedPath === undefined ? {} : { seedPath }),
++                ...(existingProject === undefined ? {} : { existingProject }),
+             });
+             const scriptCommand = ghidraHeadlessCommand({
+                 environment: this.options.environment,
+@@ -139,7 +147,7 @@
+         catch (cause) {
+             const primary = isAborted(options.signal)
+                 ? new AnalysisCancelledError("open_binary", { cause })
+-                : new GhidraLaunchError("Ghidra headless launch failed", { cause });
++                : new GhidraLaunchError(`Ghidra headless launch failed: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+             if (started === undefined)
+                 return err(primary);
+             let cleanupFailure;
+@@ -227,6 +235,25 @@
+     if (override !== undefined &&
+         (options.dosMz === true || options.dosCom === true))
+         throw new Error("A Ghidra language override cannot be combined with a DOS import.");
++    if (options.existingProject !== undefined) {
++        return [
++            options.existingProject.location,
++            options.existingProject.name,
++            "-process",
++            options.existingProject.program,
++            "-noanalysis",
++            "-readOnly",
++            "-log",
++            options.ghidraLogPath,
++            "-scriptlog",
++            options.scriptLogPath,
++            "-scriptPath",
++            bridgeDirectory,
++            "-postScript",
++            options.bridgeScriptPath,
++            options.descriptorPath,
++        ];
++    }
+     return [
+         options.projectRoot,
+         "rea-project",
+@@ -296,6 +323,23 @@
+         options.descriptorPath,
+     ];
+ };
++const existingGhidraProject = (environment, platform) => {
++    const location = environment.REA_GHIDRA_PROJECT_LOCATION;
++    const name = environment.REA_GHIDRA_PROJECT_NAME;
++    const program = environment.REA_GHIDRA_PROJECT_PROGRAM;
++    if (location === undefined && name === undefined && program === undefined)
++        return undefined;
++    if (location === undefined || name === undefined || program === undefined)
++        throw new GhidraLaunchError("REA_GHIDRA_PROJECT_LOCATION, REA_GHIDRA_PROJECT_NAME, and REA_GHIDRA_PROJECT_PROGRAM must be set together");
++    const path = platform === "win32" ? win32 : posix;
++    if (!path.isAbsolute(location))
++        throw new GhidraLaunchError("REA_GHIDRA_PROJECT_LOCATION must be absolute");
++    if (name.length === 0 || name === "." || name === ".." || /[\\/]/u.test(name))
++        throw new GhidraLaunchError("REA_GHIDRA_PROJECT_NAME must be one project basename without an extension");
++    if (program.length === 0 || path.isAbsolute(program) || program.split(/[\\/]/u).some((part) => part.length === 0 || part === "." || part === ".."))
++        throw new GhidraLaunchError("REA_GHIDRA_PROJECT_PROGRAM must be a relative project item path");
++    return { location, name, program };
++};
+ const ghidraRuntimePaths = (runtimeRoot) => ({
+     projectRoot: join(runtimeRoot, "project"),
+     homeRoot: join(runtimeRoot, "home"),
+--- a/dist/ghidra/GhidraAnalysisProfile.js
++++ b/dist/ghidra/GhidraAnalysisProfile.js
+@@ -20,6 +20,7 @@
+     const dosMz = target.format === "dos-mz";
+     const dosCom = target.format === "dos-com";
+     const dos = dosMz || dosCom;
++    const existingProject = existingProjectProfile();
+     // DOS imports already force an admitted loader, language, and context.
+     if (dos && languageOverride !== undefined)
+         return Promise.resolve(err(new AnalysisUnsupportedTargetError("resolve_analysis_profile", target.path, "REA_GHIDRA_LANGUAGE_ID cannot override the admitted DOS real-mode import.")));
+@@ -44,7 +45,10 @@
+             available_architectures: [
+                 ...(target.availableArchitectures ?? []),
+             ].sort(),
+-            import_mode: "ephemeral-source-immutable",
++            import_mode: existingProject === undefined
++                ? "ephemeral-source-immutable"
++                : "existing-project-read-only-v1",
++            ...(existingProject === undefined ? {} : { existing_project: existingProject }),
+             annotation_policy: "atomic-function-entry-metadata-v1",
+             load_image_observations: "source-mappings-entry-context-v2",
+             function_body_evidence: "complete-inclusive-ranges-v1",
+@@ -53,7 +57,9 @@
+             location_resolution: "explicit-address-exact-entry-symbol-first-v3",
+             instruction_flow_evidence: "decoded-return-pcode-v1",
+             function_boundary_observations: "ghidra-terminal-call-limitations-v1",
+-            no_return_repair: installation.platform === "win32"
++            no_return_repair: existingProject !== undefined
++                ? "existing-analysis-preserved-v1"
++                : installation.platform === "win32"
+                 ? "disabled-windows-p0"
+                 : "returning-imports-decoded-return-v2",
+             process_launch: installation.platform === "win32"
+@@ -68,7 +74,9 @@
+                 : {}),
+             jump_table_evidence: "typed-case-default-blocks-v1",
+             decompiler_jump_loads: true,
+-            loader: dosMz
++            loader: existingProject !== undefined
++                ? "existing-program"
++                : dosMz
+                 ? "MzLoader"
+                 : dosCom
+                     ? "BinaryLoader"
+@@ -102,11 +110,24 @@
+                     entry_seed: "external-entry-and-function-before-analysis-v1",
+                 }
+                 : {}),
+-            analyzer_preset: "ghidra-default",
++            analyzer_preset: existingProject === undefined
++                ? "ghidra-default"
++                : "existing-project-noanalysis-read-only",
+             ...ghidraMipsProfileParameters(target),
+         }),
+     }));
+ };
++const existingProjectProfile = () => {
++    const location = process.env.REA_GHIDRA_PROJECT_LOCATION;
++    const identityLocation = process.env.REA_GHIDRA_PROJECT_IDENTITY_LOCATION ?? location;
++    const name = process.env.REA_GHIDRA_PROJECT_NAME;
++    const program = process.env.REA_GHIDRA_PROJECT_PROGRAM;
++    if (location === undefined && name === undefined && program === undefined)
++        return undefined;
++    if (location === undefined || name === undefined || program === undefined)
++        return { invalid: "project selector is incomplete" };
++    return { location: identityLocation, name, program };
++};
+ /** Read the import-language commitment back from a resolved profile. */
+ export const ghidraProfileLanguageOverride = (parameters) => {
+     if (parameters.language_selection !== "configured-v1")
+--- a/dist/ghidra/GhidraProviderClient.js
++++ b/dist/ghidra/GhidraProviderClient.js
+@@ -22,6 +22,7 @@
+ import { ghidraExtensionFailure } from "./extensions/GhidraExtensionFailures.js";
+ import { ghidraExtensionSchema, validateGhidraExtensionProfile, ghidraExtensionLimitations, } from "./extensions/GhidraExtensions.js";
+ import { windowsNativeAuthorityUnavailableReason, hasWindowsNativeAuthority, } from "../process/WindowsAuthority.js";
++import { GHIDRA_MUTATING_OPERATIONS } from "./GhidraSessionValues.js";
+ /** Own one session's captured PE snapshot and immutable NativeAOT derivation. */
+ const createNativeAotSnapshotOwner = (input) => {
+     const { client, target, startupTimeoutMs } = input;
+@@ -175,6 +176,7 @@
+     if (!prerequisites.ok)
+         return unavailableClient(prerequisites.error);
+     const committedProfile = prerequisites.value.profile;
++    const existingProjectReadOnly = committedProfile.parameters.import_mode === "existing-project-read-only-v1";
+     const extensionProfile = ghidraExtensionSchema
+         .array()
+         .safeParse(committedProfile.parameters.analysis_extensions ?? []);
+@@ -198,6 +200,12 @@
+             },
+         }));
+     const seeds = seedProfile.data;
++    if (existingProjectReadOnly && (extensions.length > 0 || seeds !== undefined))
++        return unavailableClient(new ProviderAdapterError("ghidra", "open_binary", {
++            diagnostics: {
++                reason: "Existing Ghidra project mode is read-only and does not admit analysis extensions or seeds.",
++            },
++        }));
+     const languageOverride = ghidraProfileLanguageOverride(committedProfile.parameters);
+     if (!sameGhidraLanguageOverride(languageOverride, config.ghidraLanguageOverride))
+         return unavailableClient(new ProviderAdapterError("ghidra", "open_binary", {
+@@ -255,6 +263,7 @@
+             : "unix-socket",
+         providerVersion: prerequisites.value.providerVersion,
+         profileDigest: committedProfile.digest,
++        ...(existingProjectReadOnly ? { expectedReadOnly: true } : {}),
+         ...(["dos-mz", "dos-com"].includes(target.format)
+             ? {
+                 expectedLanguageId: "x86:LE:16:Real Mode",
+@@ -290,6 +299,9 @@
+         ...ghidraExtensionLimitations(extensions),
+         ...seedLimitations,
+         ...(releaseLimitation === undefined ? [] : [releaseLimitation]),
++        ...(existingProjectReadOnly
++            ? ["The selected existing Ghidra Program is opened with -process -noanalysis -readOnly. REA rejects database mutations and never deletes the caller-owned project."]
++            : []),
+     ];
+     const nativeAotOwner = target.format === "pe"
+         ? createNativeAotSnapshotOwner({
+@@ -302,6 +314,8 @@
+         execute: async (operation, parameters, options) => {
+             if (extensionFailure !== undefined)
+                 return err(extensionFailure);
++            if (existingProjectReadOnly && GHIDRA_MUTATING_OPERATIONS.has(operation))
++                return err(new AnalysisCapabilityUnavailableError(GHIDRA_PROVIDER_IDENTITY.id, operation, "Existing Ghidra project mode is read-only."));
+             if (operation !== "health" &&
+                 !isGhidraInventoryOperation(operation) &&
+                 !isGhidraFunctionOperation(operation))
+--- a/dist/ghidra/GhidraClient.js
++++ b/dist/ghidra/GhidraClient.js
+@@ -423,7 +423,7 @@
+             return err(this.#failure("protocol", "Ghidra run identity is missing"));
+         const parsed = parseGhidraSessionInfo(value, {
+             runId,
+-            expectedReadOnly: this.#options.transport === "authenticated-loopback-tcp",
++            expectedReadOnly: this.#options.expectedReadOnly ?? this.#options.transport === "authenticated-loopback-tcp",
+             providerVersion: this.#options.providerVersion,
+             profileDigest: this.#options.profileDigest,
+             targetSha256: this.#options.targetSha256,
+--- a/dist/ghidra/GhidraSessionValues.js
++++ b/dist/ghidra/GhidraSessionValues.js
+@@ -74,4 +74,4 @@
+     value !== null &&
+     !Array.isArray(value) &&
+     value.shutdown === true &&
+-    value.project_ephemeral === true;
++    typeof value.project_ephemeral === "boolean";
+--- a/dist/ghidra/GhidraProviderCapabilities.js
++++ b/dist/ghidra/GhidraProviderCapabilities.js
+@@ -16,8 +16,8 @@
+ /** Health limitations shared by every Ghidra-backed capability. */
+ export const healthLimitations = Object.freeze([
+     "The session serves operations only after Ghidra reports default auto-analysis complete; incomplete analysis does not expose partial results.",
+-    "The imported Program and temporary project are ephemeral and deleted on close. Annotation operations edit session database metadata; original executable bytes are never written.",
+-    "Cancelling an active Ghidra request terminates its ephemeral database and discards session annotations. The selected target remains open; the next provider query imports the original artifact again.",
++    "Default mode imports an ephemeral Program deleted on close. Explicit existing-project mode opens one caller-owned Program with -process -noanalysis -readOnly and rejects annotations; original executable bytes are never written.",
++    "Cancelling an active request terminates only the REA-owned headless process. Ephemeral databases are discarded; an existing caller-owned project is never deleted.",
+ ]);
+ /** Additional limitations applied to the experimental Windows x64 P0 boundary. */
+ export const windowsP0Limitations = Object.freeze([
+--- a/bridge/ghidra/ReaGhidraBridge.java
++++ b/bridge/ghidra/ReaGhidraBridge.java
+@@ -113,7 +113,9 @@
+         "run_id",
+         "target_sha256",
+         "provider_version",
+-        "profile_digest"
++        "profile_digest",
++        "read_only",
++        "project_ephemeral"
+     );
+     private static final Set<String> REQUEST_KEYS = Set.of(
+         "id",
+@@ -178,7 +180,7 @@
+             Files.deleteIfExists(descriptorPath);
+         }
+         if (currentProgram == null) {
+-            throw new IllegalStateException("REA bridge requires an imported program");
++            throw new IllegalStateException("REA bridge requires an active Program");
+         }
+         sessionDefaultAddressSpace =
+             currentProgram.getAddressFactory().getDefaultAddressSpace();
+@@ -204,8 +206,8 @@
+         // each edit owns a real outer transaction and can roll back immediately.
+         end(true);
+         try {
+-            if (!descriptor.transport.equals("unix-socket") && descriptor.analysisExtensions.size() > 0)
+-                throw new IOException("Windows Ghidra P0 does not admit metadata recovery or database mutation.");
++            if (descriptor.readOnly && descriptor.analysisExtensions.size() > 0)
++                throw new IOException("Read-only Ghidra sessions do not admit metadata recovery or database mutation.");
+             analysisExtensions.analyze(descriptor.analysisExtensions, currentProgram, monitor);
+             initializeDecompiler();
+             serve(descriptor);
+@@ -321,7 +323,7 @@
+                     requireKeys(request.params, Set.of());
+                     JsonObject result = new JsonObject();
+                     result.addProperty("shutdown", true);
+-                    result.addProperty("project_ephemeral", true);
++                    result.addProperty("project_ephemeral", descriptor.projectEphemeral);
+                     writeSuccess(writer, request.id, result);
+                     return;
+                 }
+@@ -383,14 +385,14 @@
+                 yield functionObservation(observation.dossier(), observation.limitations());
+             }
+             case "set_address_name", "set_addresses_names" -> {
+-                if (!descriptor.transport.equals("unix-socket"))
+-                    throw new RequestFailure("method_unavailable", "Windows P0 does not admit database mutation");
++                if (descriptor.readOnly)
++                    throw new RequestFailure("method_unavailable", "This read-only Ghidra session does not admit database mutation");
+                 yield request.method.equals("set_address_name")
+                     ? setAddressName(request.params) : setAddressesNames(request.params);
+             }
+             case "annotate_native_function" -> {
+-                if (!descriptor.transport.equals("unix-socket"))
+-                    throw new RequestFailure("method_unavailable", "Windows P0 does not admit database mutation");
++                if (descriptor.readOnly)
++                    throw new RequestFailure("method_unavailable", "This read-only Ghidra session does not admit database mutation");
+                 yield annotateNativeFunction(request.params);
+             }
+             default -> throw new RequestFailure(
+@@ -425,7 +427,7 @@
+         result.addProperty("run_id", descriptor.runId);
+         result.addProperty("profile_digest", descriptor.profileDigest);
+         result.add("provider", provider);
+-        boolean readOnly = !descriptor.transport.equals("unix-socket");
++        boolean readOnly = descriptor.readOnly;
+         result.addProperty("read_only", readOnly);
+         result.addProperty("analysis_complete", !timedOut);
+         result.addProperty("analysis_timed_out", timedOut);
+@@ -3608,6 +3610,8 @@
+             requireSha256(object, "target_sha256"),
+             requireString(object, "provider_version"),
+             requireString(object, "profile_digest"),
++            requireBoolean(object, "read_only"),
++            requireBoolean(object, "project_ephemeral"),
+             object.has("analysis_extensions") ? object.getAsJsonArray("analysis_extensions") : new JsonArray()
+         );
+     }
+@@ -3804,6 +3808,8 @@
+         String targetSha256,
+         String providerVersion,
+         String profileDigest,
++        boolean readOnly,
++        boolean projectEphemeral,
+         JsonArray analysisExtensions
+     ) {}
+     private record Request(int id, String method, JsonObject params) {}

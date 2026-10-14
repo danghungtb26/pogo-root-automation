@@ -1,3 +1,90 @@
+void log_runtime_binding_readiness(
+    ProbeContext &context,
+    const RuntimeBinding &previous,
+    const RuntimeBinding &binding
+) {
+    bool main_thread_ready = false;
+    bool main_thread_pending = false;
+    {
+        std::lock_guard<std::mutex> lock(context.main_thread_bridge.mutex);
+        main_thread_ready = context.main_thread_bridge.ready;
+        main_thread_pending = context.main_thread_bridge.pending_token != 0U;
+    }
+    __android_log_print(
+        ANDROID_LOG_INFO,
+        kLogTag,
+        "runtime binding summary previous_generation=%llu generation=%llu exact_build=%d main_thread_ready=%d main_thread_pending=%d stale_descriptors_invalidated=%d",
+        static_cast<unsigned long long>(previous.owner_generation),
+        static_cast<unsigned long long>(binding.owner_generation),
+        binding.exact_build_verified ? 1 : 0,
+        main_thread_ready ? 1 : 0,
+        main_thread_pending ? 1 : 0,
+        binding.owner_generation != previous.owner_generation ? 1 : 0
+    );
+    const auto log_method = [](const char *name,
+                               const pogo_runtime_method::VerifiedRuntimeMethod &descriptor,
+                               bool owner,
+                               bool invocation,
+                               bool outcome) {
+        __android_log_print(
+            descriptor.verified() ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
+            kLogTag,
+            "runtime binding method=%s reason=%s token=0x%08x inspected=%u signatures=%u matches=%u owner_session=%d invocation=%d outcome=%d",
+            name,
+            pogo_runtime_method::verification_reason_name(descriptor.reason),
+            descriptor.metadata_token,
+            descriptor.inspected_count,
+            descriptor.signature_match_count,
+            descriptor.verified_match_count,
+            owner ? 1 : 0,
+            invocation ? 1 : 0,
+            outcome ? 1 : 0
+        );
+    };
+    log_method(
+        "MapPokemon.TryCapture",
+        binding.map_pokemon_try_capture_descriptor,
+        binding.direct_catch_owner_session_verified,
+        binding.direct_catch_invocation_available,
+        binding.direct_catch_outcome_verified
+    );
+    log_method(
+        "ItemBagImpl.GetItemCount",
+        binding.item_bag_get_item_count_descriptor,
+        binding.discard_owner_session_verified,
+        binding.inventory_read_verified,
+        true
+    );
+    log_method(
+        "ItemBagImpl.RecycleItem",
+        binding.item_bag_recycle_item_descriptor,
+        binding.discard_owner_session_verified,
+        binding.discard_invocation_available,
+        binding.discard_outcome_verified
+    );
+    log_method(
+        "PokemonBagImpl.GetPokemon",
+        binding.pokemon_inventory_get_pokemon_descriptor,
+        binding.transfer_owner_session_verified,
+        binding.transfer_invocation_available,
+        true
+    );
+    log_method(
+        "PokemonBagImpl.ReleasePokemon",
+        binding.pokemon_inventory_release_descriptor,
+        binding.transfer_owner_session_verified,
+        binding.transfer_invocation_available,
+        binding.transfer_outcome_verified
+    );
+    log_runtime_object(context.il2cpp_api, binding.item_bag, "ItemBag owner", "ItemBagImpl");
+    log_runtime_object(
+        context.il2cpp_api,
+        binding.pokemon_inventory,
+        "PokemonBag owner",
+        "PokemonBagImpl"
+    );
+}
+
 bool run_managed_runtime_diagnostic(ProbeContext &context) {
     if (!context.il2cpp_api_ready) {
         __android_log_print(ANDROID_LOG_WARN, kLogTag, "runtime bootstrap: IL2CPP API unavailable");
@@ -39,12 +126,15 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
     // while inline hooks remain installed in the process until it exits.
     const RuntimeBinding previous = runtime_binding_snapshot(context);
     RuntimeBinding binding = previous;
+    const pogo_runtime_profile::IdentityObservation identity =
+        runtime_identity_snapshot(context);
     discover_runtime_owners(
         api,
         assemblies,
         assembly_count,
         context.process_name,
         context.il2cpp_path,
+        identity,
         &binding
     );
     binding.throw_hooks_installed = previous.throw_hooks_installed;
@@ -59,6 +149,7 @@ bool run_managed_runtime_diagnostic(ProbeContext &context) {
         std::lock_guard<std::mutex> binding_lock(context.binding_mutex);
         context.binding = binding;
     }
+    log_runtime_binding_readiness(context, previous, binding);
     pogo_runtime_world_state::reset(
         binding.owner_generation,
         static_cast<uint64_t>(now_elapsed_nanos())

@@ -59,6 +59,12 @@
             const char *owner_class_name = owner_class == nullptr
                 ? nullptr
                 : api.class_get_name(owner_class);
+            Il2CppClass *expected_item_bag_class = resolve_runtime_method_class(
+                api,
+                assemblies,
+                assembly_count,
+                pogo_runtime_method_profile_0433::kGetItemCount.method
+            );
             const void *use_item_method = find_runtime_method_with_two_parameters(
                 api,
                 owner_class,
@@ -67,7 +73,8 @@
                 "System.UInt64"
             );
             const bool is_item_bag_impl = owner_class_name != nullptr &&
-                strcmp(owner_class_name, "ItemBagImpl") == 0;
+                strcmp(owner_class_name, "ItemBagImpl") == 0 &&
+                owner_class == expected_item_bag_class;
             if (is_item_bag_impl && use_item_method != nullptr) {
                 binding->item_bag = owner;
                 binding->use_item_on_pokemon = use_item_method;
@@ -76,10 +83,16 @@
             if (is_item_bag_impl) {
                 // Inventory read: GetItemCount(Holoholo.Rpc.Item) -> int. Ensure
                 // item_bag is set even when the berry path is unavailable.
-                const void *get_item_count = find_runtime_method_with_parameter(
-                    api, owner_class, "GetItemCount", "Holoholo.Rpc.Item"
+                binding->item_bag_get_item_count_descriptor = verify_runtime_method(
+                    api,
+                    owner_class,
+                    pogo_runtime_method_profile_0433::kGetItemCount.method
                 );
-                if (get_item_count != nullptr) {
+                const void *get_item_count =
+                    binding->item_bag_get_item_count_descriptor.verified()
+                        ? binding->item_bag_get_item_count_descriptor.method
+                        : nullptr;
+                if (binding->exact_build_verified && get_item_count != nullptr) {
                     binding->item_bag = owner;
                     binding->item_bag_get_item_count = get_item_count;
                     binding->inventory_read_verified = true;
@@ -95,11 +108,14 @@
                     binding->inventory_read_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
                     "managed diagnostic: inventory read verified=%d item_bag=%p get_item_count=%p "
-                    "get_total_items=%p",
+                    "get_total_items=%p method_reason=%s",
                     binding->inventory_read_verified ? 1 : 0,
                     owner,
                     get_item_count,
-                    get_total_items
+                    get_total_items,
+                    pogo_runtime_method::verification_reason_name(
+                        binding->item_bag_get_item_count_descriptor.reason
+                    )
                 );
                 void *inventory_cache = nullptr;
                 const bool cache_field_read = read_runtime_field(
@@ -143,21 +159,28 @@
                 // ItemData is a nested type with an empty namespace in this build;
                 // resolve the actual parameter class from RecycleItem instead of
                 // guessing a namespace/name pair.
-                const void *recycle_item = api.class_get_method_from_name == nullptr
-                    ? nullptr : api.class_get_method_from_name(owner_class, "RecycleItem", 3);
+                binding->item_bag_recycle_item_descriptor = verify_runtime_method(
+                    api,
+                    owner_class,
+                    pogo_runtime_method_profile_0433::kRecycleItem.method
+                );
+                const void *recycle_item =
+                    binding->item_bag_recycle_item_descriptor.verified()
+                        ? binding->item_bag_recycle_item_descriptor.method
+                        : nullptr;
                 Il2CppClass *item_data_class = nullptr;
                 const bool recycle_contract_verified = discard_recycle_item_signature(
                     api,
                     recycle_item,
                     &item_data_class
                 );
-                if (recycle_contract_verified) {
+                if (binding->exact_build_verified && recycle_contract_verified) {
                     binding->item_bag_recycle_item = recycle_item;
                     binding->item_data_class = item_data_class;
                     binding->item_data_ctor = api.class_get_method_from_name == nullptr
                         ? nullptr
                         : api.class_get_method_from_name(item_data_class, ".ctor", 10);
-                    binding->discard_verified = true;
+                    binding->discard_verified = binding->item_data_ctor != nullptr;
                     if (api.class_get_field_from_name != nullptr && api.field_get_type != nullptr &&
                         api.type_get_class_or_element_class != nullptr) {
                         const void *medicine_field = api.class_get_field_from_name(
@@ -176,16 +199,28 @@
                         }
                     }
                 }
+                binding->discard_method_identity_verified =
+                    binding->item_bag_recycle_item_descriptor.verified();
+                binding->discard_owner_session_verified = binding->item_bag == owner &&
+                    binding->owner_generation > 0U;
+                binding->discard_invocation_available = binding->exact_build_verified &&
+                    binding->discard_method_identity_verified &&
+                    binding->discard_owner_session_verified &&
+                    binding->item_data_ctor != nullptr && api.runtime_invoke != nullptr;
+                binding->discard_verified = binding->discard_invocation_available;
                 __android_log_print(
                     binding->discard_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                     kLogTag,
                     "managed diagnostic: discard binding verified=%d recycle=%p item_data=%p "
-                    "medicine_data=%p medicine_ctor=%p",
+                    "medicine_data=%p medicine_ctor=%p method_reason=%s",
                     binding->discard_verified ? 1 : 0,
                     recycle_item,
                     item_data_class,
                     binding->medicine_data_class,
-                    binding->medicine_data_ctor
+                    binding->medicine_data_ctor,
+                    pogo_runtime_method::verification_reason_name(
+                        binding->item_bag_recycle_item_descriptor.reason
+                    )
                 );
             }
         }
@@ -261,28 +296,60 @@
         }
         if (strcmp(service.label, "IPokemonBag") == 0 && owner != nullptr &&
             runtime_object_is_exact_class(api, owner, "Niantic.Holoholo.Internal", "PokemonBagImpl")) {
-            // Transfer executor binding (from the 0.427.0 dump): GetPokemon(ulong)
-            // resolves the PokemonProto by storage id; ReleasePokemon(PokemonProto)
-            // releases it. Execution stays gated behind kTransferExecutionEnabled
-            // until the release promise post-condition is verified on device.
+            // Transfer executor binding is pinned to the exact 0.433.0 method
+            // rows. Promise/postcondition readiness remains a separate gate.
             Il2CppClass *owner_class = api.object_get_class(owner);
-            const void *get_pokemon = api.class_get_method_from_name == nullptr || owner_class == nullptr
-                ? nullptr
-                : api.class_get_method_from_name(owner_class, "GetPokemon", 1);
-            const void *release = api.class_get_method_from_name == nullptr || owner_class == nullptr
-                ? nullptr
-                : api.class_get_method_from_name(owner_class, "ReleasePokemon", 1);
-            if (get_pokemon != nullptr && release != nullptr) {
+            Il2CppClass *expected_pokemon_bag_class = resolve_runtime_method_class(
+                api,
+                assemblies,
+                assembly_count,
+                pogo_runtime_method_profile_0433::kGetPokemon.method
+            );
+            if (owner_class == expected_pokemon_bag_class) {
+                binding->pokemon_inventory_get_pokemon_descriptor = verify_runtime_method(
+                    api, owner_class, pogo_runtime_method_profile_0433::kGetPokemon.method
+                );
+                binding->pokemon_inventory_release_descriptor = verify_runtime_method(
+                    api, owner_class, pogo_runtime_method_profile_0433::kReleasePokemon.method
+                );
+            }
+            const void *get_pokemon =
+                binding->pokemon_inventory_get_pokemon_descriptor.verified()
+                    ? binding->pokemon_inventory_get_pokemon_descriptor.method
+                    : nullptr;
+            const void *release = binding->pokemon_inventory_release_descriptor.verified()
+                ? binding->pokemon_inventory_release_descriptor.method
+                : nullptr;
+            if (binding->exact_build_verified && get_pokemon != nullptr && release != nullptr) {
                 binding->pokemon_inventory = owner;
                 binding->pokemon_inventory_get_pokemon = get_pokemon;
                 binding->pokemon_inventory_release = release;
                 binding->transfer_verified = true;
             }
+            binding->transfer_method_identity_verified =
+                binding->pokemon_inventory_get_pokemon_descriptor.verified() &&
+                binding->pokemon_inventory_release_descriptor.verified();
+            binding->transfer_owner_session_verified =
+                binding->pokemon_inventory == owner && binding->owner_generation > 0U;
+            binding->transfer_invocation_available = binding->exact_build_verified &&
+                binding->transfer_method_identity_verified &&
+                binding->transfer_owner_session_verified && api.runtime_invoke != nullptr;
+            binding->transfer_verified = binding->transfer_invocation_available;
             __android_log_print(
                 binding->transfer_verified ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
                 kLogTag,
-                "managed diagnostic: transfer binding verified=%d bag=%p get_pokemon=%p release=%p",
-                binding->transfer_verified ? 1 : 0, owner, get_pokemon, release
+                "managed diagnostic: transfer binding verified=%d bag=%p get_pokemon=%p release=%p "
+                "get_reason=%s release_reason=%s",
+                binding->transfer_verified ? 1 : 0,
+                owner,
+                get_pokemon,
+                release,
+                pogo_runtime_method::verification_reason_name(
+                    binding->pokemon_inventory_get_pokemon_descriptor.reason
+                ),
+                pogo_runtime_method::verification_reason_name(
+                    binding->pokemon_inventory_release_descriptor.reason
+                )
             );
         }
         if (strcmp(service.label, "IGameMasterData") == 0 && owner != nullptr &&

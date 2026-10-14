@@ -18,11 +18,13 @@ std::vector<std::string> runtime_ui_status_capabilities(const RuntimeBinding &bi
     if (kOpenEncounterExecutionEnabled && binding.dynamic_tappables_service != nullptr &&
         binding.dynamic_tappables_tap != nullptr) capabilities.emplace_back("OPEN_ENCOUNTER");
     if (kCatchExecutionEnabled && binding.catch_throw_verified) capabilities.emplace_back("CATCH");
-    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified) {
+    if (kDirectCatchExecutionEnabled && binding.direct_catch_verified &&
+        binding.direct_catch_outcome_verified) {
         capabilities.emplace_back("DIRECT_CATCH");
     }
     if (kSpinExecutionEnabled && binding.spin_verified) capabilities.emplace_back("SPIN");
-    if (kTransferExecutionEnabled && binding.transfer_verified) {
+    if (kTransferExecutionEnabled && binding.transfer_verified &&
+        binding.transfer_outcome_verified) {
         capabilities.emplace_back("TRANSFER_POKEMON");
     }
     if (binding.throw_hooks_installed) capabilities.emplace_back("OBSERVE_THROW_EVENTS");
@@ -46,6 +48,13 @@ bool runtime_ui_module_error(
     *error_code = nullptr;
     const auto *feature = pogo_runtime_module::resolve_module(module);
     if (!desired || feature == nullptr || !binding.exact_build_verified) return false;
+    if ((module == pogo_runtime_module::Module::kTransfer &&
+            binding.transfer_invocation_available && !binding.transfer_outcome_verified) ||
+        (module == pogo_runtime_module::Module::kDiscard &&
+            binding.discard_invocation_available && !binding.discard_outcome_verified)) {
+        *error_code = "runtime_postcondition_unverified_device";
+        return true;
+    }
     if (!feature->available(binding)) {
         *error_code = "runtime_module_unavailable";
         return true;

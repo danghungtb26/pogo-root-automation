@@ -6,7 +6,7 @@ namespace pogo_runtime_module {
 bool auto_transfer_module_enabled();
 }
 
-void on_runtime_catch_succeeded_on_main_thread(
+[[maybe_unused]] void on_runtime_catch_succeeded_on_main_thread(
     ProbeContext &context,
     uint64_t captured_pokemon_id
 ) {

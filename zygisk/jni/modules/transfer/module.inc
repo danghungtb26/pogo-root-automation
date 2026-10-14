@@ -10,7 +10,7 @@ public:
         // Transfer is also the native consumer of the authoritative catch event.
         // It remains unavailable unless the exact release binding is verified.
         return binding.exact_build_verified && kTransferExecutionEnabled &&
-            binding.transfer_verified;
+            binding.transfer_verified && binding.transfer_outcome_verified;
     }
 
     bool on_enable(ProbeContext &context) override {

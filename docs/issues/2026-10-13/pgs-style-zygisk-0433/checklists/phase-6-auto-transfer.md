@@ -16,7 +16,11 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-601</summary>
 
-  BLOCKED: storage tuple/Promise/postcondition T-304 và catch-success storage-ID pipeline chưa có Evidence 0.433.0. Transfer capability giữ đóng; không gọi `GetPokemon`/`ReleasePokemon` dựa trên token hoặc field lịch sử.
+  PARTIAL/BLOCKED: exact 0.433.0 managed descriptors cho `GetPokemon` và
+  `ReleasePokemon`, token và result fields đã được implement; RVA chỉ là
+  evidence. Live bag owner/lifetime, Promise semantics, catch-success storage-ID
+  provenance, keep-policy fields và authoritative storage postcondition vẫn
+  thiếu. Transfer capability giữ đóng và không báo success khi mới dispatch.
 
   </details>
 

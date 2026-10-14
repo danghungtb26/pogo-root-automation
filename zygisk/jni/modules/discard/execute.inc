@@ -240,20 +240,33 @@ void finish_runtime_discard(
 void reset_runtime_discard_state(ProbeContext &context) {
     Il2CppGcHandle handle = 0U;
     Il2CppGcHandle reconcile_handle = 0U;
+    bool interrupted = false;
+    std::string command_id;
     {
         std::lock_guard<std::mutex> lock(g_runtime_discard_mutex);
-        if (g_runtime_discard.active || g_runtime_discard.blocked) {
-            // Resetting a native mirror does not cancel a game RPC. Preserve
-            // the pending/unknown barrier so a config toggle cannot open a
-            // second mutation before the first one is reconciled.
-            return;
-        }
+        interrupted = g_runtime_discard.active || g_runtime_discard.blocked ||
+            g_runtime_discard.awaiting_reconcile;
+        command_id = g_runtime_discard.command_id;
         handle = g_runtime_discard.promise_gc_handle;
         reconcile_handle = g_runtime_discard.reconcile_promise_gc_handle;
         g_runtime_discard = PendingRuntimeDiscard{};
     }
     free_runtime_discard_handle(context, handle);
     free_runtime_discard_handle(context, reconcile_handle);
+    if (interrupted) {
+        (void)pogo_runtime_world_state::mark_dirty(
+            pogo_runtime_world_state::kInventorySource
+        );
+    }
+    if (!command_id.empty()) {
+        (void)send_runtime_result(
+            context.fd,
+            command_id.c_str(),
+            kCommandPhaseIndeterminate,
+            "discard_reset_indeterminate",
+            "discard tracking reset before authoritative inventory reconciliation"
+        );
+    }
 }
 
 #include "recycle_item_action.inc"

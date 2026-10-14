@@ -8,6 +8,13 @@ Plan: [Tổng quan](00-overview.md)
 - `T-302` và `T-304` đã mô tả owner, lifetime và thread requirement của state.
 - Thay đổi native chưa commit hiện hữu đã được rebase logic bằng chỉnh sửa hẹp, không bị xóa.
 
+> Cập nhật reverse 2026-10-14: exact artifact pair đã có focused metadata-to-RVA
+> map, và REA đã xác nhận ba RVA đại diện nằm trong analyzed code
+> (`ev_51dac350...`, `ev_7f6095cf...`, `ev_d7680400...`). Exact boundary/ABI,
+> owner/lifetime, typed field/event và postcondition vẫn chưa được chứng minh;
+> vì vậy T-401/T-402 giữ trạng thái triển khai nền chưa hoàn tất và T-403–T-408
+> vẫn fail-closed, không được tick.
+
 ## Task
 
 - [ ] **T-401** **[zygisk]** *(native)* — Thêm world-state store tách file (đề xuất `zygisk/jni/shared/runtime/state/runtime_world_state.h` và `.inc`) chứa snapshot bất biến cho session/location/map/inventory/encounter, `ownerGeneration`, `dirtyGeneration`, `revision`, timestamp và availability `NOT_READY`, `EMPTY`, `READY`, `STALE`, `ERROR`. Collector build bản tạm rồi commit nguyên tử; không lưu managed pointer trong snapshot. Wire declaration/include tối thiểu qua `runtime_native_declarations.inc`, `runtime_native_prelude.inc` và `main.cpp`. **AC:** Reader thấy một revision nhất quán và phân biệt empty hợp lệ với read failure. **Phụ thuộc:** `T-302`, `T-304`, `T-305`. **Verify:** Native compile + existing host checks; review memory ownership/concurrency; forced session reset làm revision/generation đổi và xóa snapshot cũ.
@@ -48,7 +55,12 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-403</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: T-303/T-304 nay đã có exact managed signatures/token và resolver,
+  nhưng T-306 vẫn chưa có collection owner, create/update/remove signal,
+  stable identity, expiry, generation hoặc snapshot-completeness contract cho
+  các map source. Method identity không thay thế typed collector evidence.
+  Profile 0.433.0 giữ mutation fail-closed; scanner 0.427.0 không phải
+  implementation hợp lệ.
 
   </details>
 
@@ -57,7 +69,9 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-404</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: static RVA không chứng minh owner lifecycle/generation hoặc pointer
+  validity. T-303/T-304 cần focused call-path và runtime owner evidence trước
+  khi thay lifecycle code. Profile vẫn fail-closed; không đánh dấu hoàn tất.
 
   </details>
 
@@ -66,7 +80,9 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-405</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: storage implementation RVAs đã có, nhưng signature/ABI,
+  expiring-items source, refresh event và postcondition chưa được chứng minh.
+  Inventory collector không được gọi binding chỉ dựa trên RVA.
 
   </details>
 
@@ -75,7 +91,9 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-406</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: action arbiter phụ thuộc typed collectors và terminal contracts còn
+  thiếu exact ABI/owner/outcome evidence. Static RVA không đủ để dispatch hoặc
+  correlate completion. Profile vẫn fail-closed; không đánh dấu hoàn tất.
 
   </details>
 
@@ -84,7 +102,9 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-407</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: protocol/UI state phụ thuộc availability và arbiter semantics của
+  T-403–T-406, vốn chưa thể hoàn tất từ static RVA. Profile vẫn fail-closed;
+  không đánh dấu hoàn tất.
 
   </details>
 
@@ -93,7 +113,9 @@ Plan: [Tổng quan](00-overview.md)
   <details>
   <summary>Bị chặn — T-408</summary>
 
-  BLOCKED: storage/map owner contracts T-303/T-304 chưa có REA provider evidence, nên không thể xây collector/arbiter/protocol dựa trên type/owner đoán. Profile 0.433.0 đã giữ toàn bộ mutation fail-closed; scanner 0.427.0 không được coi là implementation hợp lệ. Không đánh dấu task hoàn tất.
+  BLOCKED: build-level completion phụ thuộc T-403–T-407. Mapping đã loại bỏ
+  token-to-RVA gap nhưng chưa cung cấp typed/runtime contracts cần để triển
+  khai an toàn. Không đánh dấu task hoàn tất.
 
   </details>
 
