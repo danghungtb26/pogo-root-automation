@@ -31,6 +31,7 @@ class HeadlessAutomationService : Service() {
     private val joystickAutoStartExecutor = Executors.newSingleThreadScheduledExecutor()
     private var joystickAutoStartPoll: ScheduledFuture<*>? = null
     private var runtimeInitialized = false
+    private var lastNotificationText = "Waiting for game"
 
     override fun onCreate() {
         super.onCreate()
@@ -71,14 +72,14 @@ class HeadlessAutomationService : Service() {
                     errorCode = "module_inactive",
                     message = reason,
                 )
-                stopSelf()
+                // A dead game session is transient; the facade reconnects.
             },
         )
         joystickAutoStartCoordinator = JoystickAutoStartCoordinator(
             context = this,
         )
 
-        startForeground(NOTIFICATION_ID, buildNotification("Runtime controller connected"))
+        startForeground(NOTIFICATION_ID, buildNotification("Waiting for game"))
         runtimeFacade.start()
         runtimeInitialized = true
         joystickAutoStartPoll = joystickAutoStartExecutor.scheduleWithFixedDelay(
@@ -142,6 +143,18 @@ class HeadlessAutomationService : Service() {
 
     private fun syncJoystickAutoStart() {
         runCatching { joystickAutoStartCoordinator.sync() }
+        if (!runtimeInitialized) return
+        val status = runtimeFacade.snapshot()
+        val content = if (status.runtimeControlState == "FAILED") {
+            status.lastError ?: "Runtime failed"
+        } else {
+            status.runtimeControlState.replace('_', ' ').lowercase()
+        }
+        if (content != lastNotificationText) {
+            lastNotificationText = content
+            getSystemService(NotificationManager::class.java)
+                .notify(NOTIFICATION_ID, buildNotification(content))
+        }
     }
 
     private fun createNotificationChannel() {

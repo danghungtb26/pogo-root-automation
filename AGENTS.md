@@ -160,6 +160,47 @@ Evidence IDs, artifact SHA-256, authority, coverage and limitations. Export the
 updated deterministic bundle back to `reverse/rea/` when new evidence matters
 to implementation.
 
+### Read an existing Ghidra analysis snapshot with REA CLI
+
+For an already analyzed `.gpr/.rep` project, use the repository's
+`scripts/rea-ghidra-project.sh` with `rea-agents@6.4.0`. It copies the project
+and REA package to a disposable location, then opens the selected Program with
+`-noanalysis -readOnly`; do not edit the caller-owned project or call REA MCP
+directly for this workflow. Read
+`reverse/rea/ghidra-existing-project/README.md` for the wrapper contract.
+
+Set `REA_AGENTS_ROOT` to an installed `node_modules/rea-agents` directory and
+set `GHIDRA_INSTALL_DIR` and `JAVA_HOME` to the installed Ghidra/JDK. On macOS,
+select a matching Xcode toolchain with `DEVELOPER_DIR` if Swift compilation
+reports an SDK mismatch. After verifying `reverse/artifacts/SHA256SUMS` and
+reviewing retained Evidence, run a focused query such as:
+
+```bash
+scripts/rea-ghidra-project.sh \
+  --project reverse/artifacts/libhela-1.273.1/libhela.gpr \
+  --program libhela-1.273.1-pogo-0.433.0.so -- \
+  search reverse/artifacts/libhela-1.273.1/libhela-1.273.1-pogo-0.433.0.so \
+    android_dlopen_ext --kind strings --provider ghidra \
+    --snapshot build/rea/libhela-1.273.1-ghidra-analysis.snapshot.json \
+    --format json --full-output
+```
+
+Reuse the **same `--snapshot` path** for subsequent `search`, `xrefs` and
+`function` commands on this exact binary and project. The CLI loads matching
+records first and atomically updates the local snapshot after each query;
+`build/rea/` is local working state, not the deterministic Evidence bundle.
+To list records already saved in the snapshot without launching Ghidra again:
+
+```bash
+jq -r '.evidence_bundle.records[] | [.evidence_id, .operation,
+  (.parameters | tostring)] | @tsv' \
+  build/rea/libhela-1.273.1-ghidra-analysis.snapshot.json
+```
+
+Read the returned Evidence ID, address, coverage and limitations. A string hit
+or containing Ghidra `FUN_*` is a search lead, not a verified hook RVA or call
+path. Export implementation-relevant Evidence to `reverse/rea/` separately.
+
 `reverse/pogo-0.427.0/` is legacy historical material only. It may help form a
 search hypothesis but never proves a 0.433.0 class, field, method, layout, RVA
 or call path. If a required REA provider is unavailable, record the residual

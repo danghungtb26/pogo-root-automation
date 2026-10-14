@@ -41,8 +41,8 @@ constexpr const char *kTempStatePrefix = "/data/adb/pogo_root_automation/runtime
 constexpr const char *kBridgeSocketName = "pogo_root_automation_runtime";
 constexpr const char *kControllerUidPath = "/data/adb/pogo_root_automation/controller.uids";
 constexpr uint32_t kRuntimeEventMagic = 0x504F474FU;
-constexpr uint32_t kRuntimeProtocolVersion = 4U;
-constexpr uint16_t kBridgeProtocolVersion = 3U;
+constexpr uint32_t kRuntimeProtocolVersion = 5U;
+constexpr uint16_t kBridgeProtocolVersion = 4U;
 constexpr uint32_t kBridgeCommandType = pogo_runtime::kBridgeCommandType;
 constexpr uint32_t kBridgeCommandResultType = 5U;
 constexpr uint32_t kBridgeHardMessageBytes = 4U * 1024U * 1024U;
@@ -50,24 +50,20 @@ constexpr uint32_t kRuntimeCommandMagic = 0x504F4743U;
 constexpr uint32_t kRuntimeResultMagic = 0x504F4752U;
 constexpr uint32_t kRuntimeCapabilitiesMagic = 0x504F474BU;
 constexpr uint32_t kRuntimeUiStatusMagic = 0x504F4753U;
+constexpr uint32_t kRuntimeBootstrapStatusMagic = 0x504F4742U;
+constexpr uint32_t kCommandPhaseStarted = 2U;
+constexpr uint32_t kCommandPhaseCompleted = 3U;
+constexpr uint32_t kCommandPhaseRejected = 4U;
+constexpr uint32_t kCommandPhaseIndeterminate = 7U;
 // This binding is intentionally pinned to the canonical 0.433.0 profile.
 // Runtime mutation remains closed until every strong-identity field is
 // independently verified in the target process.
 constexpr const char *kVerifiedBuildFingerprint = pogo_runtime_profile::kFingerprint;
-// Pokémon GO can load Unity before the IL2CPP shared object on a cold
-// BlueStacks start. Keep the probe alive long enough to observe the same
-// process after that delayed load instead of publishing a false mapped-only
-// result.
-// Air 1 can finish the first account/map bootstrap after two minutes on a
-// cold start. Keep the probe alive through that window so the controller does
-// not attach to a permanently probe-only session.
-constexpr int kProbeAttempts = 600;
-constexpr useconds_t kProbeDelayUs = 500000U;
 constexpr uint32_t kRequiredIl2cppCoreSymbolCount = 10U;
 constexpr size_t kMaxAssembliesToInspect = 4096U;
 constexpr size_t kMaxClassesToInspect = 50000U;
 constexpr uint32_t kMaxCandidateClasses = 32U;
-uint64_t g_session_counter = 0U;
+std::atomic<uint64_t> g_session_counter{0U};
 
 enum class RuntimeEventType : uint32_t {
     kTargetAttached = 1U,
@@ -115,6 +111,8 @@ struct RuntimeState {
     uint32_t class_count = 0U;
     uint32_t candidate_class_count = 0U;
     uint64_t runtime_message_seq = 0U;
+    uint64_t attach_epoch_ms = 0U;
+    uint64_t attach_elapsed_ns = 0U;
     char process_name[128]{};
     char runtime_session_id[64]{};
     char il2cpp_path[512]{};
@@ -127,19 +125,30 @@ struct RuntimeState {
 struct BrokerContext {
     int32_t pid;
     int runtime_fd;
+    RuntimeState state;
     char process_name[128];
     char runtime_session_id[64];
     uint64_t next_message_seq = 1U;
+    bool has_runtime_ready = false;
+    bool strong_identity = false;
+    std::string build_fingerprint;
+    std::vector<std::string> runtime_capabilities;
+    pogo_runtime_bootstrap::Status latest_bootstrap_status;
+    uint64_t last_runtime_bootstrap_sequence = 0U;
     // Only the latest UI status is retained for reconnect replay. Runtime
     // gameplay/config commands are never queued while a controller is absent.
     std::vector<uint8_t> latest_runtime_ui_status;
 };
 
 std::mutex g_broker_mutex;
+std::condition_variable g_broker_cv;
 std::mutex g_internal_message_mutex;
 bool g_broker_running = false;
 std::string g_broker_session_id;
+std::string g_broker_bound_session_id;
 std::atomic<bool> g_runtime_explicit_snapshot_mode{false};
+std::atomic<pogo_runtime_bootstrap::Phase> g_runtime_bootstrap_phase{
+    pogo_runtime_bootstrap::Phase::kCreated};
 
 #include "runtime_il2cpp_api.inc"
 struct RuntimeBinding {

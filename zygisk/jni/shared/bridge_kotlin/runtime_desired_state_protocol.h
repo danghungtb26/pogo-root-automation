@@ -157,7 +157,7 @@ inline bool parse(const std::vector<uint8_t> &input, Request *request) {
         logical_string_size(request->request_id, kMaxLogicalIdBytes) &&
         logical_string_size(request->process_name, kMaxLogicalIdBytes) &&
         logical_string_size(request->package_name, kMaxLogicalIdBytes) &&
-        logical_string_size(request->build_fingerprint, kMaxBuildFingerprintBytes) &&
+        request->build_fingerprint.size() <= kMaxBuildFingerprintBytes &&
         offset == input.size();
 }
 

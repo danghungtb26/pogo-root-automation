@@ -47,6 +47,12 @@ void discard_pending_throw_events(ProbeContext &context) {
 }
 
 bool activate_runtime(ProbeContext &context, const char *request_id) {
+    if (g_runtime_bootstrap_phase.load(std::memory_order_acquire) !=
+        pogo_runtime_bootstrap::Phase::kLiveReady) {
+        return send_runtime_rejected(context.fd, request_id,
+            "runtime_lifecycle_gate_closed",
+            "verified runtime lifecycle is not live ready");
+    }
     if (!pogo_runtime_module::module_registry_initialized()) {
         return send_runtime_rejected(
             context.fd,
@@ -135,6 +141,13 @@ bool stop_runtime(ProbeContext &context, const char *request_id) {
     );
 }
 bool run_runtime_control_diagnostic(ProbeContext &context, const char *request_id) {
+    const auto phase = g_runtime_bootstrap_phase.load(std::memory_order_acquire);
+    if (phase < pogo_runtime_bootstrap::Phase::kIl2cppInitialized ||
+        phase == pogo_runtime_bootstrap::Phase::kFailed) {
+        return send_runtime_rejected(context.fd, request_id,
+            "runtime_lifecycle_gate_closed",
+            "il2cpp initialization has not been verified");
+    }
     // Re-running discovery rebuilds RuntimeBinding and invokes il2cpp on this
     // thread. It is only safe when no feature module is observing (the observer
     // touches il2cpp on its own thread and holds resolved owner pointers). While
@@ -269,6 +282,7 @@ bool parse_gameplay_action_tag(
 
 void runtime_command_channel_loop(ProbeContext &context) {
     while (kill(getpid(), 0) == 0) {
+        if (!pogo_runtime_lifecycle::observer().advance(context)) break;
         pollfd descriptor{};
         descriptor.fd = context.fd;
         descriptor.events = POLLIN;
@@ -430,10 +444,22 @@ void runtime_command_channel_loop(ProbeContext &context) {
         maybe_probe_pending_map_readiness(context);
     }
 
+    g_runtime_readiness_retry.stop();
     pogo_runtime_module::disable_all_modules(context);
     pogo_runtime_module::reset_map_live_verified(context);
     g_runtime_active.store(false);
     g_runtime_explicit_snapshot_mode.store(false);
+    reset_runtime_catch_spin_config();
+    reset_runtime_transfer_config();
+    reset_runtime_discard_config();
+    clear_runtime_discard_suppressions();
+    reset_runtime_inventory_readiness();
+    invalidate_runtime_desired_apply();
+    clear_runtime_desired_state_session();
+    pogo_runtime_lifecycle::observer().deactivate();
+    pogo_runtime_world_state::reset(
+        runtime_binding_snapshot(context).owner_generation,
+        static_cast<uint64_t>(now_elapsed_nanos()));
     shutdown_main_thread_bridge(context);
 }
 

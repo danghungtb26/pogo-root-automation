@@ -3,6 +3,7 @@ package dev.pogoroot.automation.runtime.observation
 import android.util.Log
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.BridgeProtocol
+import dev.pogoroot.automation.bridge.RuntimeBootstrapPhase
 import dev.pogoroot.automation.bridge.MapTargetPayloadCodec
 import dev.pogoroot.automation.bridge.ObservationType
 import dev.pogoroot.automation.bridge.PointWalkCandidatePayloadCodec
@@ -33,6 +34,7 @@ class RuntimeUiEventRouter(
     private var runtimeSessionId: String? = null
     private var processedObservationSeq = 0L
     private var lastStatusElapsedNs = 0L
+    private var lastBootstrapSequence = 0L
 
     fun tick(): Result<RuntimeUiState> = runCatching {
         ensureSession()
@@ -46,10 +48,11 @@ class RuntimeUiEventRouter(
 
     fun reset(reason: String = "runtime disconnected") {
         onPointWalkCandidateReset(reason)
-        onRuntimeSessionLost(reason)
+        if (runtimeSessionId != null) onRuntimeSessionLost(reason)
         runtimeSessionId = null
         processedObservationSeq = 0L
         lastStatusElapsedNs = 0L
+        lastBootstrapSequence = 0L
         stateStore.reset(reason)
     }
 
@@ -59,20 +62,36 @@ class RuntimeUiEventRouter(
     }
 
     private fun ensureSession() {
-        val ready = bridge.connect().getOrThrow()
-        if (runtimeSessionId != ready.runtimeSessionId) {
+        val session = bridge.connect().getOrThrow()
+        if (runtimeSessionId != session.sessionId) {
             val previousSessionId = runtimeSessionId
             onPointWalkCandidateReset("runtime session changed")
-            onRuntimeSessionChanged(previousSessionId, ready.runtimeSessionId)
-            runtimeSessionId = ready.runtimeSessionId
+            onRuntimeSessionChanged(previousSessionId, session.sessionId)
+            runtimeSessionId = session.sessionId
             processedObservationSeq = 0L
             lastStatusElapsedNs = 0L
-            stateStore.accept(RuntimeUiEvent.Ready(ready))
+            lastBootstrapSequence = 0L
+            consumeBootstrap(session)
         }
     }
 
     private fun consume(event: BridgeEvent) {
         when (event) {
+            is BridgeEvent.BootstrapStatus -> {
+                consumeBootstrap(event.status)
+            }
+            is BridgeEvent.RuntimeReady -> {
+                val bootstrap = stateStore.snapshot().bootstrap
+                if (event.runtimeSessionId == runtimeSessionId && bootstrap != null &&
+                    bootstrap.phase == RuntimeBootstrapPhase.LIVE_READY &&
+                    bootstrap.strongIdentityVerified && event.strongIdentityVerified &&
+                    event.pid == bootstrap.pid && event.processName == bootstrap.processName &&
+                    event.buildFingerprint == bootstrap.gameBuild &&
+                    event.capabilities == bootstrap.capabilities &&
+                    isFresh(event.observedAtElapsedNs)) {
+                    stateStore.accept(RuntimeUiEvent.Ready(event))
+                }
+            }
             is BridgeEvent.RuntimeUiStatus -> consumeStatus(event.status)
             is BridgeEvent.ObservationEvent -> consumeObservation(event)
             is BridgeEvent.BindingLost -> reset(event.reason.ifBlank { "runtime binding lost" })
@@ -82,6 +101,27 @@ class RuntimeUiEventRouter(
             }
             else -> Unit
         }
+    }
+
+    private fun consumeBootstrap(status: dev.pogoroot.automation.bridge.RuntimeBootstrapStatus) {
+        // Broker replays the original observation time on reconnect. Its live
+        // authenticated socket and monotonic sequence supply freshness here.
+        if (status.sessionId != runtimeSessionId ||
+            status.observedAtElapsedNs <= 0L ||
+            status.observedAtElapsedNs > nowNanos() + CLOCK_SKEW_NS ||
+            status.sequence < lastBootstrapSequence) return
+        val previous = stateStore.snapshot().bootstrap
+        if (previous != null && previous.sessionId == status.sessionId &&
+            status.sequence == lastBootstrapSequence && status != previous) return
+        if (previous != null && previous.sessionId == status.sessionId &&
+            status.sequence > lastBootstrapSequence &&
+            (status.pid != previous.pid || status.processName != previous.processName ||
+                status.sequence != lastBootstrapSequence + 1L ||
+                previous.phase == RuntimeBootstrapPhase.FAILED ||
+                (status.phase != RuntimeBootstrapPhase.FAILED &&
+                    status.phase.wireValue != previous.phase.wireValue + 1))) return
+        lastBootstrapSequence = status.sequence
+        stateStore.accept(RuntimeUiEvent.Bootstrap(status))
     }
 
     private fun consumeStatus(status: dev.pogoroot.automation.bridge.RuntimeUiStatus) {

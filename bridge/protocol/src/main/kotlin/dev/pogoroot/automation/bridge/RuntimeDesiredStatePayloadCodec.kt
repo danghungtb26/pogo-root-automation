@@ -78,7 +78,7 @@ data class RuntimeDesiredStateRequest(
         require(pid > 0) { "desired state pid must be positive" }
         require(processName.isNotBlank()) { "desired state process is required" }
         require(packageName.isNotBlank()) { "desired state package is required" }
-        require(buildFingerprint.isNotBlank()) { "desired state build fingerprint is required" }
+        // Empty until the bootstrap status supplies a verified build identity.
         requireDesiredStateUtf8Size(runtimeSessionId, RuntimeDesiredState.MAX_LOGICAL_ID_BYTES, "session")
         requireDesiredStateUtf8Size(requestId, RuntimeDesiredState.MAX_LOGICAL_ID_BYTES, "request id")
         requireDesiredStateUtf8Size(processName, RuntimeDesiredState.MAX_LOGICAL_ID_BYTES, "process")

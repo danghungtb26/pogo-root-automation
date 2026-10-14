@@ -27,20 +27,13 @@ import dev.pogoroot.automation.bridge.RuntimeTransferConfig
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigPayloadCodec
 import dev.pogoroot.automation.bridge.RuntimeTransferConfigRequest
 import dev.pogoroot.automation.bridge.RuntimeFeatureModule
+import dev.pogoroot.automation.bridge.RuntimeBootstrapStatus
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
-
-data class RuntimeModuleLoadStatus(
-    val runtimeSessionId: String,
-    val module: RuntimeFeatureModule,
-    val loaded: Boolean,
-    val errorCode: String?,
-    val message: String?,
-)
 
 class RuntimeBridgeClient(
     private val socketName: String = DEFAULT_SOCKET_NAME,
@@ -56,6 +49,7 @@ class RuntimeBridgeClient(
     private val outputLock = Any()
     @Volatile private var socket: LocalSocket? = null
     @Volatile private var runtimeReady: BridgeEvent.RuntimeReady? = null
+    @Volatile private var bootstrapStatus: RuntimeBootstrapStatus? = null
     @Volatile private var readerError: Throwable? = null
     @Volatile private var readerExecutor: ExecutorService? = null
     @Volatile private var runtimeReadyListener: ((BridgeEvent.RuntimeReady) -> Unit)? = null
@@ -66,6 +60,9 @@ class RuntimeBridgeClient(
 
     override fun currentRuntimeReady(): BridgeEvent.RuntimeReady? =
         runtimeReady?.takeIf { connected }
+
+    fun currentBootstrapStatus(): RuntimeBootstrapStatus? =
+        bootstrapStatus?.takeIf { connected }
 
     fun setRuntimeReadyListener(listener: ((BridgeEvent.RuntimeReady) -> Unit)?) {
         runtimeReadyListener = listener
@@ -78,21 +75,7 @@ class RuntimeBridgeClient(
     override fun connect(): Result<BridgeEvent.RuntimeReady> {
         currentRuntimeReady()?.let { return Result.success(it) }
         return runCatching {
-            disconnect()
-            check(registerControllerUid()) { "cannot register controller UID with runtime broker" }
-            val next = LocalSocket()
-            next.connect(
-                LocalSocketAddress(
-                    socketName,
-                    LocalSocketAddress.Namespace.ABSTRACT,
-                ),
-            )
-            socket = next
-            readerError = null
-            val executor = Executors.newSingleThreadExecutor()
-            readerExecutor = executor
-            executor.execute { readLoop(next) }
-
+            connectSession().getOrThrow()
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(connectTimeoutMs)
             while (System.nanoTime() < deadline) {
                 val ready = events.findAndRemove { it is BridgeEvent.RuntimeReady }
@@ -114,6 +97,28 @@ class RuntimeBridgeClient(
         }
     }
 
+    fun connectSession(): Result<RuntimeBootstrapStatus> {
+        currentBootstrapStatus()?.let { return Result.success(it) }
+        return runCatching {
+            disconnect()
+            check(registerControllerUid()) { "cannot register controller UID with runtime broker" }
+            val next = LocalSocket()
+            next.connect(LocalSocketAddress(socketName, LocalSocketAddress.Namespace.ABSTRACT))
+            socket = next
+            readerError = null
+            val executor = Executors.newSingleThreadExecutor()
+            readerExecutor = executor
+            executor.execute { readLoop(next) }
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(connectTimeoutMs)
+            while (System.nanoTime() < deadline) {
+                currentBootstrapStatus()?.let { return@runCatching it }
+                readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
+                Thread.sleep(10L)
+            }
+            error("runtime bootstrap status timeout")
+        }.onFailure { disconnect() }
+    }
+
     fun receiveEvents(): Result<List<BridgeEvent>> = runCatching {
         readerError?.let { throw IllegalStateException("runtime bridge reader failed", it) }
         buildList {
@@ -133,17 +138,18 @@ class RuntimeBridgeClient(
         requestRuntimeControl(RuntimeControlAction.DIAGNOSTIC).map { Unit }
 
     fun submitDesiredState(state: RuntimeDesiredState): Result<DesiredStateReceipt> = runCatching {
-        val ready = currentRuntimeReady() ?: connect().getOrThrow()
+        val session = connectSession().getOrThrow()
+        val ready = currentRuntimeReady()?.takeIf { it.runtimeSessionId == session.sessionId }
         val requestId = "runtime-desired-state-${state.configRevision}-${System.nanoTime()}"
         val request = RuntimeDesiredStateRequest(
-            runtimeSessionId = ready.runtimeSessionId,
+            runtimeSessionId = session.sessionId,
             requestId = requestId,
             state = state,
             expiresAtElapsedNs = System.nanoTime() + CONTROL_TIMEOUT_NS,
-            pid = ready.pid,
-            processName = ready.processName,
-            packageName = ready.packageName,
-            buildFingerprint = ready.buildFingerprint,
+            pid = session.pid,
+            processName = session.processName,
+            packageName = ready?.packageName ?: session.processName,
+            buildFingerprint = ready?.buildFingerprint ?: session.gameBuild.orEmpty(),
         )
         val result = awaitAcceptedResult(requestId) {
             sendPayload(
@@ -152,7 +158,7 @@ class RuntimeBridgeClient(
             )
         }.getOrThrow()
         DesiredStateReceipt(
-            runtimeSessionId = ready.runtimeSessionId,
+            runtimeSessionId = session.sessionId,
             requestId = requestId,
             phase = result.phase,
             message = result.message,
@@ -252,6 +258,7 @@ class RuntimeBridgeClient(
         val oldSocket = socket
         socket = null
         runtimeReady = null
+        bootstrapStatus = null
         runtimeReadyListener = null
         readerError = null
         runCatching { oldSocket?.close() }
@@ -379,6 +386,16 @@ class RuntimeBridgeClient(
                     throw error
                 }
                 when (event) {
+                    is BridgeEvent.BootstrapStatus -> {
+                        val previous = bootstrapStatus
+                        if (previous == null || previous.sessionId != event.status.sessionId ||
+                            event.status.sequence >= previous.sequence) {
+                            if (previous?.sessionId != event.status.sessionId) runtimeReady = null
+                            bootstrapStatus = event.status
+                            events.add(event)
+                        }
+                    }
+
                     is BridgeEvent.RuntimeReady -> {
                         runtimeReady = event
                         Log.i(

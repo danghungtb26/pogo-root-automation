@@ -8,6 +8,7 @@ enum class CompanionMessageType {
     kRuntimeCapabilities,
     kRuntimeUiStatus,
     kRuntimeObservation,
+    kRuntimeBootstrapStatus,
 };
 
 bool read_length_prefixed_payload(int fd, std::vector<uint8_t> *payload) {
@@ -29,7 +30,8 @@ bool read_companion_message(
     std::vector<uint8_t> *runtime_result,
     std::vector<uint8_t> *runtime_capabilities,
     std::vector<uint8_t> *runtime_ui_status,
-    std::vector<uint8_t> *runtime_observation
+    std::vector<uint8_t> *runtime_observation,
+    std::vector<uint8_t> *runtime_bootstrap_status
 ) {
     uint8_t magic_bytes[4]{};
     if (message_type == nullptr || !read_full(fd, magic_bytes, sizeof(magic_bytes))) return false;
@@ -67,6 +69,11 @@ bool read_companion_message(
     if (magic == pogo_runtime::kRuntimeObservationMagic) {
         if (!read_length_prefixed_payload(fd, runtime_observation)) return false;
         *message_type = CompanionMessageType::kRuntimeObservation;
+        return true;
+    }
+    if (magic == kRuntimeBootstrapStatusMagic) {
+        if (!read_length_prefixed_payload(fd, runtime_bootstrap_status)) return false;
+        *message_type = CompanionMessageType::kRuntimeBootstrapStatus;
         return true;
     }
     return false;
@@ -119,6 +126,14 @@ bool broker_is_current(const char *runtime_session_id) {
         g_broker_session_id == runtime_session_id;
 }
 
+bool send_runtime_bootstrap_status(int fd, BrokerContext &context) {
+    std::vector<uint8_t> payload;
+    if (!pogo_runtime_bootstrap::encode(context.latest_bootstrap_status, &payload)) {
+        return false;
+    }
+    return send_bridge_frame(fd, 12U, context.next_message_seq++, payload);
+}
+
 bool send_runtime_ready_with_values(
     int fd,
     BrokerContext &context,
@@ -144,12 +159,6 @@ bool send_runtime_ready_with_values(
     append_u64(&payload, static_cast<uint64_t>(now_elapsed_nanos()));
     payload.push_back(strong_identity ? 1U : 0U);
     return send_bridge_frame(fd, 2U, message_seq, payload);
-}
-
-bool send_runtime_ready(int fd, BrokerContext &context) {
-    char fingerprint[192]{};
-    snprintf(fingerprint, sizeof(fingerprint), "unverified|%s", context.process_name);
-    return send_runtime_ready_with_values(fd, context, fingerprint, {}, false);
 }
 
 bool send_command_result(

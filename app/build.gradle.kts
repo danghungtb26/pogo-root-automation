@@ -35,6 +35,8 @@ val prepareBundledPogoModule = tasks.register("prepareBundledPogoModule") {
     inputs.file(canonicalModuleManifest)
     inputs.files(
         rootProject.fileTree("zygisk/jni"),
+        rootProject.fileTree("zygisk/loader"),
+        rootProject.fileTree("zygisk/runtime-core"),
         rootProject.fileTree("zygisk/module"),
         rootProject.files(
             rootProject.file("scripts/build-magisk.sh"),

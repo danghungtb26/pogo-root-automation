@@ -29,6 +29,13 @@ NINJA_BIN="${ANDROID_NINJA:-$(dirname "$CMAKE_BIN")/ninja}"
   || fail "NDK not found at $NDK_DIR; install ndk;28.2.13676358 or set ANDROID_NDK"
 [[ -x "$CMAKE_BIN" && -x "$NINJA_BIN" ]] || fail "install cmake;3.22.1 or set ANDROID_CMAKE and ANDROID_NINJA"
 for tool in zip unzip realpath; do command -v "$tool" >/dev/null || fail "missing $tool"; done
+READELF_BIN="${ANDROID_READELF:-}"
+if [[ -z "$READELF_BIN" ]]; then
+  for candidate in "$NDK_DIR"/toolchains/llvm/prebuilt/*/bin/llvm-readelf; do
+    if [[ -x "$candidate" ]]; then READELF_BIN="$candidate"; break; fi
+  done
+fi
+[[ -x "$READELF_BIN" ]] || fail "llvm-readelf not found in NDK; set ANDROID_READELF"
 BUILD_DIR="${BUILD_DIR:-$ROOT_DIR/build}"
 mkdir -p "$BUILD_DIR"
 BUILD_DIR="$(cd "$BUILD_DIR" && pwd)"
@@ -57,6 +64,8 @@ for abi in arm64-v8a x86_64; do
     -DANDROID_PLATFORM=android-28 "-DZYGISK_API_DIR=$API_DIR"
   "$CMAKE_BIN" --build "$BUILD_DIR/zygisk-$build_name" --parallel "${BUILD_JOBS:-4}"
 done
-"$ROOT_DIR/scripts/package-magisk.sh" \
+ANDROID_READELF="$READELF_BIN" "$ROOT_DIR/scripts/package-magisk.sh" \
   "$BUILD_DIR/zygisk-arm64/libpogo_root_automation.so" \
-  "$BUILD_DIR/zygisk-x86_64/libpogo_root_automation.so" "$OUTPUT_ZIP"
+  "$BUILD_DIR/zygisk-x86_64/libpogo_root_automation.so" \
+  "$BUILD_DIR/zygisk-arm64/libpogo_runtime_core.so" \
+  "$BUILD_DIR/zygisk-x86_64/libpogo_runtime_core.so" "$OUTPUT_ZIP"

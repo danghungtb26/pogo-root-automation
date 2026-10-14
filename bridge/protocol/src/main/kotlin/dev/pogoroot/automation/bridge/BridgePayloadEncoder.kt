@@ -8,6 +8,12 @@ internal object BridgePayloadEncoder {
     private val codec = BridgePayloadCodecSupport
 
     fun encode(event: BridgeEvent): Result<ByteArray> {
+        if (event is BridgeEvent.BootstrapStatus) {
+            return runCatching {
+                require(event.protocolVersion == BridgeProtocol.VERSION) { "bridge protocol mismatch" }
+                RuntimeBootstrapStatusPayloadCodec.encode(event.status).getOrThrow()
+            }
+        }
         if (event is BridgeEvent.RuntimeUiStatus) {
             return runCatching {
                 require(event.protocolVersion == BridgeProtocol.VERSION) {
@@ -23,8 +29,9 @@ internal object BridgePayloadEncoder {
                 output.writeInt(codec.PAYLOAD_VERSION)
                 when (event) {
                     is BridgeEvent.RuntimeStatus -> error(
-                        "legacy runtime status is not encodable under bridge protocol 3"
+                        "legacy runtime status is not encodable under bridge protocol 4"
                     )
+                    is BridgeEvent.BootstrapStatus -> error("bootstrap status is encoded above")
                     is BridgeEvent.RuntimeUiStatus -> error("runtime UI status is encoded above")
                     is BridgeEvent.RuntimeReady -> writeRuntimeReady(output, event)
                     is BridgeEvent.ObservationEvent -> writeObservation(output, event)

@@ -10,14 +10,22 @@ if(NOT EXISTS "${ZYGISK_API_DIR}/zygisk.hpp")
     message(FATAL_ERROR "zygisk.hpp not found in ${ZYGISK_API_DIR}; set -DZYGISK_API_DIR")
 endif()
 
-add_library(pogo_root_automation SHARED main.cpp)
+add_library(pogo_root_automation SHARED ../loader/main.cpp)
+add_library(pogo_runtime_core SHARED main.cpp)
 
 target_include_directories(
     pogo_root_automation
     PRIVATE
     ${ZYGISK_API_DIR}
 )
+target_include_directories(pogo_runtime_core PRIVATE ${ZYGISK_API_DIR})
 
 target_compile_features(pogo_root_automation PRIVATE cxx_std_17)
-target_compile_options(pogo_root_automation PRIVATE -Wall -Wextra -Werror)
+# The transport prelude still declares a few runtime-only helpers while the
+# single-translation-unit ownership is being separated.
+target_compile_options(pogo_root_automation PRIVATE -Wall -Wextra -Werror -Wno-unused-function)
 target_link_libraries(pogo_root_automation log dl)
+
+target_compile_features(pogo_runtime_core PRIVATE cxx_std_17)
+target_compile_options(pogo_runtime_core PRIVATE -Wall -Wextra -Werror -Wno-unused-function -fvisibility=hidden)
+target_link_libraries(pogo_runtime_core log dl)

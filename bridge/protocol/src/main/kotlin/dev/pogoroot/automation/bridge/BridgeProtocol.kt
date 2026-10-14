@@ -14,7 +14,7 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 object BridgeProtocol {
-    const val VERSION = 3
+    const val VERSION = 4
     const val OBSERVATION_PAYLOAD_VERSION = 1
     const val RUNTIME_ENCOUNTER_PAYLOAD_VERSION = 2
     const val RUNTIME_NEARBY_PAYLOAD_VERSION = 2
@@ -39,6 +39,7 @@ enum class BridgeMessageType(val wireValue: Int) {
     PONG(9),
     RUNTIME_STATUS(10),
     NEARBY_UPDATED(11),
+    RUNTIME_BOOTSTRAP_STATUS(12),
     ;
 
     companion object {
@@ -94,6 +95,14 @@ sealed interface BridgeEvent {
         get() = null
     val basedOnObservationSeq: Long?
         get() = null
+
+    data class BootstrapStatus(
+        val status: RuntimeBootstrapStatus,
+        override val protocolVersion: Int = BridgeProtocol.VERSION,
+    ) : BridgeEvent {
+        override val runtimeSessionId: String get() = status.sessionId
+        override val messageSeq: Long get() = status.sequence
+    }
 
     data class RuntimeStatus(
         override val protocolVersion: Int = BridgeProtocol.VERSION,
@@ -385,6 +394,7 @@ interface RuntimeBridge {
 }
 
 fun BridgeEvent.messageType(): BridgeMessageType = when (this) {
+    is BridgeEvent.BootstrapStatus -> BridgeMessageType.RUNTIME_BOOTSTRAP_STATUS
     is BridgeEvent.RuntimeStatus -> BridgeMessageType.RUNTIME_STATUS
     is BridgeEvent.RuntimeUiStatus -> BridgeMessageType.RUNTIME_STATUS
     is BridgeEvent.RuntimeReady -> BridgeMessageType.RUNTIME_READY

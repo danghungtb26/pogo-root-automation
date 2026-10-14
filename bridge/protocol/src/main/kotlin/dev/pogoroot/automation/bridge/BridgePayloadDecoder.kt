@@ -12,6 +12,9 @@ internal object BridgePayloadDecoder {
     private val codec = BridgePayloadCodecSupport
 
     fun decode(type: BridgeMessageType, payload: ByteArray): Result<BridgeEvent> {
+        if (type == BridgeMessageType.RUNTIME_BOOTSTRAP_STATUS) {
+            return RuntimeBootstrapStatusPayloadCodec.decode(payload).map(BridgeEvent::BootstrapStatus)
+        }
         if (type == BridgeMessageType.RUNTIME_STATUS) {
             return RuntimeUiStatusPayloadCodec.decode(payload).map {
                 BridgeEvent.RuntimeUiStatus(status = it)

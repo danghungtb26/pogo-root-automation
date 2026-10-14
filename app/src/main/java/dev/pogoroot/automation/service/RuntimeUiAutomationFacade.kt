@@ -2,6 +2,7 @@ package dev.pogoroot.automation.service
 
 import android.util.Log
 import dev.pogoroot.automation.bridge.RuntimeNativeLifecycle
+import dev.pogoroot.automation.bridge.RuntimeBootstrapPhase
 import dev.pogoroot.automation.config.AutomationConfigRepository
 import dev.pogoroot.automation.engine.CatchSpinArmState
 import dev.pogoroot.automation.config.HeadlessAutomationConfig
@@ -69,6 +70,8 @@ class RuntimeUiAutomationFacade(
     )
     @Volatile private var serviceRunning = false
     @Volatile private var lastSubmittedRevision: Long? = null
+    private var nextConnectAttemptNs = 0L
+    private var connectRetryMs = 500L
     private var poll: ScheduledFuture<*>? = null
 
     fun start() {
@@ -162,6 +165,7 @@ class RuntimeUiAutomationFacade(
     }
 
     private fun pollRuntime() {
+        if (System.nanoTime() < nextConnectAttemptNs) return
         val config = configRepository.read()
         if (lastSubmittedRevision != config.configRevision) {
             val result = client.submitDesiredState(
@@ -175,11 +179,24 @@ class RuntimeUiAutomationFacade(
                     "desired state submit failed revision=${config.configRevision}",
                     result.exceptionOrNull(),
                 )
+                if (!client.connected) {
+                    scheduleConnectRetry()
+                    return
+                }
             }
         }
-        router.tick().onFailure { error ->
+        router.tick().onSuccess {
+            nextConnectAttemptNs = 0L
+            connectRetryMs = 500L
+        }.onFailure { error ->
             Log.w(LOG_TAG, "runtime UI event poll failed", error)
+            scheduleConnectRetry()
         }
+    }
+
+    private fun scheduleConnectRetry() {
+        nextConnectAttemptNs = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(connectRetryMs)
+        connectRetryMs = (connectRetryMs * 2).coerceAtMost(8_000L)
     }
 
     private fun submitCurrentDesiredStateOnRuntimeThread(): Result<DesiredStateReceipt> {
@@ -202,6 +219,7 @@ class RuntimeUiAutomationFacade(
     ): RuntimeUiAutomationStatus {
         val native = state.nativeStatus
         val lifecycle = native?.nativeLifecycle
+        val bootstrap = state.bootstrap
         val ready = native?.ready == true && native.strongIdentityVerified
         return RuntimeUiAutomationStatus(
             running = serviceRunning,
@@ -210,31 +228,33 @@ class RuntimeUiAutomationFacade(
                 native?.runtimeSessionId ?: state.runtimeSessionId,
             ),
             runtimeSessionId = native?.runtimeSessionId ?: state.runtimeSessionId,
-            runtimeControlState = lifecycle.toControlState(client.connected),
+            runtimeControlState = bootstrap?.phase.toControlState(),
             runtimeModules = native?.modules?.associate { it.moduleName to it.state.name }.orEmpty(),
             runtimeStrongIdentityVerified = native?.strongIdentityVerified == true,
             runtimeCapabilities = native?.capabilities ?: state.ready?.capabilities.orEmpty(),
             runtimeMutationPermissionGranted = ready,
-            runtimeLifecycle = lifecycle?.name,
+            runtimeLifecycle = lifecycle?.name ?: bootstrap?.phase?.name,
             runtimeSuspended = config.enabled && !ready,
             observationSeq = state.lastObservationSeq,
             lastAction = state.lastAutomationEvent?.message,
-            lastError = state.lastError ?: native?.errorMessage ?: native?.errorCode,
+            lastError = bootstrap?.takeIf { it.phase == RuntimeBootstrapPhase.FAILED }?.let {
+                "${it.errorCode}: ${it.message.orEmpty()} (recoverable=${it.recoverable})"
+            } ?: state.lastError ?: native?.errorMessage ?: native?.errorCode,
         )
     }
 
-    private fun RuntimeNativeLifecycle?.toControlState(connected: Boolean): String = when (this) {
-        null -> if (connected) "ATTACHED_IDLE" else "DETACHED"
-        RuntimeNativeLifecycle.ATTACHED_IDLE -> "ATTACHED_IDLE"
-        RuntimeNativeLifecycle.STARTING,
-        RuntimeNativeLifecycle.DIAGNOSTIC_PENDING,
-        RuntimeNativeLifecycle.BINDING_READY,
-        RuntimeNativeLifecycle.APPLYING,
-        -> "STARTING"
-        RuntimeNativeLifecycle.READY -> "RUNNING"
-        RuntimeNativeLifecycle.STOPPING -> "STOPPING"
-        RuntimeNativeLifecycle.ERROR -> "ERROR"
-        RuntimeNativeLifecycle.UNKNOWN -> "ATTACHED_IDLE"
+    private fun RuntimeBootstrapPhase?.toControlState(): String = when (this) {
+        null -> "WAITING_FOR_GAME"
+        RuntimeBootstrapPhase.CREATED -> "ATTACHING"
+        RuntimeBootstrapPhase.CORE_LOADED,
+        RuntimeBootstrapPhase.LOADER_OBSERVER_ACTIVE,
+        RuntimeBootstrapPhase.IL2CPP_LIBRARY_SEEN,
+        RuntimeBootstrapPhase.IL2CPP_INITIALIZED -> "INITIALIZING"
+        RuntimeBootstrapPhase.BUILD_VERIFIED,
+        RuntimeBootstrapPhase.MAIN_THREAD_READY,
+        RuntimeBootstrapPhase.BINDINGS_READY -> "VERIFYING"
+        RuntimeBootstrapPhase.LIVE_READY -> "LIVE_READY"
+        RuntimeBootstrapPhase.FAILED -> "FAILED"
     }
 
     private fun mapDesiredState(

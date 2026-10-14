@@ -3,6 +3,8 @@ bool send_runtime_capability_update(
     const RuntimeBinding &binding,
     bool map_live_verified = false
 ) {
+    if (g_runtime_bootstrap_phase.load(std::memory_order_acquire) !=
+        pogo_runtime_bootstrap::Phase::kLiveReady) return false;
     if (!binding.exact_build_verified) return false;
     std::vector<std::string> capabilities;
     capabilities.emplace_back(pogo_runtime::kPointWalkCandidateCapability);

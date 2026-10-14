@@ -11,37 +11,22 @@ void *binding_probe_thread(void *opaque_context) {
     copy_string(event.process_name, sizeof(event.process_name), context->process_name);
     copy_string(event.translation_layer, sizeof(event.translation_layer), "none");
 
-    for (int attempt = 0; attempt < kProbeAttempts; ++attempt) {
-        const bool il2cpp_loaded = find_mapping_path(
-            "libil2cpp.so", event.il2cpp_path, sizeof(event.il2cpp_path)
-        );
-        const bool unity_loaded = find_mapping_path(
-            "libunity.so", event.unity_path, sizeof(event.unity_path)
-        );
-        if (il2cpp_loaded) event.probe_flags |= kIl2cppLoaded;
-        if (unity_loaded) event.probe_flags |= kUnityLoaded;
-        if (mapping_contains("libhoudini")) {
-            event.probe_flags |= kHoudiniTranslation;
-            copy_string(event.translation_layer, sizeof(event.translation_layer), "houdini");
-        } else if (mapping_contains("libndk_translation")) {
-            event.probe_flags |= kNdkTranslation;
-            copy_string(event.translation_layer, sizeof(event.translation_layer), "ndk_translation");
-        }
-        if (il2cpp_loaded) {
-            Il2CppApi resolved_api{};
-            const bool api_ready = probe_il2cpp_runtime(&event, &resolved_api);
-            copy_string(
-                context->il2cpp_path,
-                sizeof(context->il2cpp_path),
-                event.il2cpp_path
-            );
-            if (api_ready) {
-                context->il2cpp_api = resolved_api;
-                context->il2cpp_api_ready = true;
-                break;
-            }
-        }
-        usleep(kProbeDelayUs);
+    // Mapping is diagnostic only. A mapped libil2cpp does not prove that
+    // il2cpp_init returned, so do not resolve or call managed APIs here.
+    if (find_mapping_path("libil2cpp.so", event.il2cpp_path,
+            sizeof(event.il2cpp_path))) {
+        event.probe_flags |= kIl2cppLoaded;
+        copy_string(context->il2cpp_path, sizeof(context->il2cpp_path),
+            event.il2cpp_path);
+    }
+    if (find_mapping_path("libunity.so", event.unity_path,
+            sizeof(event.unity_path))) event.probe_flags |= kUnityLoaded;
+    if (mapping_contains("libhoudini")) {
+        event.probe_flags |= kHoudiniTranslation;
+        copy_string(event.translation_layer, sizeof(event.translation_layer), "houdini");
+    } else if (mapping_contains("libndk_translation")) {
+        event.probe_flags |= kNdkTranslation;
+        copy_string(event.translation_layer, sizeof(event.translation_layer), "ndk_translation");
     }
 
     event.probe_flags |= kProbeComplete;
@@ -74,8 +59,19 @@ void *binding_probe_thread(void *opaque_context) {
         "runtime host module registration complete success=%d",
         modules_registered ? 1 : 0
     );
+    if (!modules_registered) {
+        pogo_runtime_bootstrap::Status failure;
+        failure.phase = pogo_runtime_bootstrap::Phase::kFailed;
+        failure.error_code = "runtime_module_registry_uninitialized";
+        failure.message = "runtime feature module registry failed to initialize";
+        if (!publish_runtime_bootstrap_status(*context, std::move(failure))) {
+            __android_log_print(ANDROID_LOG_ERROR, kLogTag,
+                "failed to publish bootstrap module registry error");
+        }
+    }
 
-    // Feature modules auto-enable natively after CONFIG_SET and map readiness.
+    // Command receipt stays available while lifecycle and gameplay gates are
+    // closed. A future verified lifecycle owner may advance bootstrap phase.
     runtime_command_channel_loop(*context);
     close(context->fd);
     delete context;

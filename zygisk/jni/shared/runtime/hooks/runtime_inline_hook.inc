@@ -1,3 +1,11 @@
+struct RuntimeInlineHook {
+    void *target = nullptr;
+    void *trampoline = nullptr;
+    size_t trampoline_bytes = 0U;
+    uint8_t original[16]{};
+    bool installed = false;
+};
+
 #if defined(__aarch64__)
 constexpr size_t kInlineHookPatchBytes = 16U;
 constexpr size_t kInlineHookTrampolineBytes = 128U;
@@ -22,6 +30,26 @@ void write_absolute_branch(uint8_t *destination, const void *target) {
 
 bool is_adrp(uint32_t instruction) {
     return (instruction & 0x9F000000U) == 0x90000000U;
+}
+
+// The lifecycle observer has no pinned linker image. Copy only instructions
+// whose meaning is unchanged at the trampoline PC; ADRP is relocated below.
+// An unrecognized prologue refuses installation instead of guessing an A64
+// relocation (notably branches, ADR and literal loads).
+bool is_lifecycle_relocatable(uint32_t instruction) {
+    if (is_adrp(instruction)) return true;
+    // The 16-byte absolute branch replaces the landing instruction. Refuse
+    // BTI-enabled entries until a BTI-preserving patch sequence exists.
+    if (instruction == 0xD503201FU ||
+        instruction == 0xD503233FU || instruction == 0xD503237FU) return true;
+    if ((instruction & 0x3A000000U) == 0x28000000U ||
+        (instruction & 0x1F000000U) == 0x11000000U ||
+        (instruction & 0x1F000000U) == 0x0A000000U ||
+        (instruction & 0x1F800000U) == 0x12800000U ||
+        (instruction & 0x3B000000U) == 0x39000000U ||
+        (instruction & 0x3B200000U) == 0x38000000U ||
+        (instruction & 0xFFE00000U) == 0xD5200000U) return true;
+    return false;
 }
 
 uintptr_t adrp_target(uint32_t instruction, uintptr_t source_pc) {
@@ -59,7 +87,16 @@ bool patch_inline_hook(RuntimeInlineHook *hook, const uint8_t *bytes) {
         static_cast<char *>(hook->target),
         static_cast<char *>(hook->target) + sizeof(hook->original)
     );
-    return make_code_range_writable(hook->target, sizeof(hook->original), PROT_READ | PROT_EXEC);
+    if (make_code_range_writable(
+            hook->target, sizeof(hook->original), PROT_READ | PROT_EXEC)) return true;
+    memcpy(hook->target, hook->original, sizeof(hook->original));
+    __builtin___clear_cache(
+        static_cast<char *>(hook->target),
+        static_cast<char *>(hook->target) + sizeof(hook->original)
+    );
+    (void)make_code_range_writable(
+        hook->target, sizeof(hook->original), PROT_READ | PROT_EXEC);
+    return false;
 }
 
 bool install_inline_hook(
@@ -132,6 +169,20 @@ bool install_inline_hook(
     }
     hook->installed = true;
     return true;
+}
+
+bool install_checked_lifecycle_hook(
+    RuntimeInlineHook *hook,
+    const void *target,
+    const void *replacement
+) {
+    if (target == nullptr || reinterpret_cast<uintptr_t>(target) % 4U != 0U) return false;
+    uint32_t prologue[4]{};
+    memcpy(prologue, target, sizeof(prologue));
+    for (const uint32_t instruction : prologue) {
+        if (!is_lifecycle_relocatable(instruction)) return false;
+    }
+    return install_inline_hook(hook, target, prologue, replacement);
 }
 
 void uninstall_inline_hook(RuntimeInlineHook *hook) {

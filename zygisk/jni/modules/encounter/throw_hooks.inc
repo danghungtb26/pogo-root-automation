@@ -18,13 +18,7 @@ struct ThrowHookMethodInfoView {
     const void *method_pointer = nullptr;
 };
 
-struct RuntimeInlineHook {
-    void *target = nullptr;
-    void *trampoline = nullptr;
-    size_t trampoline_bytes = 0U;
-    uint8_t original[16]{};
-    bool installed = false;
-};
+#include "../../shared/runtime/hooks/runtime_inline_hook.inc"
 
 using PokeballLaunchFunction = void (*)(void *, float, float, const void *);
 using PokeballBsuzFunction = void (*)(void *, HookPokeballThrow, const void *);
@@ -181,7 +175,6 @@ bool bind_runtime_throw_methods(
     return binding->throw_hook_binding_verified;
 }
 
-#include "runtime_throw_trampoline.inc"
 
 #if defined(__aarch64__)
 void queue_throw_hook_event(

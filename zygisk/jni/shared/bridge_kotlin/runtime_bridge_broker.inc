@@ -1,256 +1,227 @@
-bool handle_controller(int fd, BrokerContext &context) {
-    if (!authorized_controller(fd)) return true;
-    if (!send_runtime_ready(fd, context)) return true;
-    if (!context.latest_runtime_ui_status.empty()) {
-        std::vector<uint8_t> status_payload;
-        if (!rewrite_runtime_ui_status_session(
-                context.latest_runtime_ui_status,
-                context.runtime_session_id,
-                &status_payload
-            ) || !send_bridge_frame(
-                fd,
-                10U,
-                context.next_message_seq++,
-                status_payload
-            )) return true;
+void persist_runtime_state(const RuntimeState &state);
+
+using BrokerRequestOwners = std::unordered_map<std::string, int>;
+
+void broker_drop_client(
+    std::vector<int> *clients,
+    BrokerRequestOwners *requests,
+    int fd
+) {
+    if (clients == nullptr || requests == nullptr) return;
+    close(fd);
+    clients->erase(std::remove(clients->begin(), clients->end(), fd), clients->end());
+    for (auto it = requests->begin(); it != requests->end();) {
+        if (it->second == fd) it = requests->erase(it);
+        else ++it;
+    }
+}
+
+template <typename Sender>
+void broker_broadcast(
+    std::vector<int> *clients,
+    BrokerRequestOwners *requests,
+    Sender send
+) {
+    const std::vector<int> recipients = *clients;
+    for (int fd : recipients) {
+        if (!send(fd)) broker_drop_client(clients, requests, fd);
+    }
+}
+
+bool broker_accept_probe_event(BrokerContext *context, const RuntimeEvent &event) {
+    if (context == nullptr || event.magic != kRuntimeEventMagic ||
+        event.protocol_version != kRuntimeProtocolVersion ||
+        event.event_type != static_cast<uint32_t>(RuntimeEventType::kBindingProbe) ||
+        event.pid != context->pid ||
+        strnlen(event.process_name, sizeof(event.process_name)) >=
+            sizeof(event.process_name) ||
+        strnlen(event.il2cpp_path, sizeof(event.il2cpp_path)) >=
+            sizeof(event.il2cpp_path) ||
+        strnlen(event.unity_path, sizeof(event.unity_path)) >=
+            sizeof(event.unity_path) ||
+        strnlen(event.translation_layer, sizeof(event.translation_layer)) >=
+            sizeof(event.translation_layer) ||
+        strnlen(event.assembly_csharp_name, sizeof(event.assembly_csharp_name)) >=
+            sizeof(event.assembly_csharp_name) ||
+        strnlen(event.candidate_classes, sizeof(event.candidate_classes)) >=
+            sizeof(event.candidate_classes) ||
+        strcmp(event.process_name, context->process_name) != 0) return false;
+
+    RuntimeState &state = context->state;
+    state.probe_flags = event.probe_flags;
+    state.runtime_message_seq += 1U;
+    state.il2cpp_symbol_count = event.il2cpp_symbol_count;
+    state.il2cpp_required_symbol_count = event.il2cpp_required_symbol_count;
+    state.assembly_count = event.assembly_count;
+    state.class_count = event.class_count;
+    state.candidate_class_count = event.candidate_class_count;
+    copy_string(state.il2cpp_path, sizeof(state.il2cpp_path), event.il2cpp_path);
+    copy_string(state.unity_path, sizeof(state.unity_path), event.unity_path);
+    copy_string(state.translation_layer, sizeof(state.translation_layer), event.translation_layer);
+    copy_string(state.assembly_csharp_name, sizeof(state.assembly_csharp_name),
+        event.assembly_csharp_name);
+    copy_string(state.candidate_classes, sizeof(state.candidate_classes), event.candidate_classes);
+    persist_runtime_state(state);
+    return true;
+}
+
+bool broker_read_runtime(
+    BrokerContext *context,
+    std::vector<int> *clients,
+    BrokerRequestOwners *requests
+) {
+    CompanionMessageType message_type{};
+    RuntimeEvent event{};
+    std::vector<uint8_t> result;
+    std::vector<uint8_t> capabilities_payload;
+    std::vector<uint8_t> ui_status;
+    std::vector<uint8_t> observation;
+    std::vector<uint8_t> bootstrap_status_payload;
+    if (!read_companion_message(context->runtime_fd, &message_type, &event, &result,
+            &capabilities_payload, &ui_status, &observation,
+            &bootstrap_status_payload)) return false;
+
+    if (message_type == CompanionMessageType::kRuntimeBootstrapStatus) {
+        pogo_runtime_bootstrap::Status update;
+        if (!pogo_runtime_bootstrap::decode(bootstrap_status_payload, &update) ||
+            update.pid != context->pid || update.process_name != context->process_name ||
+            update.sequence <= context->last_runtime_bootstrap_sequence ||
+            update.observed_at_elapsed_ns <
+                context->latest_bootstrap_status.observed_at_elapsed_ns ||
+            context->latest_bootstrap_status.phase ==
+                pogo_runtime_bootstrap::Phase::kFailed ||
+            static_cast<uint32_t>(update.phase) <=
+                static_cast<uint32_t>(context->latest_bootstrap_status.phase) ||
+            (update.phase != pogo_runtime_bootstrap::Phase::kFailed &&
+             static_cast<uint32_t>(update.phase) >
+                static_cast<uint32_t>(context->latest_bootstrap_status.phase) + 1U)) {
+            return false;
+        }
+        context->last_runtime_bootstrap_sequence = update.sequence;
+        update.session_id = context->runtime_session_id;
+        update.sequence = context->latest_bootstrap_status.sequence + 1U;
+        context->latest_bootstrap_status = std::move(update);
+        if (context->latest_bootstrap_status.phase !=
+            pogo_runtime_bootstrap::Phase::kLiveReady) {
+            context->has_runtime_ready = false;
+            context->strong_identity = false;
+            context->build_fingerprint.clear();
+            context->runtime_capabilities.clear();
+            context->latest_runtime_ui_status.clear();
+        }
+        broker_broadcast(clients, requests, [&](int fd) {
+            return send_runtime_bootstrap_status(fd, *context);
+        });
+        return true;
     }
 
-    while (kill(context.pid, 0) == 0) {
-        if (!broker_is_current(context.runtime_session_id)) return false;
-        pollfd descriptors[2]{};
-        descriptors[0].fd = fd;
-        descriptors[0].events = POLLIN;
-        descriptors[1].fd = context.runtime_fd;
-        descriptors[1].events = POLLIN;
-        if (poll(descriptors, 2, 1000) <= 0) continue;
-
-        if ((descriptors[1].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) return false;
-        if ((descriptors[1].revents & POLLIN) != 0) {
-            CompanionMessageType message_type{};
-            RuntimeEvent runtime_event{};
-                std::vector<uint8_t> runtime_result;
-                std::vector<uint8_t> runtime_capabilities;
-                std::vector<uint8_t> runtime_ui_status;
-                std::vector<uint8_t> runtime_observation;
-            if (!read_companion_message(
-                    context.runtime_fd,
-                    &message_type,
-                    &runtime_event,
-                    &runtime_result,
-                    &runtime_capabilities,
-                    &runtime_ui_status,
-                    &runtime_observation
-                )) {
-                return false;
-            }
-            if (message_type == CompanionMessageType::kRuntimeResult) {
-                std::string command_id;
-                uint32_t phase = 0U;
-                std::string error_code;
-                std::string message;
-                uint32_t catch_outcome_wire = 0U;
-                std::string captured_pokemon_id;
-                if (!parse_runtime_result(
-                        runtime_result,
-                        &command_id,
-                        &phase,
-                        &error_code,
-                        &message,
-                        &catch_outcome_wire,
-                        &captured_pokemon_id
-                    ) ||
-                    !send_command_result(
-                        fd,
-                        context,
-                        command_id.c_str(),
-                        phase,
-                        error_code.c_str(),
-                        message.c_str(),
-                        catch_outcome_wire,
-                        captured_pokemon_id.c_str()
-                    )) {
-                    return true;
-                }
-            }
-            if (message_type == CompanionMessageType::kRuntimeCapabilities) {
-                std::string fingerprint;
-                std::vector<std::string> capabilities;
-                bool strong_identity = false;
-                const bool parsed = parse_runtime_capabilities(
-                        runtime_capabilities,
-                        &fingerprint,
-                        &capabilities,
-                        &strong_identity
-                    );
-                __android_log_print(
-                    parsed ? ANDROID_LOG_INFO : ANDROID_LOG_WARN,
-                    kLogTag,
-                    "broker runtime capabilities parsed=%d bytes=%zu count=%zu strong=%d",
-                    parsed ? 1 : 0,
-                    runtime_capabilities.size(),
-                    capabilities.size(),
-                    strong_identity ? 1 : 0
-                );
-                if (!parsed || !send_runtime_ready_with_values(
-                        fd,
-                        context,
-                        fingerprint.c_str(),
-                        capabilities,
-                        strong_identity
-                )) return false;
-            }
-            if (message_type == CompanionMessageType::kRuntimeUiStatus) {
-                if (runtime_ui_status.empty() ||
-                    runtime_ui_status.size() > kBridgeHardMessageBytes) return false;
-                // One bounded snapshot is retained. Reconnect replays this
-                // latest status only; command/result traffic is never queued.
-                context.latest_runtime_ui_status = runtime_ui_status;
-                std::vector<uint8_t> status_payload;
-                if (!rewrite_runtime_ui_status_session(
-                        runtime_ui_status,
-                        context.runtime_session_id,
-                        &status_payload
-                    )) return false;
-                const uint64_t message_seq = context.next_message_seq++;
-                if (!send_bridge_frame(fd, 10U, message_seq, status_payload)) return false;
-            }
-            if (message_type == CompanionMessageType::kRuntimeObservation) {
-                uint32_t observation_type = 0U;
-                uint32_t payload_version = 0U;
-                std::vector<uint8_t> map_target_payload;
-                uint64_t observed_at_epoch_ms = 0U;
-                uint64_t observed_at_elapsed_ns = 0U;
-                if (!parse_runtime_observation_envelope(
-                        runtime_observation,
-                        &observation_type,
-                        &payload_version,
-                        &map_target_payload,
-                        &observed_at_epoch_ms,
-                        &observed_at_elapsed_ns
-                    )) return false;
-                if (observation_type == pogo_runtime::kMapTargetObservationType &&
-                    payload_version == pogo_runtime::kMapTargetPayloadVersion) {
-                    if (!send_map_target_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kEncounterObservationType &&
-                    payload_version == pogo_runtime::kRuntimeEncounterPayloadVersion) {
-                    if (!send_runtime_encounter_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                        observed_at_elapsed_ns
-                    )) return false;
-                } else if (observation_type == 2U &&
-                    payload_version == pogo_runtime::kRuntimeNearbyPayloadVersion) {
-                    if (!send_runtime_nearby_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kFortsObservationType &&
-                    payload_version == pogo_runtime::kRuntimeFortsPayloadVersion) {
-                    if (!send_runtime_forts_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kInventoryObservationType &&
-                    payload_version == pogo_runtime::kRuntimeInventoryPayloadVersion) {
-                    if (!send_runtime_inventory_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                        observed_at_elapsed_ns
-                    )) return false;
-                } else if (observation_type == pogo_runtime::kCatchSpinRequestObservationType &&
-                    payload_version == pogo_runtime::kRuntimeCatchSpinPayloadVersion) {
-                    if (!send_runtime_catch_spin_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kAutomationEventObservationType &&
-                    payload_version == pogo_runtime::kRuntimeAutomationEventPayloadVersion) {
-                    if (!send_runtime_automation_event_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kNavigationObservationType &&
-                    payload_version == pogo_runtime::kNavigationPayloadVersion) {
-                    if (!send_runtime_navigation_observation(fd, context, map_target_payload,
-                            observed_at_epoch_ms, observed_at_elapsed_ns)) return false;
-                } else if (observation_type == pogo_runtime::kPointWalkCandidateObservationType &&
-                    payload_version == pogo_runtime::kPointWalkCandidatePayloadVersion) {
-                    if (!send_runtime_walk_candidate_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                } else if (observation_type == pogo_runtime::kLifecycleObservationType &&
-                    payload_version == pogo_runtime::kLifecyclePayloadVersion &&
-                    map_target_payload.size() == 4U) {
-                    uint32_t lifecycle_wire = 0U;
-                    size_t lifecycle_offset = 0U;
-                    if (!read_be32(map_target_payload, &lifecycle_offset, &lifecycle_wire) ||
-                        lifecycle_wire == 0U || lifecycle_wire > 7U ||
-                        !send_runtime_lifecycle_observation(
-                            fd,
-                            context,
-                            map_target_payload,
-                            lifecycle_wire,
-                            observed_at_epoch_ms,
-                            observed_at_elapsed_ns
-                        )) return false;
-                }
-            }
+    if (message_type == CompanionMessageType::kRuntimeEvent) {
+        return broker_accept_probe_event(context, event);
+    }
+    if (message_type == CompanionMessageType::kRuntimeResult) {
+        std::string command_id;
+        uint32_t phase = 0U;
+        std::string error_code;
+        std::string message;
+        uint32_t catch_outcome_wire = 0U;
+        std::string captured_pokemon_id;
+        if (!parse_runtime_result(result, &command_id, &phase, &error_code, &message,
+                &catch_outcome_wire, &captured_pokemon_id)) return false;
+        const auto owner = requests->find(command_id);
+        if (owner == requests->end()) return true;
+        const int fd = owner->second;
+        if (!send_command_result(fd, *context, command_id.c_str(), phase,
+                error_code.c_str(), message.c_str(), catch_outcome_wire,
+                captured_pokemon_id.c_str())) {
+            broker_drop_client(clients, requests, fd);
+        } else if (phase >= 3U) {
+            requests->erase(command_id);
         }
-
-        if ((descriptors[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) return true;
-        if ((descriptors[0].revents & POLLIN) != 0) {
-            uint16_t message_type = 0U;
-            uint64_t message_seq = 0U;
-            std::vector<uint8_t> payload;
-            if (!read_bridge_frame(fd, &message_type, &message_seq, &payload)) return true;
-            if (message_type != kBridgeCommandType) continue;
-
-            __android_log_print(
-                ANDROID_LOG_INFO,
-                kLogTag,
-                "bridge controller command received seq=%llu bytes=%zu",
-                static_cast<unsigned long long>(message_seq),
-                payload.size()
-            );
-
-            size_t offset = 0U;
-            uint32_t payload_version = 0U;
-            std::string session_id;
-            std::string command_id;
-            if (!read_be32(payload, &offset, &payload_version) || payload_version != 1U ||
-                !read_string(payload, &offset, &session_id) ||
-                !read_string(payload, &offset, &command_id) ||
-                session_id != context.runtime_session_id) return true;
-            if (!send_runtime_command(context.runtime_fd, message_type, message_seq, payload)) return false;
-        }
+        return true;
+    }
+    if (message_type == CompanionMessageType::kRuntimeCapabilities) {
+        std::string fingerprint;
+        std::vector<std::string> parsed;
+        bool strong = false;
+        if (!parse_runtime_capabilities(capabilities_payload, &fingerprint, &parsed,
+                &strong)) return false;
+        if (context->latest_bootstrap_status.phase !=
+                pogo_runtime_bootstrap::Phase::kLiveReady ||
+            !strong || fingerprint.empty()) return true;
+        std::sort(parsed.begin(), parsed.end());
+        if (std::adjacent_find(parsed.begin(), parsed.end()) != parsed.end() ||
+            fingerprint != context->latest_bootstrap_status.game_build ||
+            parsed != context->latest_bootstrap_status.capabilities) return false;
+        context->has_runtime_ready = true;
+        context->strong_identity = strong;
+        context->build_fingerprint = fingerprint;
+        context->runtime_capabilities = parsed;
+        broker_broadcast(clients, requests, [&](int fd) {
+            return send_runtime_ready_with_values(fd, *context, fingerprint.c_str(),
+                parsed, strong);
+        });
+        return true;
+    }
+    if (message_type == CompanionMessageType::kRuntimeUiStatus) {
+        if (context->latest_bootstrap_status.phase !=
+            pogo_runtime_bootstrap::Phase::kLiveReady) return true;
+        if (ui_status.empty() || ui_status.size() > kBridgeHardMessageBytes) return false;
+        std::vector<uint8_t> payload;
+        if (!rewrite_runtime_ui_status_session(ui_status,
+                context->runtime_session_id, &payload)) return false;
+        context->latest_runtime_ui_status = ui_status;
+        broker_broadcast(clients, requests, [&](int fd) {
+            return send_bridge_frame(fd, 10U, context->next_message_seq++, payload);
+        });
+        return true;
+    }
+    if (message_type == CompanionMessageType::kRuntimeObservation) {
+        if (context->latest_bootstrap_status.phase !=
+            pogo_runtime_bootstrap::Phase::kLiveReady) return true;
+        broker_broadcast(clients, requests, [&](int fd) {
+            return forward_runtime_observation(fd, *context, observation);
+        });
+        return true;
     }
     return false;
+}
+
+bool broker_forward_controller_command(
+    BrokerContext *context,
+    int fd,
+    uint64_t *last_sequence,
+    BrokerRequestOwners *requests,
+    bool *runtime_alive
+) {
+    uint16_t message_type = 0U;
+    uint64_t message_seq = 0U;
+    std::vector<uint8_t> payload;
+    if (!read_bridge_frame(fd, &message_type, &message_seq, &payload)) return false;
+    if (message_seq <= *last_sequence) return false;
+    *last_sequence = message_seq;
+    if (message_type != kBridgeCommandType) return true;
+
+    size_t offset = 0U;
+    uint32_t payload_version = 0U;
+    std::string session_id;
+    std::string command_id;
+    if (!read_be32(payload, &offset, &payload_version) || payload_version != 1U ||
+        !read_string(payload, &offset, &session_id) ||
+        !read_string(payload, &offset, &command_id) || command_id.empty() ||
+        session_id != context->runtime_session_id || requests->size() >= 1024U ||
+        requests->find(command_id) != requests->end()) return false;
+    if (context->latest_bootstrap_status.phase ==
+            pogo_runtime_bootstrap::Phase::kFailed || context->runtime_fd < 0) {
+        return send_command_result(fd, *context, command_id.c_str(),
+            kCommandPhaseRejected, "runtime_failed",
+            context->latest_bootstrap_status.error_code.c_str());
+    }
+    if (!send_runtime_command(context->runtime_fd, message_type, message_seq, payload)) {
+        *runtime_alive = false;
+        return false;
+    }
+    requests->emplace(command_id, fd);
+    return true;
 }
 
 bool finish_runtime_bridge_broker(const char *runtime_session_id) {
@@ -261,83 +232,4 @@ bool finish_runtime_bridge_broker(const char *runtime_session_id) {
         return true;
     }
     return false;
-}
-
-void *runtime_bridge_broker_thread(void *opaque_context) {
-    auto *context = static_cast<BrokerContext *>(opaque_context);
-    if (context == nullptr) {
-        return nullptr;
-    }
-
-    int server = -1;
-    {
-        // Serialize socket replacement with a newer session starting. A stale
-        // broker may still be unwinding, but it must never remove the current
-        // session's socket during cleanup.
-        std::lock_guard<std::mutex> lock(g_broker_mutex);
-        if (g_broker_session_id != context->runtime_session_id) {
-            close(context->runtime_fd);
-            delete context;
-            return nullptr;
-        }
-        server = make_bridge_server();
-    }
-    if (server < 0) {
-        __android_log_print(ANDROID_LOG_ERROR, kLogTag, "cannot create runtime bridge socket");
-        close(context->runtime_fd);
-        finish_runtime_bridge_broker(context->runtime_session_id);
-        delete context;
-        return nullptr;
-    }
-
-    while (kill(context->pid, 0) == 0 && broker_is_current(context->runtime_session_id)) {
-        pollfd descriptor{};
-        descriptor.fd = server;
-        descriptor.events = POLLIN;
-        const int polled = poll(&descriptor, 1, 1000);
-        if (polled <= 0) continue;
-        if (!broker_is_current(context->runtime_session_id)) break;
-        const int client = accept4(server, nullptr, nullptr, SOCK_CLOEXEC);
-        if (client < 0) continue;
-        const bool runtime_alive = handle_controller(client, *context);
-        close(client);
-        if (!runtime_alive) break;
-    }
-
-    close(server);
-    close(context->runtime_fd);
-    finish_runtime_bridge_broker(context->runtime_session_id);
-    delete context;
-    return nullptr;
-}
-
-void start_runtime_bridge_broker(const RuntimeState &state, int runtime_fd) {
-    if (runtime_fd < 0) return;
-    {
-        std::lock_guard<std::mutex> lock(g_broker_mutex);
-        if (g_broker_running && g_broker_session_id == state.runtime_session_id) {
-            close(runtime_fd);
-            return;
-        }
-        g_broker_running = true;
-        g_broker_session_id = state.runtime_session_id;
-    }
-
-    auto *context = new BrokerContext{};
-    context->pid = state.pid;
-    context->runtime_fd = runtime_fd;
-    copy_string(context->process_name, sizeof(context->process_name), state.process_name);
-    copy_string(
-        context->runtime_session_id,
-        sizeof(context->runtime_session_id),
-        state.runtime_session_id
-    );
-    pthread_t thread{};
-    if (pthread_create(&thread, nullptr, runtime_bridge_broker_thread, context) != 0) {
-        close(runtime_fd);
-        delete context;
-        finish_runtime_bridge_broker(state.runtime_session_id);
-        return;
-    }
-    pthread_detach(thread);
 }

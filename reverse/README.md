@@ -11,6 +11,30 @@ bỏ; không tạo lại script tương đương.
 - `rea/rea-evidence-2026-10-13.json`: bundle Evidence deterministic, hiện có
   35 record, 2 residual-unknown identity và 4 revision record; SHA-256
   `62249426b6119f4f74a4490e2ba2202704de362fda2f6e1dce837a37efaa55bf`.
+- `rea/rea-evidence-2026-10-14-startup-connection.json`: bundle kế tiếp cho
+  phân tích startup connection so với PGS Root 1.0.15, gồm 48 record và 4
+  unknown revision; SHA-256
+  `fc3065d35500caaf914a77b70dbaec93026ea9af0986db88cc828a082ca956b2`.
+  Bundle bổ sung JADX Evidence cho manager lifecycle, nút launch game, kiểm
+  module/core và callback cài module; static evidence không chứng minh runtime.
+- `rea/rea-evidence-2026-10-14-libhela-loader.json`: 5 record REA CLI từ
+  Ghidra project `libhela-1.273.1/` read-only, gồm string/procedure search,
+  xref và dossier `__cxa_guard_enter` tại địa chỉ phân tích `0x29b640`;
+  SHA-256 `d761bcdbd18f8ef39aaf5663f92acf3506053675bede483b2917f94759138d43`.
+  Snapshot làm việc ở `build/rea/` không thay thế bundle này; địa chỉ Ghidra
+  cần đối chiếu image base và file mapping trước khi gọi là RVA.
+- `rea/rea-evidence-2026-10-14-libhela-hook-path.json`: 10 record REA CLI
+  read-only trên cùng artifact, mở rộng đường tĩnh từ `__cxa_guard_enter` qua
+  wrapper `0x914084`, dispatcher `0x914090` và các routine quản lý hook;
+  SHA-256 `96935db49d507bd722a93f754ce2048caafaff6c43757ce589daf2e882621cb2`.
+  Đây là evidence về libhela, không xác nhận prologue/linker ABI hoặc thời điểm
+  hook hoạt động trong runtime của project.
+- `rea/rea-evidence-2026-10-14-pogo-il2cpp-init.json`: 2 record REA CLI từ
+  Ghidra project PoGo 0.433.0 read-only, xác nhận export `il2cpp_init` tại
+  địa chỉ phân tích `0x4fec28c` và dossier function dài 44 byte; SHA-256
+  `789184a5a1446e5520a1021971d72254894c460798bc4d602ac7348275628c5e`.
+  ELF symbol value/RVA `0x4eec28c` chỉ áp dụng cho artifact ARM64 đã pin;
+  dossier không tự chứng minh hook lifecycle hoặc postcondition trên device.
 - `rea/pogo-0.433.0-il2cpp-mapping.json`: mapping có provenance từ đúng cặp
   `libil2cpp.so` + `global-metadata.dat` 0.433.0. File giữ managed identity,
   full parameter/return types, token/slot, RVA, file offset và 6 selected type

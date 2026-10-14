@@ -117,6 +117,9 @@ pogo_runtime_ui_status::Module runtime_ui_module_status(
 }  // namespace
 
 bool send_runtime_ui_status(ProbeContext &context) {
+    const bool bootstrap_live =
+        g_runtime_bootstrap_phase.load(std::memory_order_acquire) ==
+            pogo_runtime_bootstrap::Phase::kLiveReady;
     const RuntimeBinding binding = runtime_binding_snapshot(context);
     RuntimeDesiredStateSnapshot desired;
     const bool has_desired = snapshot_runtime_desired_state(&desired);
@@ -138,8 +141,8 @@ bool send_runtime_ui_status(ProbeContext &context) {
     status.build_fingerprint = binding.exact_build_verified
         ? kVerifiedBuildFingerprint
         : std::string("unverified|") + context.process_name;
-    status.strong_identity_verified = binding.exact_build_verified;
-    status.capabilities = runtime_ui_status_capabilities(binding);
+    status.strong_identity_verified = bootstrap_live && binding.exact_build_verified;
+    if (bootstrap_live) status.capabilities = runtime_ui_status_capabilities(binding);
     status.has_desired_revision = has_desired;
     status.desired_revision = has_desired ? desired.state.config_revision : 0U;
     status.has_applied_revision = applied_revision > 0U;
@@ -193,7 +196,7 @@ bool send_runtime_ui_status(ProbeContext &context) {
     const bool map_ready = context.map_live_verified.load(std::memory_order_acquire);
     const bool desired_enabled = has_desired && desired.state.enabled;
     const bool revision_applied = has_desired && applied_revision == desired.state.config_revision;
-    status.ready = active && binding.exact_build_verified &&
+    status.ready = bootstrap_live && active && binding.exact_build_verified &&
         (!desired_enabled || map_ready) && revision_applied && modules_ready && first_error.empty();
     if (!active) {
         status.lifecycle = pogo_runtime_ui_status::NativeLifecycle::kAttachedIdle;
@@ -210,7 +213,10 @@ bool send_runtime_ui_status(ProbeContext &context) {
     } else {
         status.lifecycle = pogo_runtime_ui_status::NativeLifecycle::kBindingReady;
     }
-    if (!binding.exact_build_verified) {
+    if (!bootstrap_live) {
+        status.error_code = "runtime_lifecycle_gate_closed";
+        status.error_message = "verified runtime lifecycle is not live ready";
+    } else if (!binding.exact_build_verified) {
         status.error_code = "unsupported_build";
         status.error_message =
             "0.433.0 runtime identity is incomplete; gameplay mutation is disabled";

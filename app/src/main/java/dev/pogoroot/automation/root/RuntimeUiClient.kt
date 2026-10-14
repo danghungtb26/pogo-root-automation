@@ -5,6 +5,7 @@ import android.os.Looper
 import dev.pogoroot.automation.bridge.BridgeEvent
 import dev.pogoroot.automation.bridge.CommandPhase
 import dev.pogoroot.automation.bridge.RuntimeDesiredState
+import dev.pogoroot.automation.bridge.RuntimeBootstrapStatus
 import dev.pogoroot.automation.bridge.RuntimeUiStatus
 
 data class DesiredStateReceipt(
@@ -41,34 +42,34 @@ class RuntimeUiClient(
         latestDesiredState = state
     }
 
-    fun connect(): Result<BridgeEvent.RuntimeReady> = runCatching {
+    fun connect(): Result<RuntimeBootstrapStatus> = runCatching {
         bindTransportListeners()
         val wasConnected = transport.connected
-        val ready = transport.connect().getOrThrow()
-        val sessionChanged = activeSessionId != null && activeSessionId != ready.runtimeSessionId
+        val session = transport.connectSession().getOrThrow()
+        val sessionChanged = activeSessionId != session.sessionId
         if (sessionChanged) {
             activeSessionId = null
             latestStatus = null
+            latestDesiredState = latestDesiredState?.copy(catchSpinArmed = false)
         }
-        activeSessionId = ready.runtimeSessionId
+        activeSessionId = session.sessionId
         if (!wasConnected || sessionChanged) latestDesiredState?.let { desired ->
             transport.submitDesiredState(desired).getOrThrow()
         }
-        ready
+        session
     }.onFailure {
         activeSessionId = null
         latestStatus = null
     }
 
     fun submitDesiredState(state: RuntimeDesiredState): Result<DesiredStateReceipt> = runCatching {
-        rememberDesiredState(state)
-        val ready = if (transport.connected) {
-            transport.currentRuntimeReady() ?: transport.connect().getOrThrow()
-        } else {
-            transport.connect().getOrThrow()
+        val session = transport.connectSession().getOrThrow()
+        val safeState = if (activeSessionId == session.sessionId) state else {
+            state.copy(catchSpinArmed = false)
         }
-        activeSessionId = ready.runtimeSessionId
-        transport.submitDesiredState(state).getOrThrow()
+        rememberDesiredState(safeState)
+        activeSessionId = session.sessionId
+        transport.submitDesiredState(safeState).getOrThrow()
     }.onFailure {
         activeSessionId = null
         latestStatus = null

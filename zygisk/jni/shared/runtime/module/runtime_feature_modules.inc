@@ -311,6 +311,13 @@ bool set_module_enabled(
         return true;
     }
 
+    if (g_runtime_bootstrap_phase.load(std::memory_order_acquire) !=
+        pogo_runtime_bootstrap::Phase::kLiveReady) {
+        if (error_code != nullptr) *error_code = "runtime_lifecycle_gate_closed";
+        if (message != nullptr) *message = "verified runtime lifecycle is not live ready";
+        return false;
+    }
+
     if (feature->enabled()) {
         if (message != nullptr) {
             *message = std::string(feature->name()) + " module already enabled";

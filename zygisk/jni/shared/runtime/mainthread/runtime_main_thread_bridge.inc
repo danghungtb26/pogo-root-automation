@@ -165,6 +165,37 @@ jobject load_bridge_from_apk_path(
 void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     ProbeContext *context = g_main_thread_context;
     if (context == nullptr) return;
+    std::string name_space;
+    std::string class_name;
+    MainThreadTaskType task_type = MainThreadTaskType::kFindObject;
+    bool gate_closed = false;
+    {
+        std::lock_guard<std::mutex> lock(context->main_thread_bridge.mutex);
+        if (context->main_thread_bridge.pending_token != static_cast<uint64_t>(token)) return;
+        task_type = context->main_thread_bridge.pending_type;
+        name_space = context->main_thread_bridge.pending_namespace;
+        class_name = context->main_thread_bridge.pending_class_name;
+        const auto phase = g_runtime_bootstrap_phase.load(std::memory_order_acquire);
+        const bool read_task = task_type == MainThreadTaskType::kFindObject ||
+            task_type == MainThreadTaskType::kReadMap ||
+            task_type == MainThreadTaskType::kReadInventory ||
+            task_type == MainThreadTaskType::kReadPlayerPosition;
+        gate_closed = phase < pogo_runtime_bootstrap::Phase::kIl2cppInitialized ||
+            phase == pogo_runtime_bootstrap::Phase::kFailed ||
+            (!read_task && phase != pogo_runtime_bootstrap::Phase::kLiveReady);
+        if (gate_closed) {
+            context->main_thread_bridge.pending_result = nullptr;
+            context->main_thread_bridge.pending_success = false;
+            context->main_thread_bridge.pending_action_outcome =
+                MainThreadActionOutcome::kRejected;
+            context->main_thread_bridge.pending_has_player_position = false;
+            context->main_thread_bridge.pending_done = true;
+        }
+    }
+    if (gate_closed) {
+        context->main_thread_bridge.condition.notify_all();
+        return;
+    }
     Il2CppThread *attached_thread = nullptr;
     if (context->il2cpp_api.domain_get != nullptr && context->il2cpp_api.thread_attach != nullptr) {
         Il2CppDomain *domain = context->il2cpp_api.domain_get();
@@ -172,21 +203,6 @@ void main_thread_native_run(JNIEnv *, jobject, jlong token) {
     }
     const Il2CppThread *current_thread = context->il2cpp_api.thread_current == nullptr
         ? nullptr : context->il2cpp_api.thread_current();
-    std::string name_space;
-    std::string class_name;
-    MainThreadTaskType task_type = MainThreadTaskType::kFindObject;
-    {
-        std::lock_guard<std::mutex> lock(context->main_thread_bridge.mutex);
-        if (context->main_thread_bridge.pending_token != static_cast<uint64_t>(token)) {
-            if (attached_thread != nullptr && context->il2cpp_api.thread_detach != nullptr) {
-                context->il2cpp_api.thread_detach(attached_thread);
-            }
-            return;
-        }
-        task_type = context->main_thread_bridge.pending_type;
-        name_space = context->main_thread_bridge.pending_namespace;
-        class_name = context->main_thread_bridge.pending_class_name;
-    }
     void *result = nullptr;
     pogo_runtime::RuntimeNearbyObservation nearby;
     pogo_runtime::RuntimeFortsObservation forts;

@@ -49,14 +49,14 @@ bool runtime_desired_identity_matches(
         request.process_name != context.process_name ||
         request.package_name != context.process_name) return false;
 
-    // A desired snapshot is allowed during the probe-only portion of a new
-    // session. The exact build fingerprint is checked again before reconcile;
-    // accepting the broker's unverified identity here does not authorize any
-    // managed call or gameplay mutation.
-    const std::string unverified_fingerprint =
-        std::string("unverified|") + context.process_name;
-    return request.build_fingerprint == kVerifiedBuildFingerprint ||
-        request.build_fingerprint == unverified_fingerprint;
+    // A desired snapshot may arrive before game identity exists. Empty build
+    // is legal only while bootstrap is below BUILD_VERIFIED; it cannot grant
+    // a managed call or gameplay mutation.
+    if (request.build_fingerprint.empty()) {
+        return static_cast<uint32_t>(g_runtime_bootstrap_phase.load()) <
+            static_cast<uint32_t>(pogo_runtime_bootstrap::Phase::kBuildVerified);
+    }
+    return request.build_fingerprint == kVerifiedBuildFingerprint;
 }
 }  // namespace
 
@@ -67,6 +67,15 @@ struct RuntimeDesiredStateSnapshot {
     uint64_t received_at_ns = 0U;
     uint64_t expires_at_ns = 0U;
 };
+
+void clear_runtime_desired_state_session() {
+    std::lock_guard<std::mutex> lock(g_runtime_desired_state_mutex);
+    g_runtime_desired_state_present = false;
+    g_runtime_desired_state_session_id.clear();
+    g_runtime_desired_state = pogo_runtime_desired_state::State{};
+    g_runtime_desired_state_received_at_ns = 0U;
+    g_runtime_desired_state_expires_at_ns = 0U;
+}
 
 [[maybe_unused]] bool snapshot_runtime_desired_state(RuntimeDesiredStateSnapshot *output) {
     if (output == nullptr) return false;

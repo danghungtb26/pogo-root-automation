@@ -78,6 +78,12 @@ jobs:
           test -s build/pogo-root-automation-magisk-multiabi.manifest.json
           unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/arm64-v8a.so'
           unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q 'zygisk/x86_64.so'
+          for abi in arm64-v8a x86_64; do
+            unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q "runtime-core/$abi.so"
+            unzip -l build/pogo-root-automation-magisk-multiabi.zip | grep -q "runtime-core/$abi.manifest"
+            test "$(unzip -p build/pogo-root-automation-magisk-multiabi.zip "runtime-core/$abi.so" | sha256sum | cut -d ' ' -f 1)" = \
+              "$(jq -r --arg abi "$abi" '.coreArtifacts[] | select(.abi == $abi) | .sha256' build/pogo-root-automation-magisk-multiabi.manifest.json)"
+          done
           test "$(sha256sum build/pogo-root-automation-magisk-multiabi.zip | cut -d ' ' -f 1)" = \
             "$(jq -r '.zipSha256' build/pogo-root-automation-magisk-multiabi.manifest.json)"
           test "$(unzip -Z1 app/build/outputs/apk/debug/app-debug.apk | grep -c '^assets/pogo-module/.*\.zip$')" -eq 1

@@ -86,6 +86,13 @@ void log_runtime_binding_readiness(
 }
 
 bool run_managed_runtime_diagnostic(ProbeContext &context) {
+    const auto phase = g_runtime_bootstrap_phase.load(std::memory_order_acquire);
+    if (phase < pogo_runtime_bootstrap::Phase::kIl2cppInitialized ||
+        phase == pogo_runtime_bootstrap::Phase::kFailed) {
+        __android_log_print(ANDROID_LOG_WARN, kLogTag,
+            "runtime bootstrap: managed diagnostic blocked before verified il2cpp_init");
+        return false;
+    }
     if (!context.il2cpp_api_ready) {
         __android_log_print(ANDROID_LOG_WARN, kLogTag, "runtime bootstrap: IL2CPP API unavailable");
         return false;
